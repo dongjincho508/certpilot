@@ -16,7 +16,7 @@
     --bg-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     --bg-sidebar: linear-gradient(180deg, #2c3e50 0%, #34495e 100%);
     --text-primary: #ffffff;
-    --text-secondary: #ffffff;
+    --text-secondary: #6c757d;
     --border-color: #e0e0e0;
     --shadow: 0 4px 12px rgba(0,0,0,0.15);
     --shadow-lg: 0 8px 24px rgba(0,0,0,0.2);
@@ -33,7 +33,7 @@
 body {
     font-family: 'Segoe UI', 'Noto Sans KR', Arial, sans-serif;
     background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-    color: var(--text-primary);
+    color: #212529;
     font-size: 14px;
     line-height: 1.6;
 }
@@ -248,6 +248,7 @@ main {
     border: none;
     vertical-align: middle;
     background: #ffffff;
+    color: #212529;
 }
 
 .table-hover tbody tr:hover {
@@ -300,7 +301,7 @@ main {
 .form-label {
     font-weight: 600;
     margin-bottom: 0.5rem;
-    color: var(--text-primary);
+    color: #495057;
 }
 
 .form-control {
@@ -309,7 +310,7 @@ main {
     padding: 0.75rem 1rem;
     transition: all var(--transition);
     background: #ffffff;
-    color: var(--text-primary);
+    color: #212529;
 }
 
 .form-control:focus {
