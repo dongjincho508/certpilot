@@ -76,16 +76,76 @@ python -m certpilot_api.app
 # http://localhost:5000/ 에서 API 확인
 ```
 
-## 📖 문서
+# 📖 Render 배포 가이드
 
-| 문서 | 설명 |
+CertPilot MVP를 Render에 배포하는 방법입니다.
+
+## 배포 방법
+
+### 방법 1: 블루프린트 사용 (권장)
+
+이 저장소의 `render.yaml`을 사용하여 Render에 배포합니다.
+
+1. Render 대시보드에서 **New +** → **GitHub** → `dongjincho508/certpilot` 선택
+2. `render.yaml` 기반 자동 구성
+3. **Deploy** 클릭
+
+#### 설정 요약
+
+| 항목 | 값 |
 |---|---|
-| [PRD v0.3](PRD_v0.3_draft.md) | 제품 요구사항 문서 |
-| [UI/UX 설계](designs/uiux.md) | 관리자 화면 설계 |
-| [API 문서](designs/api.md) | REST API 명세서 |
-| [위협 모델](designs/threat-model.md) | 보안 위협 및 대응 |
-| [테스트 계획](designs/testing.md) | 테스트 전략 및 절차 |
-| [독립 검토](designs/independent-review.md) | 독립 검토 결과 |
+| **Type** | `web` |
+| **Runtime** | `docker` |
+| **Dockerfile** | `Dockerfile` |
+| **포트** | `8080` |
+| **환경 변수** | `CERTPILOT_API_PORT=8080` |
+
+### 방법 2: 수동 배포
+
+1. Render 대시보드 → **New +** → **Web Service**
+2. **GitHub** → `dongjincho508/certpilot` 선택
+3. **Build Command**: 없음 (Docker 사용)
+4. **Start Command**: `docker/manager/startup.sh`
+
+### 포트 설정
+
+- Render는 **HTTPS**를 기본으로 제공합니다 (Let's Encrypt 자동 인증서)
+- 서비스는 내부적으로 **포트 8080**에서 실행됩니다
+- 외부 접속은 `https://<your-service>.onrender.com` 형태로 HTTPS를 통해 이루어집니다
+- 내부 트래픽은 HTTPS 로드 밸런서에서 HTTPS로 암호화되어 전달됩니다
+
+### 필수 환경 변수
+
+| 변수 | 설명 | 기본값 |
+|---|---|---|
+| `CERTPILOT_API_PORT` | API 포트 | `8080` |
+| `CERTPILOT_DATA_DIR` | 데이터 디렉토리 | `/data` |
+| `CERTPILOT_LOG_DIR` | 로그 디렉토리 | `/var/log/certpilot` |
+| `CERTPILOT_AUTH_MODE` | 인증 모드 | `disabled` |
+| `CERTPILOT_SSH_KEY_DIR` | SSH 키 디렉토리 | `/data/config/keys` |
+| `CERTPILOT_DB_URL` | 데이터베이스 URL | `sqlite:///data/certpilot.db` |
+
+### 선택 환경 변수
+
+| 변수 | 설명 | 기본값 |
+|---|---|---|
+| `CERTPILOT_ADMIN_USER` | 관리자 계정 (운영 시 필수) | - |
+| `CERTPILOT_ADMIN_PASSWORD` | 관리자 비밀번호 (운영 시 필수) | - |
+| `CERTPILOT_LOG_LEVEL` | 로그 레벨 | `info` |
+| `CERTPILOT_LOG_FORMAT` | 로그 형식 | `json` |
+| `CERTPILOT_LOG_RETENTION_DAYS` | 로그 보존 기간 (일) | `30` |
+
+## 모니터링
+
+- **로그**: Render 대시보드 → 서비스 → **Logs**
+- **메트릭**: Render 대시보드 → 서비스 → **Metrics**
+- **헬스체크**: `/health` 엔드포인트 (포트 8080)
+
+## 참고 문서
+
+- [Render Web Services](https://render.com/docs/web-services)
+- [Render Blueprints](https://render.com/docs/blueprints)
+- [Render Troubleshooting Deploys](https://render.com/docs/troubleshooting-deploys)
 
 ## 🔒 보안 사항
 
