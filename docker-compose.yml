@@ -1,0 +1,75 @@
+# Docker Compose 설정
+
+version: '3.8'
+
+services:
+  # CertPilot API 서비스
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: certpilot-api
+    ports:
+      - "${CERTPILOT_API_PORT:-8080}:8080"
+    volumes:
+      # 인증서 저장소
+      - certpilot_certs:/data/certs
+      # 로그 저장소
+      - certpilot_logs:/data/logs
+      # 설정 저장소
+      - certpilot_config:/data/config
+    env_file:
+      - .env
+    restart: unless-stopped
+    networks:
+      - certpilot_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # CertPilot CLI (선택사항)
+  cli:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: certpilot-cli
+    volumes:
+      - certpilot_configs:/app/certpilot_core
+    env_file:
+      - .env
+    depends_on:
+      - api
+    command: /bin/sh -c "echo 'CertPilot CLI가 실행 중입니다. (docker exec로 접속)'"
+    restart: unless-stopped
+
+  # CertPilot Flask (선택사항)
+  flask:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: certpilot-flask
+    ports:
+      - "${CERTPILOT_API_PORT:-8080}:8080"
+    volumes:
+      - certpilot_certs:/data/certs
+      - certpilot_logs:/data/logs
+      - certpilot_config:/data/config
+    env_file:
+      - .env
+    restart: unless-stopped
+    command: python -m certpilot_api.app --port 8080
+
+networks:
+  certpilot_network:
+    driver: bridge
+
+volumes:
+  certpilot_certs:
+    driver: local
+  certpilot_logs:
+    driver: local
+  certpilot_config:
+    driver: local

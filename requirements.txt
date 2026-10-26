@@ -1,0 +1,20 @@
+# CertPilot MVP - 의존성 패키지 목록
+
+## Python 패키지
+
+flask>=2.3.0
+paramiko>=3.4.0
+cryptography>=41.0.0
+pyyaml>=6.0
+click>=8.1.0
+itsdangerous>=2.1.0
+werkzeug>=2.2.0
+typing-extensions>=4.5.0
+```
+
+## 시스템 패키지 (Dockerfile)
+
+- python3
+- python3-pip
+- libpq-dev
+- gcc

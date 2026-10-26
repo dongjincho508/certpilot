@@ -2,19 +2,35 @@
 CertPilot API - REST API 모듈
 관리 인터페이스용 REST API
 """
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from datetime import datetime
 from typing import List, Dict, Any
-from .server_manager import ServerManager
-from .certificate_manager import CertificateManager
-from .audit_storage import AuditLogWriter
+from certpilot_core.server_manager import ServerManager
+from certpilot_core.certificate_manager import CertificateManager
+from certpilot_core.audit_storage import AuditLogWriter
 
 app = Flask(__name__)
+
+# 프론트엔드 템플릿 및 정적 파일 경로
+app.template_folder = 'frontend/templates'
+app.static_folder = 'frontend/static'
 
 # 전역 매니저 인스턴스
 server_manager = ServerManager()
 certificate_manager = CertificateManager()
 audit_writer = AuditLogWriter('/var/log/certpilot/audit', log_type='certpilot')
+
+
+@app.route('/')
+def index():
+    """메인 페이지 (프론트엔드)"""
+    return send_from_directory(app.template_folder, 'index.html')
+
+
+@app.route('/static/<path:filename>')
+def serve_static(filename):
+    """정적 파일 서빙"""
+    return send_from_directory(app.static_folder, filename)
 
 
 @app.route('/servers', methods=['GET', 'POST'])

@@ -1,0 +1,18 @@
+# Python 캐시 파일
+__pycache__/
+*.pyc
+
+# 환경 변수
+.env
+
+# 로그 파일
+*.log
+
+# 백업 파일
+*.bak
+*.tmp
+
+# IDE 설정
+.vscode/
+.idea/
+*.swp
