@@ -1,26 +1,6 @@
 # CertPilot Manager - Render 배포 설정
-#
-# Render 공식 배포 설정 파일 (render.yaml)
-# Render 대시보드에서 "Establish repository" 로 이 저장소를 연결 후 배포
-#
-# 구성 요소:
-# - certpilot-api : Flask REST API + Apache 프록시 웹 서비스 (포트 8080)
-# - 옵션: 데이터베이스는 Render Managed DB 로 별도 구성 가능
-#
-# 사용 방법:
-# 1. Render 대시보드 → New + → Browse All Services → GitHub → 이 저장소 연결
-# 2. "Deploy" 클릭 → render.yaml 기반 자동 구성
-#
-# 환경 변수 (필수):
-#   CERTPILOT_ADMIN_USER    : 관리자 계정 (운영 배포 시 필수)
-#   CERTPILOT_ADMIN_PASSWORD: 관리자 비밀번호 (운영 배포 시 필수)
-#   CERTPILOT_SSH_KEY_DIR   : 관리 대상 SSH 키 디렉토리
-#   CERTPILOT_DB_URL        : DB URL (선택, 기본 SQLite)
-#
-# 참고:
-# - Dockerfile 은 Python 3.11-slim 기반 (Apache2 + Flask)
-# - 포트 80 (Apache), 8080 (Flask) 노출, 헬스체크는 80 포트 기준
-# - 운영 배포 시 CERTPILOT_AUTH_MODE=disabled → 최소 basic 인증 권장
+# CertPilot 매니페스트 관리 서버 - 멀티 컨테이너 구성
+version: '3.8'
 
 services:
   - type: web
@@ -28,24 +8,15 @@ services:
     runtime: docker
     dockerfilePath: Dockerfile
     envVars:
-      # API 포트 (Flask 앱 포트)
       - key: CERTPILOT_API_PORT
         value: "8080"
-
-      # 데이터/로그 디렉토리 (Docker 와 동일)
       - key: CERTPILOT_DATA_DIR
         value: /data
       - key: CERTPILOT_LOG_DIR
         value: /var/log/certpilot
-
-      # 인증 모드: 운영 배포 시 basic/token 권장, 개발 시 disabled
       - key: CERTPILOT_AUTH_MODE
         value: disabled
-
-      # SSH 키 디렉토리 (관리 대상 서버 연결용)
       - key: CERTPILOT_SSH_KEY_DIR
         value: /data/config/keys
-
-      # 데이터베이스 (선택, 기본 SQLite)
       - key: CERTPILOT_DB_URL
         value: sqlite:///data/certpilot.db
