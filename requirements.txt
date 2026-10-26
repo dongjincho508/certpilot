@@ -1,6 +1,7 @@
-# CertPilot MVP - 의존성 패키지 목록
-
-## Python 패키지
+# CertPilot MVP - Python 의존성 패키지 목록
+#
+# docker build 시 이 파일만 pip 로 설치됩니다.
+# (시스템 패키지 python3, python3-pip, libpq-dev, gcc 는 Dockerfile 에서 별도 설치)
 
 flask>=2.3.0
 paramiko>=3.4.0
@@ -10,11 +11,3 @@ click>=8.1.0
 itsdangerous>=2.1.0
 werkzeug>=2.2.0
 typing-extensions>=4.5.0
-```
-
-## 시스템 패키지 (Dockerfile)
-
-- python3
-- python3-pip
-- libpq-dev
-- gcc
