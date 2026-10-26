@@ -49,7 +49,7 @@ services:
     restart: unless-stopped
     networks:
       - certpilot_network
-    command: python -m certpilot_api.app --port 8080
+    command: python -m app --port 8080
 
   # CLI 컨테이너 (선택사항)
   cli:
