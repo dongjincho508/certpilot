@@ -14,7 +14,7 @@ export CERTPILOT_LOG_DIR=${CERTPILOT_LOG_DIR:-/var/log/certpilot}
 echo "[1/2] CertPilot API 시작..."
 cd /app/certpilot_api
 export PYTHONPATH=/app/certpilot_core:/app/certpilot_cli:/app
-nohup python certpilot_api/app.py > /data/logs/certpilot-api.log 2>&1 &
+nohup python app.py > /data/logs/certpilot-api.log 2>&1 &
 
 API_PID=$!
 echo "CertPilot API PID: $API_PID"
