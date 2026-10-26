@@ -147,6 +147,17 @@ CertPilot MVP를 Render에 배포하는 방법입니다.
 - [Render Blueprints](https://render.com/docs/blueprints)
 - [Render Troubleshooting Deploys](https://render.com/docs/troubleshooting-deploys)
 
+## 문서
+
+|| 문서 | 설명 |
+|---|---|---|
+| [PRD v0.3](PRD_v0.3_draft.md) | 제품 요구사항 문서 |
+| [UI/UX 설계](designs/uiux.md) | 관리자 화면 설계 |
+| [API 문서](designs/api.md) | REST API 명세서 |
+| [위협 모델](designs/threat-model.md) | 보안 위협 및 대응 |
+| [테스트 계획](designs/testing.md) | 테스트 전략 및 절차 |
+| [독립 검토](designs/independent-review.md) | 독립 검토 결과 |
+
 ## 🔒 보안 사항
 
 - **운영 개인키**: 운영 개인키, 비밀번호, API 토큰은 절대 출력하거나 로그에 기록하지 마세요.
