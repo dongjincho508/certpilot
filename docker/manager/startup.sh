@@ -23,7 +23,8 @@ service apache2 start || true
 # Flask API 시작 (백그라운드)
 echo "[2/3] CertPilot API 시작..."
 cd /app/certpilot_api
-nohup python -m app --port 8080 > /data/logs/certpilot-api.log 2>&1 &
+export PYTHONPATH=/app/certpilot_core:/app/certpilot_cli
+nohup python -m certpilot_api.app --port 8080 > /data/logs/certpilot-api.log 2>&1 &
 
 API_PID=$!
 echo "CertPilot API PID: $API_PID"
