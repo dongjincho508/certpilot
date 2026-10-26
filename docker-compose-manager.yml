@@ -7,7 +7,7 @@ services:
   # 메인 매니저 서버 (Apache + Flask + Frontend)
   manager:
     build:
-      context: ..
+      context: .
       dockerfile: Dockerfile
     container_name: certpilot-manager
     ports:
@@ -35,7 +35,7 @@ services:
   # 별도 API 컨테이너 (프록시 없이 직접 실행)
   api:
     build:
-      context: ..
+      context: .
       dockerfile: Dockerfile
     container_name: certpilot-api
     ports:
@@ -54,7 +54,7 @@ services:
   # CLI 컨테이너 (선택사항)
   cli:
     build:
-      context: ..
+      context: .
       dockerfile: Dockerfile
     container_name: certpilot-cli
     volumes:

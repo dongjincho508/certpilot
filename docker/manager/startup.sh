@@ -11,7 +11,7 @@ export CERTPILOT_DATA_DIR=${CERTPILOT_DATA_DIR:-/data}
 export CERTPILOT_LOG_DIR=${CERTPILOT_LOG_DIR:-/var/log/certpilot}
 
 # Apache 설정 확인
-if [ ! -f /etc/apache2/sites-available/certpilot.conf ]; then
+if [ ! -f /etc/apache2/sites-available/000-default.conf ]; then
     echo "Apache 설정 파일이 없습니다."
     exit 1
 fi
@@ -23,12 +23,10 @@ service apache2 start || true
 # Flask API 시작 (백그라운드)
 echo "[2/3] CertPilot API 시작..."
 cd /app/certpilot_api
-nohup python -m certpilot_api.app --port 8080 > /data/logs/certpilot-api.log 2>&1 &
+nohup python -m app --port 8080 > /data/logs/certpilot-api.log 2>&1 &
 
 API_PID=$!
 echo "CertPilot API PID: $API_PID"
-
-# 프론트엔드 정적 파일 서빙 (Apache에서 처리)
 
 # 로그 디렉토리 생성
 mkdir -p /data/logs

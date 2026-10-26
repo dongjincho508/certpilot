@@ -43,6 +43,10 @@ COPY certpilot_cli/ /app/certpilot_cli/
 COPY certpilot_api/ /app/certpilot_api/
 COPY frontend/ /app/frontend/
 
+# 시작 스크립트 복사
+COPY docker/manager/startup.sh /app/docker/manager/startup.sh
+RUN chmod +x /app/docker/manager/startup.sh
+
 # 데이터와 로그 디렉토리 생성
 RUN mkdir -p /data/certs /data/logs /data/config && \
     mkdir -p /var/log/certpilot && \

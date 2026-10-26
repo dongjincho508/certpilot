@@ -11,9 +11,26 @@ from certpilot_core.audit_storage import AuditLogWriter
 
 app = Flask(__name__)
 
-# 프론트엔드 템플릿 및 정적 파일 경로
-app.template_folder = 'frontend/templates'
-app.static_folder = 'frontend/static'
+from pathlib import Path
+
+# 프런트엔드 템플릿 및 정적 파일 경로 (절대 경로)
+BASE_DIR = Path(__file__).resolve().parent
+FRONTEND_DIR = BASE_DIR.parent / 'frontend'
+
+app.template_folder = str(FRONTEND_DIR / 'templates')
+app.static_folder = str(FRONTEND_DIR)
+
+def get_static_file(filename):
+    """정적 파일 서빙을 위한 헬퍼 함수"""
+    from flask import send_from_directory
+    import os
+    # /css/ 파일 경로는 /app/frontend/css/로 매핑
+    if filename.startswith('css/'):
+        return send_from_directory(os.path.join(app.static_folder, 'css'), filename[4:])
+    elif filename.startswith('js/'):
+        return send_from_directory(os.path.join(app.static_folder, 'js'), filename[3:])
+    else:
+        return send_from_directory(app.static_folder, filename)
 
 # 전역 매니저 인스턴스
 server_manager = ServerManager()
@@ -27,9 +44,26 @@ def index():
     return send_from_directory(app.template_folder, 'index.html')
 
 
+@app.route('/health')
+def health_check():
+    """헬스체크 엔드포인트"""
+    return jsonify({
+        'status': 'ok',
+        'service': 'certpilot-api',
+        'version': '0.1.0'
+    })
+
+
 @app.route('/static/<path:filename>')
 def serve_static(filename):
-    """정적 파일 서빙"""
+    """정적 파일 서빙 (CSS, JS)"""
+    from flask import send_from_directory
+    import os
+    # /static/css/style.css -> /app/frontend/css/style.css
+    if filename.startswith('css/'):
+        return send_from_directory(os.path.join(app.static_folder, 'css'), filename[4:])
+    elif filename.startswith('js/'):
+        return send_from_directory(os.path.join(app.static_folder, 'js'), filename[2:])
     return send_from_directory(app.static_folder, filename)
 
 
