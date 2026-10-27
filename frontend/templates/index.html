@@ -27,266 +27,229 @@
     </nav>
 
     <!-- Main Content -->
-    <div class="container-fluid">
-        <div class="row">
-            <!-- Sidebar -->
-            <nav class="col-md-2 d-md-block bg-gradient sidebar">
-                <div class="sidebar-sticky">
-                    <ul class="nav flex-column">
-                        <li class="nav-item">
-                            <a class="nav-link active" data-bs-toggle="pill" href="#dashboard">
-                                <i class="fas fa-th-large me-2"></i>대시보드
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" data-bs-toggle="pill" href="#servers">
-                                <i class="fas fa-server me-2"></i>서버 목록
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" data-bs-toggle="pill" href="#register">
-                                <i class="fas fa-plus-circle me-2"></i>서버 등록
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" data-bs-toggle="pill" href="#audit-log">
-                                <i class="fas fa-history me-2"></i>감사 로그
-                            </a>
-                        </li>
-                    </ul>
+    <div class="app-layout">
+        <!-- Sidebar -->
+        <nav class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-brand">
+                    <i class="fas fa-shield-alt"></i>
+                    <span>CertPilot</span>
                 </div>
-            </nav>
+            </div>
 
-            <!-- Main Content Area -->
-            <main class="col-md-10 col-lg-10 py-4">
-                <!-- Tabs -->
-                <div class="tab-content">
-                    <!-- Dashboard -->
-                    <div class="tab-pane fade show active" id="dashboard">
-                        <div class="card">
-                            <div class="card header-gradient">
-                                <h5 class="mb-0">
-                                    <i class="fas fa-chart-pie me-2 text-primary"></i>전체 상태 요약
-                                </h5>
-                            </div>
-                            <div class="card-body">
-                                <div class="row">
-                                    <div class="col-md-3">
-                                        <div class="card text-white bg-success mb-2">
-                                            <div class="card-body">
-                                                <h5 class="card-title" id="valid-count">0</h5>
-                                                <small>정상 인증서</small>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <div class="card text-white bg-warning mb-2">
-                                            <div class="card-body">
-                                                <h5 class="card-title" id="expiring-soon-count">0</h5>
-                                                <small>만료 임박</small>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <div class="card text-white bg-danger mb-2">
-                                            <div class="card-body">
-                                                <h5 class="card-title" id="expired-count">0</h5>
-                                                <small>만료</small>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <div class="card text-white bg-secondary mb-2">
-                                            <div class="card-body">
-                                                <h5 class="card-title" id="other-count">0</h5>
-                                                <small>기타</small>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+            <!-- Platform Section -->
+            <div class="sidebar-section">
+                <h6 class="sidebar-section-title">플랫폼</h6>
+                <ul class="nav flex-column">
+                    <li class="nav-item">
+                        <a class="nav-link active" data-bs-toggle="pill" href="#dashboard">
+                            <i class="fas fa-th-large me-2"></i>대시보드
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" data-bs-toggle="pill" href="#servers">
+                            <i class="fas fa-server me-2"></i>서버 목록
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" data-bs-toggle="pill" href="#register">
+                            <i class="fas fa-plus-circle me-2"></i>서버 등록
+                        </a>
+                    </li>
+                </ul>
+            </div>
 
-                        <div class="card-bordered">
-                            <div class="card-header header-gradient">
-                                <h5 class="mb-0">
-                                    <i class="fas fa-server me-2"></i>서버별 인증서 현황
-                                </h5>
-                                <div class="card-header-actions">
-                                    <button class="btn btn-sm btn-outline-primary" onclick="refreshCertificates()">
-                                        <i class="fas fa-sync-alt"></i> 새로고침
-                                    </button>
-                                    <button class="btn btn-sm btn-outline-primary" onclick="showRegisterForm()">
-                                        <i class="fas fa-plus"></i> 서버 등록
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="card-body">
-                                <div class="table-responsive">
-                                    <table class="table table-striped table-hover" id="certificates-table">
-                                        <thead>
-                                            <tr>
-                                                <th>서버명</th>
-                                                <th>IP 주소</th>
-                                                <th>DBMS</th>
-                                                <th>공인 CA</th>
-                                                <th>유효 시작</th>
-                                                <th>만료까지</th>
-                                                <th>상태</th>
-                                                <th>관리</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody id="certificates-body">
-                                            <tr>
-                                                <td colspan="8" class="text-center">데이터 로딩 중...</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        </div>
+            <!-- Resources Section -->
+            <div class="sidebar-section">
+                <h6 class="sidebar-section-title">관리</h6>
+                <ul class="nav flex-column">
+                    <li class="nav-item">
+                        <a class="nav-link" data-bs-toggle="pill" href="#audit-log">
+                            <i class="fas fa-history me-2"></i>감사 로그
+                        </a>
+                    </li>
+                </ul>
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="sidebar-section">
+                <h6 class="sidebar-section-title">빠른 작업</h6>
+                <ul class="nav flex-column">
+                    <li class="nav-item">
+                        <a class="nav-link quick-action" href="#register">
+                            <i class="fas fa-plus-circle me-2"></i>새 서버
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Page Header -->
+            <div class="page-header">
+                <div class="page-title-wrapper">
+                    <h1 class="page-title">대시보드</h1>
+                    <div class="page-actions">
+                        <button class="btn btn-outline-secondary btn-sm" onclick="refreshCertificates()">
+                            <i class="fas fa-sync-alt"></i> 새로고침
+                        </button>
                     </div>
+                </div>
+                <div class="page-subtitle">
+                    <span id="last-update-text">마지막 업데이트: 로딩 중...</span>
+                </div>
+            </div>
 
-                    <!-- Servers -->
-                    <div class="tab-pane fade" id="servers">
-                        <div class="card">
-                            <div class="card header-gradient">
-                                <h5 class="mb-0">
-                                    <i class="fas fa-server me-2"></i>서버 목록
-                                </h5>
-                            </div>
-                            <div class="card-body">
-                                <div class="table-responsive">
-                                    <table class="table table-striped table-hover">
-                                        <thead>
-                                            <tr>
-                                                <th>서버명</th>
-                                                <th>IP 주소</th>
-                                                <th>운영체제</th>
-                                                <th>SSH 포트</th>
-                                                <th>상태</th>
-                                                <th>관리</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody id="servers-body">
-                                            <tr>
-                                                <td colspan="6" class="text-center">서버 데이터가 없습니다.</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        </div>
+            <!-- Summary Cards -->
+            <div class="summary-grid">
+                <div class="summary-card valid">
+                    <div class="card-number" id="valid-count">0</div>
+                    <div class="card-title">정상 인증서</div>
+                </div>
+                <div class="summary-card expiring">
+                    <div class="card-number" id="expiring-soon-count">0</div>
+                    <div class="card-title">만료 임박</div>
+                </div>
+                <div class="summary-card expired">
+                    <div class="card-number" id="expired-count">0</div>
+                    <div class="card-title">만료</div>
+                </div>
+                <div class="summary-card other">
+                    <div class="card-number" id="other-count">0</div>
+                    <div class="card-title">기타</div>
+                </div>
+            </div>
+
+            <!-- Servers Section -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-header-left">
+                        <i class="fas fa-server text-primary"></i>
+                        <h5>서버별 인증서 현황</h5>
                     </div>
-
-                    <!-- Server Registration -->
-                    <div class="tab-pane fade" id="register">
-                        <div class="card">
-                            <div class="card header-gradient">
-                                <h5 class="mb-0">
-                                    <i class="fas fa-plus-circle me-2"></i>서버 등록
-                                </h5>
-                            </div>
-                            <div class="card-body">
-                                <form id="server-form">
-                                    <div class="row">
-                                        <div class="col-md-6 mb-3">
-                                            <label class="form-label">서버명</label>
-                                            <input type="text" class="form-control" id="server-name" placeholder="예: prod-server-01">
-                                        </div>
-                                        <div class="col-md-6 mb-3">
-                                            <label class="form-label">호스트명 / IP 주소</label>
-                                            <input type="text" class="form-control" id="server-hostname" placeholder="예: 192.168.1.100">
-                                        </div>
-                                    </div>
-                                    <div class="row">
-                                        <div class="col-md-4 mb-3">
-                                            <label class="form-label">SSH 포트</label>
-                                            <input type="number" class="form-control" id="server-ssh-port" value="22">
-                                        </div>
-                                        <div class="col-md-4 mb-3">
-                                            <label class="form-label">SSH 사용자</label>
-                                            <input type="text" class="form-control" id="server-ssh-user" placeholder="예: certpilot">
-                                        </div>
-                                        <div class="col-md-4 mb-3">
-                                            <label class="form-label">SSH 키 경로</label>
-                                            <input type="text" class="form-control" id="server-ssh-key" placeholder="예: /etc/certpilot/keys/id_ed25519">
-                                        </div>
-                                    </div>
-                                    <div class="row">
-                                        <div class="col-md-6 mb-3">
-                                            <label class="form-label">운영체제</label>
-                                            <select class="form-control" id="server-os">
-                                                <option value="linux">Linux</option>
-                                                <option value="windows">Windows</option>
-                                                <option value="network">네트워크 장비</option>
-                                            </select>
-                                        </div>
-                                        <div class="col-md-6 mb-3">
-                                            <label class="form-label">운영체제 버전</label>
-                                            <input type="text" class="form-control" id="server-os-version" placeholder="예: Ubuntu 22.04">
-                                        </div>
-                                    </div>
-                                    <div class="alert alert-info">
-                                        <i class="fas fa-info-circle me-2"></i>
-                                        이 서버는 읽기 전용으로 연결됩니다. 인증서 조회만 가능하며, 수정/설치는 불가능합니다.
-                                    </div>
-                                    <div class="d-flex gap-2">
-                                        <button type="submit" class="btn btn-primary">
-                                            <i class="fas fa-save me-2"></i>서버 등록
-                                        </button>
-                                        <button type="button" class="btn btn-secondary" onclick="resetForm()">
-                                            <i class="fas fa-undo me-2"></i>취소
-                                        </button>
-                                    </div>
-                                </form>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Audit Log -->
-                    <div class="tab-pane fade" id="audit-log">
-                        <div class="card">
-                            <div class="card header-gradient">
-                                <h5 class="mb-0">
-                                    <i class="fas fa-history me-2"></i>감사 로그
-                                </h5>
-                                <div class="card-header-actions">
-                                    <select class="form-select form-select-sm" id="log-level">
-                                        <option value="">전체 레벨</option>
-                                        <option value="INFO">INFO</option>
-                                        <option value="WARNING">WARNING</option>
-                                        <option value="ERROR">ERROR</option>
-                                        <option value="SECURITY">SECURITY</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="card-body">
-                                <div class="table-responsive">
-                                    <table class="table table-striped table-hover">
-                                        <thead>
-                                            <tr>
-                                                <th>시간 (UTC)</th>
-                                                <th>레벨</th>
-                                                <th>액터</th>
-                                                <th>액션</th>
-                                                <th>대상</th>
-                                                <th>상세</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody id="audit-logs-body">
-                                            <tr>
-                                                <td colspan="6" class="text-center">감사 로그 데이터가 없습니다.</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
+                    <div class="card-header-right">
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-sm btn-outline-primary" onclick="refreshCertificates()">
+                                <i class="fas fa-sync-alt"></i> 새로고침
+                            </button>
+                            <button class="btn btn-sm btn-outline-primary" onclick="showRegisterForm()">
+                                <i class="fas fa-plus"></i> 서버 등록
+                            </button>
                         </div>
                     </div>
                 </div>
-            </main>
-        </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover" id="certificates-table">
+                            <thead>
+                                <tr>
+                                    <th>서버명</th>
+                                    <th>IP 주소</th>
+                                    <th>도메인</th>
+                                    <th>발급자</th>
+                                    <th>유효 시작</th>
+                                    <th>만료까지</th>
+                                    <th>상태</th>
+                                    <th>관리</th>
+                                </tr>
+                            </thead>
+                            <tbody id="certificates-body">
+                                <tr>
+                                    <td colspan="8" class="text-center">
+                                        <div class="empty-state">
+                                            <i class="fas fa-spinner fa-spin"></i>
+                                            <p>데이터 로딩 중...</p>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Servers Section -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-header-left">
+                        <i class="fas fa-server text-primary"></i>
+                        <h5>서버 목록</h5>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover" id="servers-table">
+                            <thead>
+                                <tr>
+                                    <th>서버명</th>
+                                    <th>IP 주소</th>
+                                    <th>운영체제</th>
+                                    <th>SSH 포트</th>
+                                    <th>상태</th>
+                                    <th>관리</th>
+                                </tr>
+                            </thead>
+                            <tbody id="servers-body">
+                                <tr>
+                                    <td colspan="6" class="text-center">
+                                        <div class="empty-state">
+                                            <i class="fas fa-server"></i>
+                                            <p>등록된 서버가 없습니다.</p>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Audit Log Section -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-header-left">
+                        <i class="fas fa-history text-primary"></i>
+                        <h5>감사 로그</h5>
+                    </div>
+                    <div class="card-header-right">
+                        <select class="form-select form-select-sm" id="log-level">
+                            <option value="">전체 레벨</option>
+                            <option value="INFO">INFO</option>
+                            <option value="WARNING">WARNING</option>
+                            <option value="ERROR">ERROR</option>
+                            <option value="SECURITY">SECURITY</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover" id="audit-logs-table">
+                            <thead>
+                                <tr>
+                                    <th>시간 (UTC)</th>
+                                    <th>레벨</th>
+                                    <th>액터</th>
+                                    <th>액션</th>
+                                    <th>대상</th>
+                                    <th>상세</th>
+                                </tr>
+                            </thead>
+                            <tbody id="audit-logs-body">
+                                <tr>
+                                    <td colspan="6" class="text-center">
+                                        <div class="empty-state">
+                                            <i class="fas fa-history"></i>
+                                            <p>감사 로그 데이터가 없습니다.</p>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
     </div>
 
     <!-- Bootstrap 5 JS -->
