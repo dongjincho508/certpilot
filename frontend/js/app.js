@@ -3,42 +3,28 @@
  * REST API 연동 및 UI 로직
  */
 
-// API BASE URL
-const API_BASE_URL = 'http://localhost:8080';
+// ===== app.js (수정) =====
+// API_BASE_URL: 상대 경로 기준(빈 문자열) → 현재 출처(origin)에 요청
+//   - 개발:  http://localhost:8080/servers
+//   - 배포: https://certpilot.onrender.com/servers
+// API가 별도 도메인이면 아래 한 줄로만 바꿉니다:
+// const API_BASE_URL = 'https://certpilot-api-xxx.onrender.com';
+const API_BASE_URL = '';
 
-// DOM Elements
-const certificatesBody = document.getElementById('certificates-body');
-const serversBody = document.getElementById('servers-body');
-const auditLogsBody = document.getElementById('audit-logs-body');
-const lastUpdate = document.getElementById('last-update');
+async function apiCall(endpoint, method = 'GET', body = null) {
+  const options = {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+  };
+  if (body !== null) {
+    options.body = typeof body === 'string' ? body : JSON.stringify(body);
+  }
 
-/**
- * API 호출 헬퍼
- */
-async function apiCall(endpoint, options = {}) {
-    const url = `${API_BASE_URL}${endpoint}`;
-    const config = {
-        headers: {
-            'Content-Type': 'application/json',
-            ...options.headers
-        },
-        ...options
-    };
-
-    try {
-        const response = await fetch(url, config);
-        if (response.status === 204) {
-            return null;
-        }
-        const data = await response.json();
-        if (!response.ok) {
-            throw new Error(data.error || '요청 처리 중 오류가 발생했습니다.');
-        }
-        return data;
-    } catch (error) {
-        console.error('API Error:', error);
-        throw error;
-    }
+  const res = await fetch(API_BASE_URL + endpoint, options);
+  if (!res.ok) {
+    throw new Error(`API 오류: ${res.status} ${res.statusText}`);
+  }
+  return res.json();
 }
 
 /**
