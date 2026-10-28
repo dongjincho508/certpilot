@@ -88,12 +88,13 @@ function showLogin() {
   me = null; $('app-view').hidden = true; $('login-view').hidden = false; $('login-pass').value = '';
 }
 function showView(name) {
-  ['dashboard', 'audit', 'users', 'debug'].forEach((v) => { $(`view-${v}`).hidden = v !== name; });
+  ['dashboard', 'audit', 'users', 'debug', 'cd'].forEach((v) => { $(`view-${v}`).hidden = v !== name; });
   document.querySelectorAll('#main-tabs .nav-link').forEach((a) => a.classList.toggle('active', a.dataset.view === name));
   if (name === 'dashboard') guarded(loadServers);
   if (name === 'audit') guarded(loadAudit);
   if (name === 'users') guarded(loadUsers);
   if (name === 'debug') guarded(loadDebug);
+  if (name === 'cd') guarded(loadCd);
 }
 function enter(user) {
   me = user; $('login-view').hidden = true; $('app-view').hidden = false;
@@ -373,6 +374,80 @@ async function loadDebug() {
   });
   if (!ev.events.length) { const tr = document.createElement('tr'); const td = el('td', '이벤트가 없습니다. 연결 테스트·조회를 실행해 보세요.', 'text-center text-body-secondary py-4'); td.colSpan = 5; tr.append(td); tb.append(tr); }
 }
+// ---------------------------------------------------------------- 발급·배포 설정(certdeploy)
+let cdOverview = null;
+function fmtDays(d) { return d == null ? '-' : `${Math.floor(d)}일`; }
+async function loadCd() {
+  const banner = $('cd-banner'); banner.hidden = true; $('cd-body').hidden = false;
+  try { cdOverview = await api('/certdeploy/overview'); } catch (e) { banner.textContent = e.message; banner.hidden = false; $('cd-body').hidden = true; return; }
+  const o = cdOverview, m = o.mail;
+  $('cd-mail-source').textContent = m ? `출처: ${m.source}` : '설정 없음';
+  if (m) {
+    $('m-enabled').checked = m.enabled !== false; $('m-host').value = m.host || ''; $('m-port').value = m.port || 587; $('m-starttls').checked = m.starttls !== false;
+    $('m-from').value = m.from || ''; $('m-to').value = (m.to || []).join(', '); $('m-user').value = m.username || ''; $('m-success').checked = m.on_success !== false;
+    $('m-pass').value = ''; $('m-pass-hint').textContent = m.password_set ? '비밀번호가 저장되어 있습니다. 비워 두면 유지합니다(화면에는 표시되지 않음).' : '비밀번호가 설정되어 있지 않습니다(인증 없는 릴레이면 비워 두세요).';
+  }
+  const box = $('cd-certs'); box.replaceChildren();
+  o.certificates.forEach((c) => box.append(certCard(c)));
+}
+function certCard(c) {
+  const card = el('div', null, 'border rounded p-3');
+  const head = el('div', null, 'd-flex flex-wrap justify-content-between gap-2 mb-2');
+  head.append(el('strong', c.name, 'fs-6'));
+  const info = el('div', null, 'small text-body-secondary');
+  info.textContent = c.cert ? `일련번호 ${c.cert.serial.slice(0, 12)}… · 만료 ${c.cert.not_after.slice(0, 10)} (남은 ${fmtDays(c.cert.days_left)}) · ${c.cert.names.join(', ')}` : (c.cert_error || '인증서 없음(아직 발급·가져오기 전)');
+  head.append(info); card.append(head);
+  const meta = el('div', null, 'small mb-2');
+  meta.textContent = `대상 ${c.targets.length}개` + (c.dns_mode ? ` · 발급 DNS 방식 ${c.dns_mode}` : '') + (c.last_run ? ` · 마지막 실행 ${(c.last_run.finished_at || '').slice(0, 16).replace('T', ' ')} ${c.last_run.ok ? '정상' : '문제 있음'}` : ' · 실행 기록 없음');
+  card.append(meta);
+  if (c.last_run) {
+    const row = el('div', null, 'd-flex flex-wrap gap-1 mb-2');
+    c.last_run.results.forEach((r) => { const bad = ['failed', 'rolled_back'].includes(r.status); const wait = r.status === 'manual_pending';
+      row.append(el('span', `${r.target}: ${r.status}`, `badge ${bad ? 'text-bg-danger' : wait ? 'text-bg-warning' : 'text-bg-success'}`)); });
+    card.append(row);
+  }
+  const keyBox = el('div', null, 'bg-body-tertiary rounded p-2');
+  const state = c.key_file_encrypted === null ? '키 파일 없음' : c.key_file_encrypted ? '암호화됨' : '평문(권한 600)';
+  keyBox.append(el('div', `개인키 보호 — 현재 파일: ${state} · 설정: ${c.key_encryption === 'passphrase' ? '사용' : '사용 안 함'} (${c.key_encryption_source})`, 'small fw-semibold mb-2'));
+  const radios = el('div', null, 'd-flex gap-3 mb-2');
+  ['passphrase', 'none'].forEach((v) => {
+    const wrap = el('div', null, 'form-check'); const r = el('input', null, 'form-check-input'); r.type = 'radio'; r.name = `kp-${c.name}`; r.id = `kp-${c.name}-${v}`; r.value = v; r.checked = c.key_encryption === v;
+    const l = el('label', v === 'passphrase' ? '사용 (암호로 보호)' : '사용 안 함', 'form-check-label'); l.htmlFor = r.id; wrap.append(r, l); radios.append(wrap);
+  });
+  keyBox.append(radios);
+  const pw = el('div', null, 'row g-2 align-items-end');
+  const c1 = el('div', null, 'col-md-4'); const p1 = el('input', null, 'form-control form-control-sm'); p1.type = 'password'; p1.autocomplete = 'new-password'; p1.placeholder = c.passphrase_set ? '암호(비우면 저장된 암호 유지)' : '암호 12자 이상'; p1.setAttribute('aria-label', `${c.name} 개인키 암호`); c1.append(p1);
+  const c2 = el('div', null, 'col-md-4'); const p2 = el('input', null, 'form-control form-control-sm'); p2.type = 'password'; p2.autocomplete = 'new-password'; p2.placeholder = '암호 확인'; p2.setAttribute('aria-label', `${c.name} 개인키 암호 확인`); c2.append(p2);
+  const c3 = el('div', null, 'col-md-4');
+  const apply = btn('적용', 'btn-sm btn-primary', async (e) => {
+    const mode = card.querySelector(`input[name="kp-${c.name}"]:checked`).value;
+    if (mode === 'passphrase' && p1.value !== p2.value) { toast('암호와 암호 확인이 다릅니다.', 'warning'); return; }
+    if (mode === 'passphrase' && !p1.value && !c.passphrase_set) { toast('암호를 입력하세요(12자 이상).', 'warning'); return; }
+    if (!window.confirm(`${c.name} 인증서의 개인키 보호를 '${mode === 'passphrase' ? '사용' : '사용 안 함'}'으로 적용합니다. 키 파일이 바로 변환됩니다. 계속할까요?`)) return;
+    await guarded(() => busy(e.currentTarget, async () => {
+      const r = await api('/certdeploy/settings', 'PUT', { certificates: { [c.name]: { key_encryption: mode, ...(p1.value ? { key_passphrase: p1.value } : {}) } } });
+      p1.value = p2.value = ''; toast((r.messages || ['저장했습니다']).join(' / ')); await loadCd();
+    }));
+  }, 'bi-check2');
+  c3.append(apply); pw.append(c1, c2, c3); keyBox.append(pw);
+  keyBox.append(el('div', '암호는 서버(설정 화면 파일, 권한 600)에 저장되어 배포·갱신 때 자동으로 쓰입니다. 파일만 유출되는 경우를 막는 장치이며, 서버 자체가 침해되는 것까지 막지는 못합니다.', 'form-text'));
+  card.append(keyBox);
+  return card;
+}
+function mailPayload() {
+  return { enabled: $('m-enabled').checked, host: $('m-host').value.trim(), port: Number($('m-port').value || 587), starttls: $('m-starttls').checked,
+    from: $('m-from').value.trim(), to: $('m-to').value, username: $('m-user').value.trim(), password: $('m-pass').value, on_success: $('m-success').checked };
+}
+function mailResult(ok, msg) { const s = $('cd-mail-result'); s.className = `small fw-semibold ${ok ? 'text-success' : 'text-danger'}`; s.textContent = msg; }
+async function saveMail(e) {
+  e.preventDefault();
+  await guarded(() => busy($('btn-mail-save'), async () => { await api('/certdeploy/settings', 'PUT', { mail: mailPayload() }); mailResult(true, '저장했습니다.'); toast('메일 설정을 저장했습니다.'); await loadCd(); }));
+}
+async function testMail() {
+  mailResult(true, '시험 메일을 보내는 중…');
+  await guarded(() => busy($('btn-mail-test'), async () => { const r = await api('/certdeploy/mail-test', 'POST', mailPayload()); mailResult(r.ok, r.message); }));
+}
+
 async function loadUsers() {
   const { users } = await api('/users'); const tb = $('users-body'); tb.replaceChildren();
   users.forEach((u) => {
@@ -411,6 +486,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('btn-scan-all').addEventListener('click', (e) => guarded(() => busy(e.currentTarget, async () => { const r = await api('/scan', 'POST'); toast(`${r.scanned}대 조회 완료`); await loadServers(); })));
   $('btn-export').addEventListener('click', () => { window.location = '/export.csv'; });
   $('btn-verify').addEventListener('click', () => guarded(verifyAudit));
+  $('cd-mail-form').addEventListener('submit', saveMail);
+  $('btn-mail-test').addEventListener('click', testMail);
+  $('btn-cd-refresh').addEventListener('click', () => guarded(loadCd));
   $('btn-dbg-refresh').addEventListener('click', () => guarded(loadDebug));
   $('dbg-errors').addEventListener('change', () => guarded(loadDebug));
   $('dbg-run').addEventListener('change', () => guarded(loadDebug));

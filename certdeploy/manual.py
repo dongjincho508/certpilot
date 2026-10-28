@@ -73,6 +73,53 @@ def decrypt_key_pem(key_pem: bytes, password: Optional[str]) -> bytes:
     return key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
 
 
+def convert_key_file(key_file: str, password: str, encrypt: bool, now: Optional[datetime] = None, keep_backup: bool = True) -> Tuple[bool, Optional[str]]:
+    """저장된 개인키 파일을 암호화/평문으로 바꾼다. (변경 여부, 변환 전 백업 경로) 반환. 이미 원하는 상태면 (False, None).
+    변환 전 원본은 `.bak-<시각>`(0600)으로 보존한다(새 키로 정상 동작을 확인한 뒤 shred 로 삭제)."""
+    try:
+        data = open(key_file, "rb").read()
+    except OSError as e:
+        raise ManualError(f"개인키 파일을 읽을 수 없습니다: {e.strerror}")
+    if encrypt == (b"ENCRYPTED" in data):
+        return False, None
+    out = encrypt_key_pem(data, password) if encrypt else decrypt_key_pem(data, password)
+    bak = f"{key_file}.bak-{(now or datetime.now(timezone.utc)):%Y%m%d%H%M%S}"
+    _write_private(bak, data, 0o600)
+    _write_private(key_file, out, 0o600)
+    if not keep_backup:                                   # 새 파일이 원래 키와 같은 키임을 확인한 뒤에만 원본 사본을 덮어써 지운다
+        plain = lambda blob: decrypt_key_pem(blob, password if b"ENCRYPTED" in blob else None)    # noqa: E731 — 암호화 여부에 맞게 평문 PEM 으로 정규화
+        if plain(out) == plain(data):
+            shred_file(bak)
+            return True, None
+    return True, bak
+
+
+def shred_file(path: str) -> None:
+    """파일 내용을 0 으로 덮어쓴 뒤 삭제(키 사본 정리용, 최선의 노력 — SSD·스냅샷에는 흔적이 남을 수 있다)."""
+    try:
+        size = os.path.getsize(path)
+        with open(path, "r+b") as f:
+            f.write(b"\0" * size)
+            f.flush()
+            os.fsync(f.fileno())
+    except OSError:
+        pass
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def rekey_file(key_file: str, old_password: str, new_password: str) -> None:
+    """암호화된 개인키의 암호를 바꾼다(원본 사본은 남기지 않되, 검증 후 교체)."""
+    data = open(key_file, "rb").read()
+    plain = decrypt_key_pem(data, old_password)
+    out = encrypt_key_pem(plain, new_password)
+    if decrypt_key_pem(out, new_password) != plain:
+        raise ManualError("암호 변경 검증에 실패했습니다")
+    _write_private(key_file, out, 0o600)
+
+
 def pending_dir(state_dir: str, name: str) -> str:
     return os.path.join(state_dir, "pending", name)
 

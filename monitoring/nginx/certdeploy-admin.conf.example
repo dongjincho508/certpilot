@@ -1,0 +1,21 @@
+# /etc/nginx/conf.d/certdeploy-admin.conf — 관리자 화면(발급·배포 설정) HTTPS 역프록시. 접속: https://<관리 서버>:8443
+# SELinux: 8443 은 기본적으로 http_port_t 에 포함되어 있다(확인: semanage port -l | grep http_port_t). 로컬 프록시는 setsebool -P httpd_can_network_connect on
+# 방화벽: firewall-cmd --permanent --add-port=8443/tcp && firewall-cmd --reload  (관리자 PC 대역만 허용하는 것을 권장)
+server {
+    listen 8443 ssl;
+    http2 on;
+    server_name mgmt.univ.example;                    # TODO: 관리 서버 호스트명
+    ssl_certificate     /etc/pki/tls/certs/mgmt.crt;  # Grafana 와 같은 인증서 사용 가능
+    ssl_certificate_key /etc/pki/tls/private/mgmt.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    client_max_body_size 1m;
+
+    location / {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}

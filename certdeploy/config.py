@@ -83,6 +83,7 @@ class SmtpCfg:
     password_env: Optional[str] = None
     password_file: Optional[str] = None
     on_success: bool = True
+    password: Optional[str] = None    # 관리자 화면(settings.json)에서 입력한 비밀번호(YAML 에는 쓰지 않는다)
 
 
 @dataclass
@@ -118,6 +119,7 @@ class CertSet:
     audit_dir: Optional[str] = None
     acme: Optional[dict] = None       # 내장 ACME 클라이언트 설정(검증·기본값 적용 후)
     key_encryption: str = "none"      # none: 평문(권한 600) | passphrase: 저장본 개인키를 암호(key_password_env)로 보호
+    key_passphrase: Optional[str] = None   # 관리자 화면(settings.json)에서 입력한 암호(있으면 환경변수보다 후순위)
 
 
 @dataclass
@@ -127,12 +129,13 @@ class Config:
     options: Options = field(default_factory=Options)
     notify: NotifyCfg = field(default_factory=NotifyCfg)
     audit_dir: Optional[str] = None
+    applied: List[str] = field(default_factory=list)      # 관리자 화면(settings.json)에서 적용된 항목
 
     def __getattr__(self, name):
         """인증서가 하나일 때 cfg.targets, cfg.cert_file 같은 접근을 그 인증서로 위임(하위 호환)."""
         if name == "certs":      # copy/pickle 중 속성이 아직 없을 때의 무한 재귀 방지
             raise AttributeError(name)
-        if name in ("cert_file", "key_file", "key_password_env", "targets", "lego", "acme", "name", "key_encryption") and len(self.certs) == 1:
+        if name in ("cert_file", "key_file", "key_password_env", "targets", "lego", "acme", "name", "key_encryption", "key_passphrase") and len(self.certs) == 1:
             return getattr(self.certs[0], name)
         raise AttributeError(name)
 
@@ -422,4 +425,10 @@ def load_config(path: str) -> Config:
         raise ConfigError([f"설정 파일을 읽을 수 없습니다: {e}"])
     except yaml.YAMLError as e:
         raise ConfigError([f"YAML 문법 오류: {e}"])
-    return parse_config(data)
+    cfg = parse_config(data)
+    from . import settings as _st
+    try:
+        cfg.applied = _st.apply(cfg, _st.load(cfg.state_dir))
+    except _st.SettingsError as e:
+        raise ConfigError([str(e)])
+    return cfg

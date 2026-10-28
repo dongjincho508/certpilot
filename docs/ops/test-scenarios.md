@@ -3,7 +3,7 @@
 [VM 설치·테스트 매뉴얼](vm-install-and-test.md) 7절의 T-01~T-13 을 **그대로 따라 할 수 있게** 풀어 쓴 것이다. 각 시나리오는 *사전조건 → 절차 → 기대 결과 → 증거 → 실패 시* 순서다.
 결과는 마지막 [결과 기록표](#결과-기록표)에 적고, 실패하면 매뉴얼 8절 방식으로 번들을 보낸다.
 
-공통 준비(발급·배포 VM, 한 번만):
+공통 준비(관리 서버, 한 번만). **인증서가 도메인별로 나뉘어 있으므로(`hnu`, `hannam`) 발급·배포 명령에는 `--cert hnu` 또는 `--cert hannam` 을 붙인다**(아래 예시는 `hnu`; `hannam` 도 같은 방식으로 반복). `validate`·`preflight`·`check`·`status` 처럼 전체를 대상으로 하는 명령은 생략 가능:
 ```bash
 CD="sudo -u certdeploy /opt/certdeploy/venv/bin/certdeploy -c /etc/certdeploy/certdeploy.yml"
 ```
@@ -55,17 +55,17 @@ $CD preflight
 - **사전조건**: 설정 파일에 `certificate.cert_file/key_file` 지정(`lego:` 없이)
 - **절차**
 ```bash
-$CD csr --domains '*.univ.example,univ.example' --country KR --org '대학명'
+$CD --cert hnu csr --domains '*.hnu.kr,hnu.kr' --country KR --org '대학명'
 ```
   출력된 CSR 을 CA 에 제출 → 받은 파일을 `/tmp` 에 올림 →
 ```bash
-$CD import --file /tmp/server.cer --file /tmp/intermediates.p7b --dry-run
+$CD --cert hnu import --file /tmp/server.cer --file /tmp/intermediates.p7b --dry-run
 ```
 - **기대**: 서버 인증서 일련번호·유효기간·SAN 표시, `중간 CA 1개`(필요 시 "자체 서명 루트 제외" 안내), `--dry-run` 이라 설치 안 함. 개인키 내용은 어디에도 출력되지 않음
 - **오류 확인(선택)**: 다른 키로 시도(`--key-file`)하면 "일치하는 서버 인증서가 없습니다", 만료 인증서면 "만료"로 종료 코드 2
 - **증거**: 출력 전체(키 없음), `openssl verify` 결과
 ```bash
-openssl verify -CAfile /path/to/root.pem -untrusted /var/lib/certdeploy/managed/fullchain.pem /var/lib/certdeploy/managed/fullchain.pem
+openssl verify -CAfile /path/to/root.pem -untrusted /var/lib/certdeploy/hnu/managed/wildcard.crt /var/lib/certdeploy/hnu/managed/wildcard.crt
 ```
 - **실패 시**: 번들과 CA 가 보낸 파일 이름 목록(파일 자체는 인증서라 공유 가능, 키는 절대 보내지 않는다)
 
@@ -75,15 +75,15 @@ openssl verify -CAfile /path/to/root.pem -untrusted /var/lib/certdeploy/managed/
 $CD plan
 ```
 ```bash
-$CD import --file /tmp/server.cer --file /tmp/intermediates.p7b
+$CD --cert hnu import --file /tmp/server.cer --file /tmp/intermediates.p7b
 ```
 ```bash
-$CD deploy --target web-canary
+$CD --cert hnu deploy --target hnu-web-canary
 ```
-- **기대**: `[web-canary] 배포 완료`, `요약: 배포 완료 1`, 종료 코드 0. 대상에는 백업 `*.bak-<시각>` 이 남음
+- **기대**: `[hnu-web-canary] 배포 완료`, `요약: 배포 완료 1`, 종료 코드 0. 대상에는 백업 `*.bak-<시각>` 이 남음
 - **확인**
 ```bash
-echo | openssl s_client -connect www1.univ.example:443 -servername www1.univ.example 2>/dev/null | openssl x509 -noout -serial -enddate
+echo | openssl s_client -connect www1.hnu.kr:443 -servername www1.hnu.kr 2>/dev/null | openssl x509 -noout -serial -enddate
 ```
 ```bash
 $CD status
@@ -95,7 +95,7 @@ $CD status
 ### T-06 멱등성
 - **절차**: T-05 직후 같은 명령 재실행
 ```bash
-$CD deploy --target web-canary
+$CD --cert hnu deploy --target hnu-web-canary
 ```
 - **기대**: `건너뜀 — 이미 새 인증서를 서빙 중`, 재로드 없음(서버 로그에 reload 기록 추가 없음), 종료 코드 0
 - **실패 시**: 건너뛰지 않고 재배포했다면 `status` 출력과 번들(서빙 일련번호 확인 실패 여부)
@@ -104,10 +104,10 @@ $CD deploy --target web-canary
 - **목적**: 배포 중 문제가 나도 서비스가 이전 인증서로 유지되는지
 - **절차(안전한 주입)**: 시험 대상(운영 트래픽 없는 서버 권장)의 `check_cmd` 를 `"false"` 로 바꾸고 강제 재배포
 ```bash
-$CD deploy --target web-test --force
+$CD --cert hnu deploy --target hnu-web-test --force
 ```
 - **기대**: `[web-test] 롤백됨 — 설정 점검 실패 … → 이전 파일로 롤백함`, 종료 코드 1, 알림(메일/Teams/Alertmanager) 수신, 해당 서버의 서빙 인증서는 **이전 것 그대로**, Pushgateway 지표 `certdeploy_run_ok 0`
-- **복구**: `check_cmd` 를 원복하고 `$CD deploy --target web-test` → `배포 완료`, 해소 알림, `run_ok 1`
+- **복구**: `check_cmd` 를 원복하고 `$CD --cert hnu deploy --target hnu-web-test` → `배포 완료`, 해소 알림, `run_ok 1`
 - **증거**: 출력, 알림 화면, Grafana certdeploy 패널
 - **실패 시**: 롤백 문구에 "롤백도 실패 — 수동 조치 필요"가 보이면 즉시 중단하고 `.bak-` 파일로 수동 복구 후 번들 전달
 
@@ -117,7 +117,7 @@ $CD deploy --target web-test --force
 $CD preflight
 ```
 ```bash
-$CD deploy
+$CD --cert hnu deploy
 ```
 - **기대**: canary → order 순 한 대씩 `배포 완료`, 중간에 실패하면 이후 대상은 `실행 안 함`, 종료 코드 0, `$CD check` 가 `CERTDEPLOY OK`
 - **확인**
@@ -165,7 +165,7 @@ systemctl list-timers certdeploy-renew.timer
 - **기대**: 재부팅 후에도 타이머가 다음 실행 시각을 가짐, 잠금 파일 잔여로 인한 종료 코드 3 없음, `journalctl -u certdeploy-renew` 에 정상 기록
 
 ### T-13 감시 장애 시 배포 영향 없음
-- **절차**: 감시 VM 의 Pushgateway 를 중지(`docker compose stop pushgateway`)한 상태에서 `$CD deploy --force --target web-test`
+- **절차**: 감시 VM 의 Pushgateway 를 중지(`docker compose stop pushgateway`)한 상태에서 `$CD --cert hnu deploy --force --target hnu-web-test`
 - **기대**: 배포는 정상 완료, 종료 코드 0. 지표 푸시 실패는 오류 이벤트로만 남음
 ```bash
 $CD trace --errors
@@ -254,7 +254,7 @@ $CD key-encrypt
 $CD validate
 ```
 ```bash
-$CD deploy --force --target web-canary
+$CD --cert hnu deploy --force --target hnu-web-canary
 ```
 - **기대**: `key-encrypt` 후 키 파일이 `BEGIN ENCRYPTED PRIVATE KEY`(0600), 변환 전 파일은 `*.key.bak-<시각>`(0600)으로 남음(확인 후 `shred -u` 로 삭제), `validate` 가 `암호화됨(…)`, **대상 서버에 배포된 키 파일은 평문(0600)** 이고 서비스 정상. 암호 환경변수를 빼고 실행하면 `개인키 암호화가 켜져 있습니다 — 환경변수 … 를 설정하세요` 로 중단. 되돌리기: `$CD key-decrypt` 후 설정을 `none` 으로
 - **재부팅 시험**: 암호 보호 상태에서 재부팅 → 타이머(`renew`)가 환경변수 파일의 암호로 정상 동작하는지(T-12 와 함께)
@@ -273,6 +273,20 @@ $CD deploy --target waf-main
 ```bash
 $CD confirm --target waf-main
 ```
+
+### T-22 관리자 화면(발급·배포 설정) — 메일 입력·시험 / 인증서별 개인키 보호 선택
+- **사전조건**: 설치 매뉴얼 7-5 완료(`certdeploy-admin` 실행, nginx 8443), 인증서(`hnu`, `hannam`) 중 하나 이상이 이미 설치되어 있으면 키 변환까지 확인 가능
+- **절차**: ① 브라우저로 `https://<관리 서버>:8443` 로그인(관리자) → 「발급·배포 설정」 ② **메일**: SMTP 입력 → [시험 메일 보내기] → 수신함 확인 → [저장] ③ **개인키 보호**: `hnu` 를 「사용」+암호(12자 이상)로 [적용] → `hannam` 은 「사용 안 함」 유지 ④ CLI 확인
+```bash
+$CD --cert hnu validate
+```
+```bash
+$CD --cert hnu deploy --force --target hnu-web-canary
+```
+- **기대**: 시험 메일이 도착하고, 실패 시 화면에 원인(연결 거부·로그인 실패·TLS 오류…)이 표시됨. 저장 후 `validate` 출력에 `관리자 화면(settings.json) 적용: 메일 · 개인키 보호(hnu)`. `hnu` 키 파일이 암호화(`BEGIN ENCRYPTED PRIVATE KEY`)되고 같은 폴더에 평문 `.bak-` 사본이 **남지 않으며**, 배포는 환경변수 없이 성공(대상 서버의 키는 평문). `hannam` 키는 평문 그대로. 「사용 안 함」으로 되돌리면 평문으로 복원. 감사 로그에 `certdeploy_settings_update` 가 기록되지만 비밀번호·암호는 없음
+- **권한 확인**: 운영자(operator) 계정으로 로그인하면 「발급·배포 설정」 탭이 보이지 않고, API 직접 호출은 403
+- **증거**: 화면 캡처(비밀번호 가림), `validate` 출력, `ls -l /var/lib/certdeploy/hnu/managed/`
+- **실패 시**: `journalctl -u certdeploy-admin -n 50`, 화면의 오류 메시지·요청 ID, `$CD diagnose --out`
 
 ---
 ## 결과 기록표
@@ -300,3 +314,4 @@ $CD confirm --target waf-main
 | T-20 | | | | | |
 | T-21 | | | | | |
 | T-02a | | | | | |
+| T-22 | | | | | |

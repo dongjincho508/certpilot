@@ -95,7 +95,7 @@ def test_encryption_on_stores_encrypted_key_and_deploys_plain_to_targets(kenv):
     assert deployed.startswith(b"-----BEGIN PRIVATE KEY-----") and mode(kenv.web / "s.key") == 0o600
     assert serialization.load_pem_private_key(stored, PW.encode()).private_numbers() == serialization.load_pem_private_key(deployed, None).private_numbers()
     v = run(cfg, "validate", env={"KEYPW": PW})
-    assert v.exit_code == 0 and "암호화됨(KEYPW)" in v.output
+    assert v.exit_code == 0 and "암호화됨" in v.output
 
 
 def test_encryption_on_requires_password_env_everywhere(kenv):

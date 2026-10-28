@@ -66,6 +66,7 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
         "ADMIN_USER": os.environ.get("CERTPILOT_ADMIN_USER"),
         "ADMIN_PASSWORD": os.environ.get("CERTPILOT_ADMIN_PASSWORD"),
         "ADMIN_RESET": os.environ.get("CERTPILOT_ADMIN_RESET_PASSWORD") == "1",
+        "CERTDEPLOY_CONFIG": os.environ.get("CERTDEPLOY_CONFIG"),      # 설정하면 관리자 화면에서 certdeploy 설정(메일·개인키 보호)을 다룬다
         "SECURE_COOKIE": os.environ.get("CERTPILOT_SECURE_COOKIE", "1") == "1",
         "IDLE_MINUTES": int(os.environ.get("CERTPILOT_IDLE_MINUTES", "30")),
         **(config or {}),
@@ -344,6 +345,47 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
     @require(ADMIN)
     def audit_verify():
         return jsonify(audit.verify_integrity())
+
+    # ---------------------------------------------------------------- 발급·배포 설정 (관리자) — certdeploy 와 같은 서버에서 쓰는 설정 화면
+    def cd_call(fn, *a, **k):
+        if not cfg.get("CERTDEPLOY_CONFIG"):
+            return _err("certdeploy", "이 서버에는 certdeploy 연동이 설정되어 있지 않습니다(환경변수 CERTDEPLOY_CONFIG). 설치 매뉴얼의 '관리자 화면' 절을 참고하세요.", 409)
+        try:
+            from certdeploy import adminapi        # 지연 임포트: certdeploy 가 없는 배포(예: Render)에서도 앱은 정상 기동
+        except ImportError:
+            return _err("certdeploy", "certdeploy 패키지가 설치되어 있지 않습니다", 409)
+        try:
+            return fn(adminapi, *a, **k)
+        except adminapi.AdminError as e:
+            return _err("certdeploy", str(e), e.status)
+
+    @app.get("/certdeploy/overview")
+    @require(ADMIN)
+    def cd_overview():
+        r = cd_call(lambda m: m.overview(cfg.get("CERTDEPLOY_CONFIG")))
+        return r if isinstance(r, tuple) else jsonify(r)
+
+    @app.put("/certdeploy/settings")
+    @require(ADMIN)
+    def cd_save():
+        payload = body()
+        r = cd_call(lambda m: m.save(cfg.get("CERTDEPLOY_CONFIG"), payload, g.user["username"]))
+        if isinstance(r, tuple):
+            return r
+        audit.write({"event_type": "certdeploy_settings_update", "description": ", ".join(r["changed"]) or "(변경 없음)",
+                     "details": {"actor": g.user["username"], "changed": r["changed"], "messages": r["messages"]}})     # 비밀번호·암호는 기록하지 않는다
+        return jsonify(r)
+
+    @app.post("/certdeploy/mail-test")
+    @require(ADMIN)
+    def cd_mail_test():
+        d = request.get_json(silent=True)
+        r = cd_call(lambda m: m.mail_test(cfg.get("CERTDEPLOY_CONFIG"), d if isinstance(d, dict) and d else None))
+        if isinstance(r, tuple):
+            return r
+        audit.write({"event_type": "certdeploy_mail_test", "description": "ok" if r["ok"] else "failed",
+                     "details": {"actor": g.user["username"], "ok": r["ok"], "message": r["message"]}})
+        return jsonify(r)
 
     # ---------------------------------------------------------------- 진단 (관리자)
     def self_checks() -> list:

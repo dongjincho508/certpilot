@@ -5,7 +5,7 @@
 ## 1. 한눈에
 | 구분 | 결과 |
 |---|---|
-| 자동 테스트 | **668개 통과·건너뜀 0 (promtool·amtool 포함)** (`scripts/check.sh`, promtool/amtool 포함 실행 기준) |
+| 자동 테스트 | **699개 통과·건너뜀 0 (promtool·amtool 포함)** (`scripts/check.sh`, promtool/amtool 포함 실행 기준) |
 | 정적 보안 분석(bandit, 중간 이상) | 지적 **0건** (CI `security` 잡) |
 | 의존성 취약점(pip-audit) | 알려진 취약점 **0건** |
 | 실제 바이너리로 확인 | Prometheus 3.5.0 · Alertmanager 0.28.1 · ssl_exporter 2.4.3(설정 검증·규칙 단위 시험·실수집), OpenSSL(체인 검증), JDK keytool(JKS), systemd-analyze(유닛), docker compose config |
@@ -48,6 +48,7 @@
 | **수동 교체 대상 `type: manual`**(WAF 옵션 C): 교체용 파일(PEM/PFX) 준비·메일 안내·독촉 승격·서빙 확인으로 자동 완료·`confirm`·개인키 사본 삭제, 지표·알림 규칙(1일/3일)·Grafana 패널 | ✅ `test_certdeploy_options.py`(수동 교체 9개) + promtool 규칙 단위 시험 | ⬜ **T-21** (모니터랩 화면에서 실제 교체) |
 | **개인키 저장 방식 선택**: `key_encryption: none/passphrase` — import·csr·내장 ACME(대기 키 포함) 저장본 암호화, 배포 때만 복호화, `key-encrypt`/`key-decrypt` 전환·백업, 설정↔실제 상태 불일치 점검 | ✅ `test_certdeploy_options.py`(암호화 8개) | ⬜ **T-20** (재부팅·타이머 환경에서 암호 공급) |
 | 알림 시험 `notify-test`(메일 우선 설정), 전송 실패 진단 이벤트 | ✅ | ⬜ **T-02a** (실제 SMTP 수신) |
+| **관리자 화면(발급·배포 설정)**: 메일 입력·저장·시험 메일(원인 분류), 인증서별 개인키 보호 사용/사용 안 함 선택·즉시 변환(평문 사본 검증 후 삭제)·암호 변경, 현황(만료·대상 상태), 관리자 전용·감사 기록(비밀 제외), 설정 화면 값이 CLI·타이머에 자동 적용 | ✅ `test_certdeploy_admin.py`(가짜 SMTP 서버로 실제 메일 전송·인증 실패·수신 거부 확인, 키 변환·롤백 안전) + 실제 브라우저 조작 확인 | ⬜ **T-22** (systemd·nginx 8443 구성, 실제 SMTP) |
 | `check`(Nagios 형식 종료 코드), `schema`, `diagnose`, `trace`, `--debug` | ✅ `test_prevm_checks.py`, `test_debug_tools.py` | ⬜ T-19 |
 
 ### 보안 설계 (코드로 확인된 것)
@@ -73,13 +74,14 @@
 - 내장 ACME: `_acme-challenge` **CNAME 위임**, **EAB**(외부 계정 바인딩) 미지원
 - `http_api`: 원시 바이너리 업로드, 클라이언트 인증서(mTLS) 인증 미지원
 - IIS 자동 배포 미구현(초안 스크립트만)
-- 인증서 상태 웹 화면 없음 — Grafana 대시보드·터미널·알림으로 확인(CertPilot 웹 앱은 보류·미사용)
+- 인증서 상태의 상세 웹 화면은 Grafana 대시보드가 담당하고, 관리자 화면은 설정(메일·개인키 보호)과 요약 현황만 제공한다(Render 의 CertPilot 앱은 사용하지 않음)
+- 관리자 화면에서 저장하는 SMTP 비밀번호·개인키 암호는 `settings.json`(0600, certdeploy 계정)에 평문으로 저장된다(서버 침해 시 노출 — 파일 단독 유출은 디스크 암호화·접근 통제로 방어)
 - 단일 관리 서버(고가용성 없음): 장애 시 백업([T-11](test-scenarios.md))으로 새 VM 에 복원
 
 ## 5. 테스트 구성 (파일별)
 | 파일 | 개수 | 내용 |
 |---|---|---|
-| `tests/test_prevm_checks.py` | 238 | 문서 정합성(bash 문법·명령·링크·이미지 태그), 설정 예시↔스키마, systemd·compose, OpenSSL 교차 검증, 퍼징, check/export-targets, 보안 보강, 50대 성능 |
+| `tests/test_prevm_checks.py` | 246 | 문서 정합성(bash 문법·명령·링크·이미지 태그), 설정 예시↔스키마, systemd·compose, OpenSSL 교차 검증, 퍼징, check/export-targets, 보안 보강, 50대 성능 |
 | `tests/test_certdeploy_features.py` | 50 | 멀티 인증서, 훅, soak, 백업, 알림 3종, 지표, 감사, scaffold 등 부가 기능 |
 | `tests/test_api.py` | 39 | CertPilot API(보류 앱): 인증·권한·서버·조회 |
 | `tests/test_certdeploy_engine.py` | 33 | 배포 엔진: 교체·롤백·canary·멱등·잠금 |
@@ -90,6 +92,7 @@
 | `tests/test_certdeploy_manual.py` | 25 | 수동 인증서 csr/import |
 | `tests/test_certdeploy_waf.py` | 24 | 웹방화벽 HTTP API 배포(옵션 A) |
 | `tests/test_scanner.py` | 22 | CertPilot 조회기(보류 앱) |
+| `tests/test_certdeploy_admin.py` | 23 | 관리자 화면: 메일·개인키 보호 저장/적용/변환, 시험 메일(가짜 SMTP), 웹 API 권한·감사·비밀 비노출 |
 | `tests/test_certdeploy_options.py` | 21 | 개인키 암호 사용/미사용 옵션, 수동 교체 대상(옵션 C), 알림 시험 |
 | `tests/test_debug_tools.py` | 19 | 진단 트레이스·진단 API·trace/diagnose·감시 점검 |
 | `tests/test_certdeploy_bundle.py` | 18 | 번들 검증·PKCS12/JKS 변환 |
