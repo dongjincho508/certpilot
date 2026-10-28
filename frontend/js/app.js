@@ -251,9 +251,9 @@ async function registerServer(e) {
       account: $('f-account').value.trim(), warn_days: Number($('f-warn').value || 30),
       paths: $('f-paths').value.split('\n').map((x) => x.trim()).filter(Boolean),
       tls_ports: $('f-tls').value.split(',').map((x) => x.trim()).filter(Boolean).map(Number),
-      group: $('f-group').value.trim(), memo: $('f-memo').value.trim(),
+      group: $('f-group').value.trim(), memo: $('f-memo').value.trim(), os_type: $('f-os').value,
     });
-    $('server-form').reset(); $('f-port').value = 22; $('f-warn').value = 30;
+    $('server-form').reset(); updateOsHint(); $('f-port').value = 22; $('f-warn').value = 30;
     serverModal.hide(); toast('서버를 등록했습니다.'); await loadServers();
   });
 }
@@ -262,8 +262,22 @@ function serverFormData() {
   return {
     hostname: $('f-host').value.trim(), port: Number($('f-port').value), account: $('f-account').value.trim(),
     paths: $('f-paths').value.split('\n').map((x) => x.trim()).filter(Boolean),
-    tls_ports: $('f-tls').value.split(',').map((x) => x.trim()).filter(Boolean).map(Number),
+    tls_ports: $('f-tls').value.split(',').map((x) => x.trim()).filter(Boolean).map(Number), os_type: $('f-os').value,
   };
+}
+let osProfiles = [];
+async function loadOsProfiles() {
+  if (osProfiles.length) return;
+  osProfiles = (await api('/os-profiles')).profiles;
+  const sel = $('f-os'); sel.replaceChildren();
+  osProfiles.forEach((p) => { const o = el('option', p.label); o.value = p.id; sel.append(o); });
+  updateOsHint();
+}
+function updateOsHint() {
+  const p = osProfiles.find((x) => x.id === $('f-os').value);
+  $('f-os-hint').textContent = p && p.candidates.length
+    ? `자동 조회 경로: ${p.candidates.join(', ')}`
+    : '선택한 OS 계열의 표준 인증서 경로를 자동으로 조회합니다. 자동 감지는 접속 후 /etc/os-release 로 판단합니다.';
 }
 function addPathsToForm(paths) {
   const cur = $('f-paths').value.split('\n').map((x) => x.trim()).filter(Boolean);
@@ -281,6 +295,13 @@ function renderProbe(r) {
     if (r.hostkey_blocked) status.append(el('div', '호스트 키가 이전과 다릅니다. 보안 이벤트일 수 있으니 확인 전까지 진행하지 마세요.', 'mt-1'));
   }
   box.append(status);
+  if (r.connected && r.os) {
+    const o = r.os, line = el('div', null, `small mb-2 ${o.mismatch ? 'text-danger' : 'text-body-secondary'}`);
+    line.append(icon(o.mismatch ? 'bi-exclamation-triangle-fill' : 'bi-pc-display'),
+      document.createTextNode(` 감지된 OS: ${o.detected || '확인 불가'} · 사용 프로필: ${o.label}${o.mode === 'auto' ? ' (자동)' : ' (선택)'}`));
+    if (o.mismatch) line.append(el('div', `선택한 OS 와 실제 서버가 다릅니다. '${o.detected_profile}' 계열로 바꾸는 것을 권장합니다.`, 'mt-1'));
+    box.append(line);
+  }
   (r.tls || []).forEach((t) => {
     const line = el('div', null, `small mb-1 ${t.ok ? 'text-success' : 'text-danger'}`);
     line.append(icon(t.ok ? 'bi-check-circle' : 'bi-x-circle'),
@@ -396,6 +417,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('btn-dbg-bundle').addEventListener('click', () => { window.location = '/debug/bundle'; });
   $('server-form').addEventListener('submit', registerServer);
   $('btn-probe').addEventListener('click', probeServer);
+  $('f-os').addEventListener('change', updateOsHint);
+  $('server-modal').addEventListener('show.bs.modal', () => guarded(loadOsProfiles));
   $('server-modal').addEventListener('hidden.bs.modal', () => $('probe-result').replaceChildren());
   $('user-form').addEventListener('submit', async (e) => {
     e.preventDefault();

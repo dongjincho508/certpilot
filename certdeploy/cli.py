@@ -427,6 +427,54 @@ def import_cmd(obj, files, key_file, key_pass_env, pfx, pfx_pass_env, dry_run, d
         sys.exit(_run_deploy(cfg, cs, _bundle(cs), force_deploy, False, (), False, action="import"))
 
 
+@main.command()
+@click.option("--warn", "warn_days", default=30, show_default=True, help="남은 일수가 이 값 이하면 WARNING")
+@click.option("--crit", "crit_days", default=14, show_default=True, help="남은 일수가 이 값 이하면 CRITICAL")
+@click.pass_obj
+def check(obj, warn_days, crit_days):
+    """Nagios/Zabbix/cron 용 한 줄 점검: 관리 중인 인증서 만료일 + 각 서버가 같은 인증서를 서빙하는지.
+    종료 코드: 0 OK · 1 WARNING · 2 CRITICAL · 3 UNKNOWN(설정·인증서 읽기 오류)."""
+    try:
+        cfg, sets = _sets(obj)
+    except click.ClickException as e:
+        click.echo(f"CERTDEPLOY UNKNOWN - {e.message.splitlines()[0]}")
+        sys.exit(3)
+    level, notes, perf = 0, [], []
+    for cs in sets:
+        b = _bundle(cs, exit_on_error=False)
+        if b is None:
+            click.echo(f"CERTDEPLOY UNKNOWN - {cs.name}: 인증서를 읽을 수 없습니다")
+            sys.exit(3)
+        left = b.days_left()
+        lv = 2 if left <= crit_days else 1 if left <= warn_days else 0
+        level = max(level, lv)
+        notes.append(f"{cs.name} 만료까지 {left:.0f}일")
+        perf.append(f"'{cs.name}_days_left'={left:.0f};{warn_days};{crit_days}")
+        d = _deployer(cs, b)
+        for t in cs.targets:
+            if not t.verify:
+                continue
+            try:
+                got = d._tls(t)
+            except VerifyError as e:
+                level = 2
+                notes.append(f"{t.name} 서빙 확인 실패({str(e)[:60]})")
+                continue
+            if got != b.serial:
+                level = max(level, 1 if lv == 0 else lv)
+                notes.append(f"{t.name} 이전/다른 인증서 서빙")
+    word = ("OK", "WARNING", "CRITICAL")[level]
+    click.echo(f"CERTDEPLOY {word} - {'; '.join(notes)} | {' '.join(perf)}")
+    sys.exit(level)
+
+
+@main.command()
+def schema():
+    """설정 파일의 JSON Schema 를 출력한다(편집기 자동완성·검증용: yaml-language-server 등)."""
+    from .schema import config_schema
+    click.echo(json.dumps(config_schema(), ensure_ascii=False, indent=2))
+
+
 @main.command("trace")
 @click.option("--run", "run_id", help="작업 ID 로 필터")
 @click.option("--errors", is_flag=True, help="경고·오류만")

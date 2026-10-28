@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from typing import Callable, List, Optional
 
-from certpilot_core import trace
+from certpilot_core import netutil, trace
 
 log = logging.getLogger("certdeploy")
 
@@ -40,7 +40,7 @@ class AlertmanagerNotifier(NullNotifier):
         req = urllib.request.Request(self.url, data=json.dumps(alerts).encode(), method="POST",
                                      headers={"Content-Type": "application/json"})
         try:
-            urllib.request.urlopen(req, timeout=self.timeout).read()
+            netutil.urlopen(req, timeout=self.timeout).read()
         except OSError as e:
             log.warning("Alertmanager 알림 전송 실패: %s", type(e).__name__)
             trace.event("notify", "alertmanager", "error", url=self.url, error=type(e).__name__, message=str(e))
@@ -133,7 +133,7 @@ class WebhookNotifier(NullNotifier):
         req = urllib.request.Request(url, data=json.dumps(self.payload(title, text, ok)).encode(), method="POST",
                                      headers={"Content-Type": "application/json"})
         try:
-            urllib.request.urlopen(req, timeout=self.timeout).read()
+            netutil.urlopen(req, timeout=self.timeout).read()
         except OSError as e:
             log.warning("웹훅 알림 전송 실패: %s", type(e).__name__)
             trace.event("notify", "webhook", "error", error=type(e).__name__, message=str(e))

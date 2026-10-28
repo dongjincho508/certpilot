@@ -394,4 +394,4 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT") or os.environ.get("CERTPILOT_API_PORT") or 8080)
-    create_app().run(host="0.0.0.0", port=port, debug=False)
+    create_app().run(host="0.0.0.0", port=port, debug=False)  # nosec B104 — 컨테이너(Render) 개발용 진입점

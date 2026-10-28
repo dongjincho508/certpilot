@@ -278,3 +278,10 @@ def test_diagnose_reports_invalid_config_without_crashing(tmp_path):
     p.write_text(yaml.safe_dump({"targets": []}))
     r = run(str(p), "diagnose")
     assert r.exit_code == 1 and "[문제] config" in r.output and "targets" in r.output
+
+
+def test_frontend_registration_has_os_selector():
+    base = os.path.join(os.path.dirname(__file__), "..", "frontend")
+    html = open(os.path.join(base, "templates", "index.html"), encoding="utf-8").read()
+    js = open(os.path.join(base, "js", "app.js"), encoding="utf-8").read()
+    assert 'id="f-os"' in html and "/os-profiles" in js and "os_type: $('f-os').value" in js and "mismatch" in js

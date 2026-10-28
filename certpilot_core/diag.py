@@ -9,6 +9,7 @@ import urllib.error
 import urllib.request
 from typing import Dict, List, Optional
 
+from . import netutil
 from .trace import redact
 
 # 값은 노출하지 않고 설정 여부만 보여 줄 환경변수
@@ -28,7 +29,7 @@ def check(name: str, ok: bool, detail: str = "", hint: str = "") -> dict:
 
 
 def _get_json(url: str, timeout: float = 5.0):
-    with urllib.request.urlopen(url, timeout=timeout) as r:    # noqa: S310 — 운영자가 지정한 감시 서버 주소
+    with netutil.urlopen(url, timeout=timeout) as r:    # noqa: S310 — 운영자가 지정한 감시 서버 주소
         return json.loads(r.read().decode())
 
 
@@ -65,7 +66,7 @@ def check_monitoring(prometheus: Optional[str] = None, alertmanager: Optional[st
             out.append(check("alertmanager.reachable", False, f"{type(e).__name__}: {e}", "주소·포트 확인"))
     if pushgateway:
         try:
-            with urllib.request.urlopen(f"{pushgateway.rstrip('/')}/metrics", timeout=5) as r:   # noqa: S310
+            with netutil.urlopen(f"{pushgateway.rstrip('/')}/metrics", timeout=5) as r:   # noqa: S310
                 text = r.read().decode()
             seen = [l for l in text.splitlines() if l.startswith("certdeploy_last_run_timestamp_seconds")]
             out.append(check("pushgateway.certdeploy_metrics", bool(seen), f"{len(seen)}개 시계열", "certdeploy 가 지표를 푸시했는지(notify.pushgateway_url) 확인"))

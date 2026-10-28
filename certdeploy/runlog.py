@@ -9,7 +9,7 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-from certpilot_core import trace
+from certpilot_core import netutil, trace
 
 from .engine import TargetResult
 
@@ -128,7 +128,7 @@ def push_metrics(url: str, cert: str, text: str, user: Optional[str] = None, pas
     if user and password:
         req.add_header("Authorization", "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode())
     try:
-        urllib.request.urlopen(req, timeout=timeout).read()
+        netutil.urlopen(req, timeout=timeout).read()
         trace.event("metrics", "pushgateway", url=url, cert=cert, bytes=len(text))
         return True
     except OSError as e:

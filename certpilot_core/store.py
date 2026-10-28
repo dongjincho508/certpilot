@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   token_hash TEXT PRIMARY KEY, username TEXT NOT NULL, created_at TEXT NOT NULL, last_seen TEXT NOT NULL);
 """
 
+USER_COLUMNS = frozenset({"password_hash", "role", "failed_count", "locked_until"})
+
 
 class Store(HostKeyStore):
     def __init__(self, path: str = ":memory:"):
@@ -135,9 +137,12 @@ class Store(HostKeyStore):
                     for r in c.execute("SELECT * FROM users ORDER BY username")]
 
     def update_user(self, username, **fields) -> None:
-        cols = ", ".join(f"{k}=?" for k in fields)
+        bad = set(fields) - USER_COLUMNS
+        if bad:
+            raise ValueError(f"허용되지 않는 사용자 컬럼: {sorted(bad)}")
+        cols = ", ".join(f"{k}=?" for k in fields)    # 컬럼명은 위 허용 목록만 통과 → 값은 바인딩
         with self._conn() as c:
-            c.execute(f"UPDATE users SET {cols} WHERE username=?", (*fields.values(), username))
+            c.execute(f"UPDATE users SET {cols} WHERE username=?", (*fields.values(), username))  # nosec B608
 
     def delete_user(self, username) -> bool:
         with self._conn() as c:

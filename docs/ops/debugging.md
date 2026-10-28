@@ -38,3 +38,7 @@ PIPELINE_VERBOSE=1 python -m pytest tests/test_pipeline_e2e.py -s -q
 
 ## 5. 공유할 때
 `certdeploy diagnose --out` 파일, 진단 탭의 「진단 번들」, 또는 `certdeploy trace --errors` 출력을 그대로 전달하면 된다(비밀값 마스킹됨). 그래도 공유 전 한 번 훑어보고 내부 호스트명 노출이 곤란하면 가려서 보낸다.
+
+## 6. VM 설치 전 점검 (`tests/test_prevm_checks.py`)
+문서의 bash 블록 문법·`certdeploy` 명령 존재·상대 링크, systemd 유닛(`systemd-analyze verify`), compose 렌더링(`docker compose config`: 비밀번호 없으면 기동 거부, 포트 localhost 바인딩), 설정 예시 ↔ JSON Schema, openssl 로 체인 교차 검증, 손상 입력 퍼징, 50대 동시 조회, 보안 보강을 자동 점검한다. CI `security` 잡은 bandit(중간 이상 0건)·pip-audit 를 돌린다.
+등록 서버를 감시 대상으로: `certpilot-cli export-targets --db data/certpilot.db -o monitoring/prometheus/targets/certpilot.yml`
