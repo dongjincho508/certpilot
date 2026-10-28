@@ -2,6 +2,15 @@
 # CertPilot 시작: (선택) ssh-agent 에 키를 올리고 gunicorn 으로 API+UI 를 포그라운드 실행한다.
 set -e
 PORT="${PORT:-${CERTPILOT_API_PORT:-8080}}"
+DATA_DIR="${CERTPILOT_DATA_DIR:-/data}"
+
+# root 로 시작했다면 데이터 디스크 소유권을 앱 사용자에게 맞추고 권한을 내려 다시 실행한다.
+if [ "$(id -u)" = "0" ]; then
+  mkdir -p "$DATA_DIR"
+  chown -R 10001:10001 "$DATA_DIR" || echo "경고: $DATA_DIR 소유권 변경 실패" >&2
+  export HOME=/tmp   # 권한을 내린 뒤 /root 에 쓰지 않도록
+  exec setpriv --reuid=10001 --regid=10001 --clear-groups sh "$0" "$@"
+fi
 
 if [ -z "$CERTPILOT_ADMIN_USER" ] || [ -z "$CERTPILOT_ADMIN_PASSWORD" ]; then
   echo "경고: CERTPILOT_ADMIN_USER / CERTPILOT_ADMIN_PASSWORD 가 없으면 최초 관리자가 만들어지지 않아 로그인할 수 없습니다." >&2
