@@ -1,0 +1,130 @@
+# promtool test rules  — 알림 규칙이 의도한 구간에서만 발동하는지 검증한다.
+rule_files:
+  - ../rules/cert-expiry.yml
+evaluation_interval: 1m
+
+tests:
+  # 시각 0 기준: not_after = 초 단위 절대값. 평가 시각 1h(3600초) 에서 남은 일수 = (not_after-3600)/86400
+  - name: 구간별로 단 하나의 만료 알림만 발동한다
+    interval: 1m
+    input_series:
+      - series: 'ssl_cert_not_after{instance="a:443",cn="a",serial_no="1"}'
+        values: '2592000+0x120'      # 30일(=2592000s)  → 평가 시 29.96일 → 30일 구간
+      - series: 'ssl_cert_not_after{instance="b:443",cn="b",serial_no="2"}'
+        values: '1036800+0x120'      # 12일
+      - series: 'ssl_cert_not_after{instance="c:443",cn="c",serial_no="3"}'
+        values: '518400+0x120'       # 6일
+      - series: 'ssl_cert_not_after{instance="d:443",cn="d",serial_no="4"}'
+        values: '259200+0x120'       # 3일
+      - series: 'ssl_cert_not_after{instance="e:443",cn="e",serial_no="5"}'
+        values: '86400+0x120'        # 1일 → 평가 시 이미 23h 남음
+      - series: 'ssl_cert_not_after{instance="f:443",cn="f",serial_no="6"}'
+        values: '3000+0x120'         # 이미 지남
+      - series: 'ssl_cert_not_after{instance="g:443",cn="g",serial_no="7"}'
+        values: '7776000+0x120'      # 90일 → 알림 없음
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: CertExpiresIn30Days
+        exp_alerts:
+          - exp_labels: {severity: info, instance: "a:443", cn: a, serial_no: "1"}
+            exp_annotations:
+              summary: "인증서 30일 이내 만료: a:443"
+              description: "a:443 (CN=a) 인증서가 29d 23h 0m 0s 후 만료됩니다. 갱신 일정을 확인하세요."
+      - eval_time: 1h
+        alertname: CertExpiresIn14Days
+        exp_alerts:
+          - exp_labels: {severity: warning, instance: "b:443", cn: b, serial_no: "2"}
+            exp_annotations:
+              summary: "인증서 14일 이내 만료: b:443"
+              description: "b:443 (CN=b) 인증서가 11d 23h 0m 0s 후 만료됩니다."
+      - eval_time: 1h
+        alertname: CertExpiresIn7Days
+        exp_alerts:
+          - exp_labels: {severity: warning, instance: "c:443", cn: c, serial_no: "3"}
+            exp_annotations:
+              summary: "인증서 7일 이내 만료: c:443"
+              description: "c:443 (CN=c) 인증서가 5d 23h 0m 0s 후 만료됩니다."
+      - eval_time: 1h
+        alertname: CertExpiresIn3Days
+        exp_alerts:
+          - exp_labels: {severity: critical, instance: "d:443", cn: d, serial_no: "4"}
+            exp_annotations:
+              summary: "인증서 3일 이내 만료: d:443"
+              description: "d:443 (CN=d) 인증서가 2d 23h 0m 0s 후 만료됩니다."
+      - eval_time: 1h
+        alertname: CertExpiresIn1Day
+        exp_alerts:
+          - exp_labels: {severity: critical, instance: "e:443", cn: e, serial_no: "5"}
+            exp_annotations:
+              summary: "인증서 1일 이내 만료: e:443"
+              description: "e:443 (CN=e) 인증서가 23h 0m 0s 후 만료됩니다."
+      - eval_time: 1h
+        alertname: CertExpired
+        exp_alerts:
+          - exp_labels: {severity: critical, instance: "f:443", cn: f, serial_no: "6"}
+            exp_annotations:
+              summary: "인증서 만료됨: f:443"
+              description: "f:443 가 제공하는 인증서(CN=f, 일련번호 6)가 이미 만료되었습니다."
+
+  # 갱신 지연: 비율(남은 기간 < 수명의 25%) 기준이라 시간 척도와 무관하다. 평가를 빠르게 하려고 수명 10시간으로 축소.
+  # 수명 36000초, 남은 기간이 9000초(=25%) 미만이 되는 시점 = 7.5h, for 1h → 8.5h 이후에 발동
+  - name: 갱신 지연은 수명 75% 경과 후 1시간 지속되어야 발동
+    interval: 1m
+    input_series:
+      - series: 'ssl_cert_not_after{instance="lag:443",cn="lag",serial_no="9"}'
+        values: '36000+0x700'
+      - series: 'ssl_cert_not_before{instance="lag:443",cn="lag",serial_no="9"}'
+        values: '0+0x700'
+      # 수명이 훨씬 긴 인증서는 같은 시각에 발동하지 않는다
+      - series: 'ssl_cert_not_after{instance="fresh:443",cn="fresh",serial_no="10"}'
+        values: '360000+0x700'
+      - series: 'ssl_cert_not_before{instance="fresh:443",cn="fresh",serial_no="10"}'
+        values: '0+0x700'
+    alert_rule_test:
+      - eval_time: 7h            # 남은 3h > 25% → 없음
+        alertname: CertRenewalLagging
+        exp_alerts: []
+      - eval_time: 8h            # 조건은 참(7.5h~)이나 for 1h 미충족 → 없음
+        alertname: CertRenewalLagging
+        exp_alerts: []
+      - eval_time: 9h            # 조건 90분 지속 → 발동
+        alertname: CertRenewalLagging
+        exp_alerts:
+          - exp_labels: {severity: warning, instance: "lag:443", cn: lag, serial_no: "9"}
+            exp_annotations:
+              summary: "인증서 갱신 지연 의심: lag:443"
+              description: "lag:443 (CN=lag) 인증서 수명의 75% 이상이 지났습니다. 자동 갱신·배포가 동작하는지 확인하세요."
+
+  - name: 조회 실패는 15분 지속 시 발동, 수집 중단은 10분
+    interval: 1m
+    input_series:
+      - series: 'ssl_probe_success{instance="down:443"}'
+        values: '0+0x60'
+      - series: 'ssl_probe_success{instance="blip:443"}'
+        values: '1 0 0 1+0x57'
+      - series: 'up{job="ssl-endpoints",instance="gone:443"}'
+        values: '0+0x60'
+      - series: 'up{job="ssl-exporter-self",instance="ssl-exporter:9219"}'
+        values: '0+0x60'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: CertProbeFailed
+        exp_alerts:
+          - exp_labels: {severity: warning, instance: "down:443"}
+            exp_annotations:
+              summary: "인증서 조회 실패: down:443"
+              description: "down:443 에 TLS 연결을 할 수 없습니다(서비스 중지·방화벽·포트 변경 가능). 이 대상은 만료 감시가 되지 않고 있습니다."
+      - eval_time: 12m
+        alertname: CertTargetScrapeFailed
+        exp_alerts:
+          - exp_labels: {severity: critical, job: ssl-endpoints, instance: "gone:443"}
+            exp_annotations:
+              summary: "인증서 수집 실패(exporter 호출 오류): gone:443"
+              description: "Prometheus 가 ssl_exporter 로부터 gone:443 결과를 받지 못했습니다. 감시가 중단된 상태입니다."
+      - eval_time: 7m
+        alertname: CertExporterDown
+        exp_alerts:
+          - exp_labels: {severity: critical, job: ssl-exporter-self, instance: "ssl-exporter:9219"}
+            exp_annotations:
+              summary: "ssl_exporter 중단"
+              description: "ssl_exporter 가 응답하지 않아 모든 인증서 감시가 중단되었습니다."

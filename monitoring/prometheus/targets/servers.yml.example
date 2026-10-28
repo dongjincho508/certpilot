@@ -1,0 +1,16 @@
+# 감시 대상 목록 예시. 이 파일을 servers.yml 로 복사해 실제 서버로 바꾸세요(수정은 1분 내 자동 반영).
+# 대상은 `호스트명:포트` — 가능하면 IP 가 아니라 호스트명(SNI 가 맞아야 올바른 인증서가 조회됩니다).
+# 레이블(group/service/os/owner)은 대시보드 필터와 알림 메일에 표시됩니다.
+- targets: ["www.univ.example:443", "portal.univ.example:443"]
+  labels: {group: 대표홈페이지, service: apache, os: linux, owner: 전산실}
+- targets: ["sugang.univ.example:8443"]
+  labels: {group: 학사, service: tomcat, os: linux, owner: 학사팀}
+- targets: ["ssoweb.univ.example:443"]
+  labels: {group: 학사, service: jeus, os: linux, owner: 학사팀}
+- targets: ["intra.univ.example:443"]
+  labels: {group: 행정, service: iis, os: windows, owner: 행정팀}
+- targets: ["api.univ.example:3000"]
+  labels: {group: 연구, service: nodejs, os: linux, owner: 연구지원}
+# 메일(STARTTLS) 서버는 module 레이블로 구분:
+# - targets: ["mail.univ.example:587"]
+#   labels: {group: 메일, service: postfix, os: linux, module: smtp}

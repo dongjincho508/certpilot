@@ -1,5 +1,9 @@
 # CertPilot 제품 방향·로드맵 (제안 v1)
 
+> **결정 (2026-10-28, 오너): 감시는 Prometheus + ssl_exporter + Grafana 오픈소스 스택으로 진행한다.** → [`monitoring/`](../monitoring/README.md)
+> CertPilot(이 저장소의 Flask 앱)의 개발은 **보류**한다. 코드·테스트·문서는 그대로 보존하며, SSH 디스크 파일 인벤토리·감사 로그·교체 체크리스트 워크플로가
+> 꼭 필요해질 때 아래 Phase 0 부터 재개한다. 이 문서의 이하 내용은 재개 시 참고하는 계획이다. 발급·배포·갱신은 [갱신 자동화](ops/acme-automation.md) 참고.
+
 작성 기준: 2026-10-28. 이 문서는 **제안**이며, PRD 범위를 바꾸는 항목은 오너 승인 후 PRD 개정(v0.4)으로 반영한다.
 관련: [PRD](PRD.md) · [ARCHITECTURE](ARCHITECTURE.md) · [TRACEABILITY](TRACEABILITY.md) · [OPEN_ITEMS](OPEN_ITEMS.md)
 

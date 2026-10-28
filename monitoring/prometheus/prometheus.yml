@@ -1,0 +1,44 @@
+# 인증서 만료 감시용 Prometheus 설정. 대상은 targets/*.yml 에서 관리한다(파일 변경은 1분 내 자동 반영).
+global:
+  scrape_interval: 5m        # 인증서 상태는 느리게 변하므로 5분이면 충분
+  scrape_timeout: 30s
+  evaluation_interval: 1m
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  # 서비스 엔드포인트(host:port)의 TLS 인증서를 ssl_exporter 로 조회한다
+  - job_name: ssl-endpoints
+    metrics_path: /probe
+    params:
+      module: [tcp]            # 기본 모듈. 대상에 `module` 레이블이 있으면 그 값으로 덮어쓴다
+    file_sd_configs:
+      - files: ["/etc/prometheus/targets/*.yml"]
+        refresh_interval: 1m
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - source_labels: [module]
+        regex: (.+)
+        target_label: __param_module
+      - target_label: __address__
+        replacement: ssl-exporter:9219
+
+  # 수집 체계 자체의 상태
+  - job_name: ssl-exporter-self
+    static_configs:
+      - targets: ["ssl-exporter:9219"]
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["alertmanager:9093"]

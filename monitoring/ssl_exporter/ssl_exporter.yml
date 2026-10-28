@@ -1,0 +1,17 @@
+# insecure_skip_verify: 사내 CA·자체 서명 인증서도 만료일은 읽어야 하므로 검증 실패로 조회를 중단하지 않는다.
+# (이 도구의 목적은 '신뢰 검증'이 아니라 '서비스되는 인증서의 만료 감시'이다)
+default_module: tcp
+modules:
+  tcp:
+    prober: tcp
+    timeout: 20s
+    tls_config:
+      insecure_skip_verify: true
+  # 메일·FTP 등 STARTTLS 서비스 예시: 대상에 `module: smtp` 레이블을 지정
+  smtp:
+    prober: tcp
+    timeout: 20s
+    tls_config:
+      insecure_skip_verify: true
+    tcp:
+      starttls: smtp
