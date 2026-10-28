@@ -240,7 +240,7 @@ def test_boots_even_if_admin_password_is_weak(tmp_path, capsys):
                       "SECURE_COOKIE": False})
     assert app.test_client().get("/health").status_code == 200
     err = capsys.readouterr().err
-    assert "최초 관리자 생성 실패" in err and "weak" not in err.replace("weak_password", "")
+    assert "관리자 생성/재설정 실패" in err and "weak" not in err.replace("weak_password", "")
 
 
 def test_unwritable_data_dir_gives_clear_error(tmp_path):
@@ -248,3 +248,34 @@ def test_unwritable_data_dir_gives_clear_error(tmp_path):
     blocker.write_text("x")
     with pytest.raises(RuntimeError, match="데이터 디렉터리"):
         create_app({"DATA_DIR": str(blocker / "sub")})
+
+
+def test_admin_password_not_overwritten_without_reset_flag(tmp_path, capsys):
+    cfg = {"DATA_DIR": str(tmp_path), "ADMIN_USER": "admin", "ADMIN_PASSWORD": PW, "SECURE_COOKIE": False}
+    create_app(cfg)
+    app2 = create_app({**cfg, "ADMIN_PASSWORD": PW + "new"})  # 재시작 + 환경변수 변경
+    c = app2.test_client()
+    assert login(c, "admin", PW).status_code == 200           # 기존 비밀번호 유지
+    assert login(app2.test_client(), "admin", PW + "new").status_code == 401
+    assert "이미 존재" in capsys.readouterr().err
+
+
+def test_admin_reset_flag_recovers_login_and_unlocks(tmp_path):
+    cfg = {"DATA_DIR": str(tmp_path), "ADMIN_USER": "admin", "ADMIN_PASSWORD": PW, "SECURE_COOKIE": False}
+    app = create_app(cfg)
+    c = app.test_client()
+    for _ in range(5):
+        login(c, "admin", "wrong")
+    assert login(c, "admin", PW).status_code == 423              # 잠김
+    app2 = create_app({**cfg, "ADMIN_PASSWORD": PW + "new", "ADMIN_RESET": True})
+    assert login(app2.test_client(), "admin", PW + "new").status_code == 200
+    assert login(app2.test_client(), "admin", PW).status_code == 401
+    logs = app2.extensions["certpilot"]["audit"].read_logs()
+    assert any(l["event_type"] == "admin_password_reset" for l in logs)
+
+
+def test_reset_with_weak_password_keeps_old(tmp_path):
+    cfg = {"DATA_DIR": str(tmp_path), "ADMIN_USER": "admin", "ADMIN_PASSWORD": PW, "SECURE_COOKIE": False}
+    create_app(cfg)
+    app2 = create_app({**cfg, "ADMIN_PASSWORD": "weak", "ADMIN_RESET": True})
+    assert login(app2.test_client(), "admin", PW).status_code == 200
