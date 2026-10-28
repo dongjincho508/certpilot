@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, List, Optional
 
+from certpilot_core import trace
+
 from . import remote
 from .bundle import Bundle, BundleError
 from .config import Config, Target
@@ -137,7 +139,9 @@ class Deployer:
             if stop:
                 results.append(TargetResult(t.name, "not_run", "이전 대상 실패로 중단"))
                 continue
-            r = self._deploy_target(t, force, dry_run)
+            with trace.span("deploy", "target", target=t.name, serial=f"{self.bundle.serial:x}", force=force, dry_run=dry_run) as ctx:
+                r = self._deploy_target(t, force, dry_run)
+                ctx.update(status=r.status, message=r.message, served_before=f"{r.serial_before:x}" if r.serial_before else None)
             results.append(r)
             if r.status in ("failed", "rolled_back") and not continue_on_error:
                 stop = True
@@ -193,7 +197,9 @@ class Deployer:
 
     def _deploy_target(self, t: Target, force: bool, dry_run: bool) -> TargetResult:
         new = self.bundle.serial
-        before = self._served_serial(t)
+        with trace.span("deploy", "served_serial", target=t.name) as ctx:
+            before = self._served_serial(t)
+            ctx["served"] = f"{before:x}" if before else None
         if before == new and not force:
             return TargetResult(t.name, "skipped", "이미 새 인증서를 서빙 중", before)
         # TLS 확인이 설정되지 않은 대상은 서빙 여부를 알 수 없으므로 마지막 배포 기록으로 멱등성을 보장한다
@@ -203,6 +209,7 @@ class Deployer:
         if dry_run:
             return TargetResult(t.name, "dry_run", "실행하지 않음(계획만)", before)
         if t.pre_cmd:                                 # 예: 로드밸런서에서 이 서버 제외. 실패하면 아무것도 바꾸지 않는다
+            trace.event("deploy", "pre_cmd", target=t.name, cmd=t.pre_cmd)
             try:
                 rc, out = self.hook_runner(t.pre_cmd, self._hook_env(t, "pre"), self.cfg.options.command_timeout)
             except (OSError, subprocess.TimeoutExpired) as e:
@@ -217,7 +224,8 @@ class Deployer:
         installed: List[remote.Installed] = []
         transport: Optional[Transport] = None
         try:
-            transport = self.transport_factory(t.transport)
+            with trace.span("deploy", "connect", target=t.name, kind=t.transport.get("kind", "local"), host=t.transport.get("host")):
+                transport = self.transport_factory(t.transport)
             self._install_all(t, transport, ts, installed)
             self._check_and_reload(t, transport)
             self._verify_new(t)
@@ -265,17 +273,30 @@ class Deployer:
     def _install_all(self, t, transport, ts, installed):
         for f in t.files:
             data = self._content(f)
-            installed.append(remote.install_file(transport, f.dest, data, f.mode, ts))
+            with trace.span("deploy", "install_file", dest=f.dest, mode=f.mode, bytes=len(data)):
+                installed.append(remote.install_file(transport, f.dest, data, f.mode, ts))
             del data     # 키 내용을 오래 들고 있지 않는다
+
+    @staticmethod
+    def _traced_run(transport, step, t, cmd, timeout):
+        t0 = time.monotonic()
+        try:
+            r = transport.run(cmd, timeout=timeout)
+        except Exception as e:
+            trace.event("deploy", step, "error", target=t.name, cmd=cmd, error=type(e).__name__, message=str(e))
+            raise
+        trace.event("deploy", step, "info" if r.ok else "error", target=t.name, cmd=cmd, rc=r.rc,
+                    ms=round((time.monotonic() - t0) * 1000), output=(r.err or r.out)[-300:])
+        return r
 
     def _check_and_reload(self, t, transport):
         to = self.cfg.options.command_timeout
         if t.check_cmd:
-            r = transport.run(t.check_cmd, timeout=to)
+            r = self._traced_run(transport, "check_cmd", t, t.check_cmd, to)
             if not r.ok:
                 raise DeployFailure("설정 점검 실패: " + ((r.err or r.out).strip().splitlines() or ["원인 불명"])[-1][:200])
         if t.reload_cmd:
-            r = transport.run(t.reload_cmd, timeout=to)
+            r = self._traced_run(transport, "reload_cmd", t, t.reload_cmd, to)
             if not r.ok:
                 raise DeployFailure("재로드 실패: " + ((r.err or r.out).strip().splitlines() or ["원인 불명"])[-1][:200])
 
@@ -287,11 +308,13 @@ class Deployer:
         for i in range(o.verify_attempts):
             try:
                 got = self._tls(t)
+                trace.event("deploy", "verify_attempt", target=t.name, attempt=i + 1, served=f"{got:x}", expected=f"{self.bundle.serial:x}", match=got == self.bundle.serial)
                 if got == self.bundle.serial:
                     return
                 last = f"다른 인증서가 서빙됨(일련번호 {got:x})"
             except VerifyError as e:
                 last = str(e)
+                trace.event("deploy", "verify_attempt", "warning", target=t.name, attempt=i + 1, error=last)
             if i < o.verify_attempts - 1:
                 self.sleep(o.verify_interval)
         raise DeployFailure(f"재로드 후 새 인증서가 확인되지 않음: {last}")
@@ -299,6 +322,7 @@ class Deployer:
     def _fail(self, t, transport, installed, before, reason) -> TargetResult:
         """롤백 후 상태·알림 기록. 롤백까지 실패하면 수동 조치 필요를 명시한다."""
         rolled, problem = False, ""
+        trace.event("deploy", "failure", "error", target=t.name, reason=reason, installed=len(installed))
         if transport is not None:
             try:
                 for inst in reversed(installed):

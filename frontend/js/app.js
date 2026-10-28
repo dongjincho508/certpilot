@@ -30,7 +30,10 @@ async function api(path, method = 'GET', body = null) {
   if (res.status === 401 && !path.startsWith('/auth/')) { showLogin(); throw new Error('로그인이 필요합니다.'); }
   const ct = res.headers.get('content-type') || '';
   const data = ct.includes('json') ? await res.json() : await res.text();
-  if (!res.ok) throw new Error((data && data.error && data.error.message) || `오류 ${res.status}`);
+  if (!res.ok) {
+    const rid = res.headers.get('X-Request-Id');
+    throw new Error(((data && data.error && data.error.message) || `오류 ${res.status}`) + (rid && res.status >= 500 ? ` [요청 ID ${rid}]` : ''));
+  }
   return data;
 }
 
@@ -85,11 +88,12 @@ function showLogin() {
   me = null; $('app-view').hidden = true; $('login-view').hidden = false; $('login-pass').value = '';
 }
 function showView(name) {
-  ['dashboard', 'audit', 'users'].forEach((v) => { $(`view-${v}`).hidden = v !== name; });
+  ['dashboard', 'audit', 'users', 'debug'].forEach((v) => { $(`view-${v}`).hidden = v !== name; });
   document.querySelectorAll('#main-tabs .nav-link').forEach((a) => a.classList.toggle('active', a.dataset.view === name));
   if (name === 'dashboard') guarded(loadServers);
   if (name === 'audit') guarded(loadAudit);
   if (name === 'users') guarded(loadUsers);
+  if (name === 'debug') guarded(loadDebug);
 }
 function enter(user) {
   me = user; $('login-view').hidden = true; $('app-view').hidden = false;
@@ -328,6 +332,26 @@ async function verifyAudit() {
   s.append(icon(r.integrity_valid ? 'bi-check-circle-fill' : 'bi-exclamation-octagon-fill'),
     document.createTextNode(r.integrity_valid ? ` 무결성 정상 (${r.total_logs}건)` : ` 변조 의심 ${r.issues.length}건`));
 }
+async function loadDebug() {
+  const [chk, ev] = await Promise.all([api('/debug/selfcheck'),
+    api(`/debug/events?limit=300${$('dbg-errors').checked ? '&level=warning' : ''}${$('dbg-run').value ? `&run_id=${encodeURIComponent($('dbg-run').value)}` : ''}`)]);
+  const cl = $('dbg-checks'); cl.replaceChildren();
+  chk.checks.forEach((c) => {
+    const li = el('li', null, 'list-group-item d-flex gap-2');
+    li.append(icon(c.ok ? 'bi-check-circle-fill text-success' : 'bi-x-octagon-fill text-danger'), el('strong', c.name),
+      el('span', [c.detail, c.hint].filter(Boolean).join(' — '), 'text-body-secondary small'));
+    cl.append(li);
+  });
+  const tb = $('dbg-body'); tb.replaceChildren();
+  ev.events.slice().reverse().forEach((e) => {
+    const tr = document.createElement('tr'); if (e.level === 'error') tr.className = 'table-danger'; else if (e.level === 'warning') tr.className = 'table-warning';
+    const extra = Object.entries(e).filter(([k]) => !['seq', 'ts', 'run_id', 'component', 'step', 'level', 'ms'].includes(k)).map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`).join(' ');
+    const run = el('a', e.run_id || '-', 'small'); run.href = '#'; run.addEventListener('click', (x) => { x.preventDefault(); $('dbg-run').value = e.run_id || ''; guarded(loadDebug); });
+    tr.append(cell(e.ts.slice(11, 23), 'small text-nowrap'), cell(run), cell(`${e.component}/${e.step}`, 'text-nowrap'), cell(e.ms != null ? `${e.ms}ms` : '', 'small text-end'), cell(extra, 'small text-break'));
+    tb.append(tr);
+  });
+  if (!ev.events.length) { const tr = document.createElement('tr'); const td = el('td', '이벤트가 없습니다. 연결 테스트·조회를 실행해 보세요.', 'text-center text-body-secondary py-4'); td.colSpan = 5; tr.append(td); tb.append(tr); }
+}
 async function loadUsers() {
   const { users } = await api('/users'); const tb = $('users-body'); tb.replaceChildren();
   users.forEach((u) => {
@@ -366,6 +390,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('btn-scan-all').addEventListener('click', (e) => guarded(() => busy(e.currentTarget, async () => { const r = await api('/scan', 'POST'); toast(`${r.scanned}대 조회 완료`); await loadServers(); })));
   $('btn-export').addEventListener('click', () => { window.location = '/export.csv'; });
   $('btn-verify').addEventListener('click', () => guarded(verifyAudit));
+  $('btn-dbg-refresh').addEventListener('click', () => guarded(loadDebug));
+  $('dbg-errors').addEventListener('change', () => guarded(loadDebug));
+  $('dbg-run').addEventListener('change', () => guarded(loadDebug));
+  $('btn-dbg-bundle').addEventListener('click', () => { window.location = '/debug/bundle'; });
   $('server-form').addEventListener('submit', registerServer);
   $('btn-probe').addEventListener('click', probeServer);
   $('server-modal').addEventListener('hidden.bs.modal', () => $('probe-result').replaceChildren());

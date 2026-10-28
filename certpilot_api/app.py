@@ -1,11 +1,16 @@
 """CertPilot REST API (Flask).  create_app() 팩토리로 설정·의존성을 주입한다."""
+import json
 import os
+import time
+import uuid
 from functools import wraps
 from pathlib import Path
 from typing import Callable, Optional
 
+from werkzeug.exceptions import HTTPException
 from flask import Flask, Response, g, jsonify, request, send_from_directory
 
+from certpilot_core import diag, trace
 from certpilot_core.audit_storage import AuditLogWriter
 from certpilot_core.auth import ADMIN, OPERATOR, AuthError, AuthService
 from certpilot_core.osprofiles import list_profiles
@@ -88,9 +93,22 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
     app = Flask(__name__, static_folder=None)
     app.extensions["certpilot"] = {"store": store, "audit": audit, "service": service, "auth": auth}
 
+    trace.configure_from_env()
+
     # ---------------------------------------------------------------- 공통
+    @app.before_request
+    def _begin():
+        g.req_id = request.headers.get("X-Request-Id", "")[:32] or uuid.uuid4().hex[:8]
+        g.t0 = time.monotonic()
+        g.run_token = trace.run_id_var.set(f"req-{g.req_id}")
+
     @app.after_request
     def security_headers(resp):
+        resp.headers["X-Request-Id"] = getattr(g, "req_id", "-")
+        if request.path != "/health" and not request.path.startswith(("/static/", "/debug")) and request.path != "/":
+            trace.event("api", "request", "warning" if resp.status_code >= 400 else "info", method=request.method,
+                        path=request.path, status=resp.status_code, user=(getattr(g, "user", None) or {}).get("username"),
+                        ms=round((time.monotonic() - getattr(g, "t0", time.monotonic())) * 1000))
         resp.headers["X-Content-Type-Options"] = "nosniff"
         resp.headers["X-Frame-Options"] = "DENY"
         resp.headers["Referrer-Policy"] = "no-referrer"
@@ -101,6 +119,15 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
         if request.path not in ("/",) and not request.path.startswith("/static/"):
             resp.headers["Cache-Control"] = "no-store"
         return resp
+
+    @app.teardown_request
+    def _end(_exc):
+        tok = g.pop("run_token", None)
+        if tok is not None:
+            try:
+                trace.run_id_var.reset(tok)
+            except ValueError:
+                pass
 
     def token_from_request() -> Optional[str]:
         h = request.headers.get("Authorization", "")
@@ -138,6 +165,16 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
     def _a(e):
         status = {"invalid": 401, "locked": 423, "exists": 409}.get(e.code, 422)
         return _err(e.code, e.message, status)
+
+    @app.errorhandler(Exception)
+    def _unexpected(e):
+        if isinstance(e, HTTPException):
+            return e
+        import traceback
+        trace.event("api", "unhandled_exception", "error", path=request.path, error=type(e).__name__, message=str(e),
+                    traceback=traceback.format_exc()[-1500:])
+        resp = _err("internal", f"서버 내부 오류입니다. 요청 ID {g.get('req_id', '-')} 로 관리자 화면 '진단'에서 원인을 확인하세요.", 500)
+        return resp
 
     def body() -> dict:
         data = request.get_json(silent=True)
@@ -307,6 +344,50 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
     @require(ADMIN)
     def audit_verify():
         return jsonify(audit.verify_integrity())
+
+    # ---------------------------------------------------------------- 진단 (관리자)
+    def self_checks() -> list:
+        c = []
+        try:
+            store.list_servers()
+            c.append(diag.check("db", True, "읽기 가능"))
+        except Exception as e:   # noqa: BLE001
+            c.append(diag.check("db", False, f"{type(e).__name__}: {e}", "데이터 디렉터리·디스크 권한 확인"))
+        c.append(diag.check("data_dir_writable", os.access(data_dir, os.W_OK), str(data_dir), "디스크 마운트·소유권 확인"))
+        v = audit.verify_integrity()
+        c.append(diag.check("audit_chain", bool(v.get("integrity_valid")), json.dumps(v, ensure_ascii=False)[:200], "감사 로그 변조·손상 여부 확인"))
+        c.append(diag.check("admin_exists", any(u["role"] == ADMIN for u in store.list_users()), "", "CERTPILOT_ADMIN_* 설정 확인"))
+        has_key = bool(os.environ.get("CERTPILOT_SSH_PRIVATE_KEY") or os.environ.get("CERTPILOT_SSH_PRIVATE_KEY_B64"))
+        c.append(diag.check("ssh_agent", bool(os.environ.get("SSH_AUTH_SOCK")) or not has_key,
+                            "SSH_AUTH_SOCK 설정됨" if os.environ.get("SSH_AUTH_SOCK") else "에이전트 없음",
+                            "CERTPILOT_SSH_PRIVATE_KEY[_B64] 형식 확인(시작 로그 참조)"))
+        return c
+
+    @app.get("/debug/events")
+    @require(ADMIN)
+    def debug_events():
+        evs = trace.TRACER.events(limit=max(1, min(request.args.get("limit", 200, type=int), 1000)),
+                                  component=request.args.get("component"), level=request.args.get("level"),
+                                  run_id=request.args.get("run_id"), since_seq=request.args.get("since", 0, type=int))
+        return jsonify({"events": evs})
+
+    @app.get("/debug/selfcheck")
+    @require(ADMIN)
+    def debug_selfcheck():
+        checks = self_checks()
+        return jsonify({"checks": checks, **diag.summarize(checks)})
+
+    @app.get("/debug/bundle")
+    @require(ADMIN)
+    def debug_bundle():
+        checks = self_checks()
+        servers = [{k: s.get(k) for k in ("name", "hostname", "port", "account", "os_type", "status", "status_label",
+                                         "cause_label", "last_scanned_at", "certificate_count")} for s in service.overview()]
+        audit.write({"event_type": "debug_bundle", "description": "download", "details": {"actor": g.user["username"]}})
+        payload = {"version": VERSION, "environment": diag.environment_info(), "checks": checks, "servers": servers,
+                   "events": trace.TRACER.events(limit=500)}
+        return Response(diag.dumps(payload), mimetype="application/json",
+                        headers={"Content-Disposition": "attachment; filename=certpilot-debug.json"})
 
     return app
 

@@ -9,7 +9,9 @@ from datetime import datetime, timezone
 import click
 import yaml
 
-from . import __version__
+from certpilot_core import diag as cpdiag, trace
+
+from . import __version__, diagnose as dg
 from .backup import BackupError, create_backup, restore_backup
 from .bundle import BundleError, key_permission_problems, load_bundle
 from .config import HOST_RE, NAME_RE, ConfigError, load_config
@@ -29,9 +31,12 @@ STATUS_LABEL = STATUS_KO
 
 def _cfg(obj):
     try:
-        return load_config(obj["config"])
+        cfg = load_config(obj["config"])
     except ConfigError as e:
         raise click.ClickException(str(e)) from None
+    if not trace.TRACER.path and cfg.certs:      # 항상 기록(파일 0600, 5MB 회전): 실패 후에도 원인을 볼 수 있게
+        trace.TRACER.configure(path=dg.trace_path(cfg.certs[0].state_dir))
+    return cfg
 
 
 def _sets(obj):
@@ -83,13 +88,18 @@ def _worst(codes):
 @click.option("-c", "--config", "config", required=True, envvar="CERTDEPLOY_CONFIG", type=click.Path(), help="설정 파일(YAML)")
 @click.option("--cert", "cert_name", default=None, help="여러 인증서 중 하나만 대상으로 함")
 @click.option("-v", "--verbose", is_flag=True)
+@click.option("--debug", is_flag=True, envvar="CERTDEPLOY_DEBUG", help="단계별 진단 이벤트를 실시간 출력하고 <state_dir>/trace.jsonl 에 기록")
 @click.version_option(__version__)
 @click.pass_context
-def main(ctx, config, cert_name, verbose):
+def main(ctx, config, cert_name, verbose, debug):
     """인증서 발급(lego)·자동 배포·검증·롤백."""
     logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO, stream=sys.stderr,
                         format="%(asctime)s %(levelname)s %(message)s")
-    ctx.obj = {"config": config, "cert": cert_name}
+    ctx.obj = {"config": config, "cert": cert_name, "debug": debug}
+    trace.configure_from_env(prefix="CERTDEPLOY")
+    trace.run_id_var.set(f"{ctx.invoked_subcommand or 'cli'}-{os.urandom(3).hex()}")
+    if debug:
+        trace.TRACER.configure(echo=lambda line: print(line, file=sys.stderr, flush=True))
 
 
 # ------------------------------------------------------------------ 점검
@@ -386,9 +396,12 @@ def import_cmd(obj, files, key_file, key_pass_env, pfx, pfx_pass_env, dry_run, d
                 if not os.path.exists(used_pending):
                     raise ManualError("개인키가 없습니다 — 먼저 `certdeploy csr` 로 키/CSR 을 만들었거나 --key-file 을 지정해야 합니다")
                 key = load_key_file(used_pending)
-        bundle, notes = build_bundle(certs, key)
+        with trace.span("import", "build_bundle", files=len(certs), pfx=bool(pfx), pending_key=bool(used_pending)) as ctx:
+            bundle, notes = build_bundle(certs, key)
+            ctx.update(serial=f"{bundle.serial:x}", chain=len(bundle.chain), notes=notes)
     except ManualError as e:
         click.echo(f"가져오기 실패: {e}", err=True)
+        trace.event("import", "failed", "error", message=str(e))
         sys.exit(2)
     click.echo(f"서버 인증서: 일련번호 {bundle.serial:x}, 유효 {bundle.not_before:%Y-%m-%d} ~ {bundle.not_after:%Y-%m-%d} (남은 {bundle.days_left():.0f}일)")
     click.echo(f"SAN: {', '.join(bundle.names)}   중간 CA {len(bundle.chain)}개")
@@ -399,7 +412,9 @@ def import_cmd(obj, files, key_file, key_pass_env, pfx, pfx_pass_env, dry_run, d
         return
     os.makedirs(os.path.dirname(cs.cert_file), mode=0o700, exist_ok=True)
     os.makedirs(os.path.dirname(cs.key_file), mode=0o700, exist_ok=True)
-    backups = install_bundle(cs.cert_file, cs.key_file, bundle)
+    with trace.span("import", "install", cert_file=cs.cert_file, key_file=cs.key_file) as ctx:
+        backups = install_bundle(cs.cert_file, cs.key_file, bundle)
+        ctx["backups"] = backups
     click.echo(f"설치 완료: {cs.cert_file} (서버+중간 CA), {cs.key_file} (0600)")
     for b in backups:
         click.echo(f"이전 파일 백업: {b}")
@@ -410,6 +425,44 @@ def import_cmd(obj, files, key_file, key_pass_env, pfx, pfx_pass_env, dry_run, d
             pass
     if do_deploy:
         sys.exit(_run_deploy(cfg, cs, _bundle(cs), force_deploy, False, (), False, action="import"))
+
+
+@main.command("trace")
+@click.option("--run", "run_id", help="작업 ID 로 필터")
+@click.option("--errors", is_flag=True, help="경고·오류만")
+@click.option("--debug", "show_debug", is_flag=True, help="상세(.start) 이벤트 포함")
+@click.option("-n", "count", default=60, show_default=True)
+@click.pass_obj
+def trace_cmd(obj, run_id, errors, show_debug, count):
+    """최근 실행의 단계별 진단 이벤트(성공·실패·소요시간)를 본다. 비밀값은 마스킹되어 있다."""
+    cfg = _cfg(obj)
+    evs = []
+    for cs in cfg.certs:
+        evs += trace.read_file(dg.trace_path(cs.state_dir))
+    evs = [e for e in evs if (not run_id or e.get("run_id") == run_id) and (not errors or e["level"] in ("warning", "error"))
+           and (show_debug or e["level"] != "debug")]
+    if not evs:
+        click.echo("기록된 이벤트가 없습니다. 먼저 명령을 실행하세요(항상 기록됩니다).")
+    for e in evs[-count:]:
+        click.echo(trace.format_event(e))
+
+
+@main.command()
+@click.option("--out", type=click.Path(), help="진단 번들을 저장할 JSON 파일(생략하면 요약만 출력)")
+@click.option("--prometheus", help="Prometheus 주소(예: http://127.0.0.1:9090) — 수집 대상·규칙·certdeploy 지표 점검")
+@click.option("--alertmanager", help="Alertmanager 주소")
+@click.option("--pushgateway", help="Pushgateway 주소")
+@click.pass_obj
+def diagnose(obj, out, prometheus, alertmanager, pushgateway):
+    """설정·인증서·마지막 실행·트레이스·감시 스택을 점검해 문제 목록과(선택) 공유용 번들을 만든다. 비밀값 제외."""
+    b = dg.build(obj["config"], prometheus, alertmanager, pushgateway)
+    for c in b["checks"]:
+        click.echo(f"[{'OK' if c['ok'] else '문제'}] {c['name']}" + (f" — {c['detail']}" if c["detail"] else "") + (f"  → {c['hint']}" if c["hint"] else ""))
+    if out:
+        with open(os.open(out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w", encoding="utf-8") as f:
+            f.write(cpdiag.dumps(b))
+        click.echo(f"진단 번들 저장: {out} (비밀값 마스킹됨)")
+    sys.exit(0 if b["ok"] else 1)
 
 
 @main.command("verify-audit")

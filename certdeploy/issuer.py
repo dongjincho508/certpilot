@@ -9,6 +9,8 @@ import subprocess
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Dict, List, Optional, Tuple
 
+from certpilot_core import trace
+
 STAGING = "https://acme-staging-v02.api.letsencrypt.org/directory"
 
 
@@ -167,12 +169,15 @@ class LegoIssuer:
                 env.update(parse_env_file(self.cfg["env_file"]))
             except OSError as e:
                 raise IssueError(f"lego env_file 을 읽을 수 없습니다: {e}")
+        trace.event("issue", "lego_start", action=action, cmd=" ".join(cmd), staging=staging)
         try:
             r = self.runner(cmd, env, self.timeout)
         except FileNotFoundError:
             raise IssueError(f"lego 실행 파일을 찾을 수 없습니다: {cmd[0]}")
         except subprocess.TimeoutExpired:
             raise IssueError(f"lego 가 {self.timeout}초 안에 끝나지 않았습니다")
+        trace.event("issue", "lego_done", "info" if r.returncode == 0 else "error", action=action, rc=r.returncode,
+                    output=" | ".join((r.stderr or r.stdout or "").strip().splitlines()[-5:]))
         if r.returncode != 0:
             tail = " | ".join((r.stderr or r.stdout or "").strip().splitlines()[-3:])
             raise IssueError(f"lego {action} 실패(종료 코드 {r.returncode}): {tail[:300]}")

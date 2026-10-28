@@ -13,6 +13,8 @@ from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from typing import Callable, List, Optional
 
+from certpilot_core import trace
+
 log = logging.getLogger("certdeploy")
 
 
@@ -41,6 +43,7 @@ class AlertmanagerNotifier(NullNotifier):
             urllib.request.urlopen(req, timeout=self.timeout).read()
         except OSError as e:
             log.warning("Alertmanager 알림 전송 실패: %s", type(e).__name__)
+            trace.event("notify", "alertmanager", "error", url=self.url, error=type(e).__name__, message=str(e))
 
     def _alert(self, target, starts_at, ends_at, summary="", description="", severity="critical"):
         return {"labels": {"alertname": self.ALERT, "severity": severity, "target": target, "service": "certdeploy"},
@@ -89,6 +92,7 @@ class SmtpNotifier(NullNotifier):
                 s.send_message(msg)
         except (OSError, smtplib.SMTPException) as e:
             log.warning("메일 전송 실패: %s", type(e).__name__)
+            trace.event("notify", "smtp", "error", host=c.host, port=c.port, error=type(e).__name__, message=str(e))
 
     def fire(self, target, summary, description, severity="critical"):
         self._send(f"{severity.upper()} {summary}", f"{summary}\n\n{description}\n")
@@ -132,6 +136,7 @@ class WebhookNotifier(NullNotifier):
             urllib.request.urlopen(req, timeout=self.timeout).read()
         except OSError as e:
             log.warning("웹훅 알림 전송 실패: %s", type(e).__name__)
+            trace.event("notify", "webhook", "error", error=type(e).__name__, message=str(e))
 
     def fire(self, target, summary, description, severity="critical"):
         self._post(summary, description, False)

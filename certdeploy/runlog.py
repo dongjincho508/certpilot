@@ -9,6 +9,8 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
+from certpilot_core import trace
+
 from .engine import TargetResult
 
 log = logging.getLogger("certdeploy")
@@ -127,9 +129,11 @@ def push_metrics(url: str, cert: str, text: str, user: Optional[str] = None, pas
         req.add_header("Authorization", "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode())
     try:
         urllib.request.urlopen(req, timeout=timeout).read()
+        trace.event("metrics", "pushgateway", url=url, cert=cert, bytes=len(text))
         return True
     except OSError as e:
         log.warning("Pushgateway 전송 실패: %s", type(e).__name__)
+        trace.event("metrics", "pushgateway", "error", url=url, error=type(e).__name__, message=str(e))
         return False
 
 
@@ -162,21 +166,27 @@ def finish_run(certset, bundle, results, started, notifier, env=os.environ, acti
         save_report(certset.state_dir, rep)
     except OSError as e:
         log.warning("보고서 저장 실패: %s", e)
+        trace.event("report", "save", "error", error=type(e).__name__, message=str(e))
     try:
         audit_events(certset.audit_dir, rep)
+        trace.event("audit", "write", dir=certset.audit_dir, entries=len(rep["results"]) + 1)
     except Exception as e:   # noqa: BLE001 — 감사 로그 문제가 배포 결과를 바꾸지 않게 한다
         log.warning("감사 로그 기록 실패: %s", type(e).__name__)
+        trace.event("audit", "write", "error", error=type(e).__name__, message=str(e))
     n = certset.notify
     text = metrics_text(rep, {}, rep.get("last_success_ts"), issue_failures, finished)
     if n.metrics_file:
         try:
             write_metrics_file(n.metrics_file, text)
+            trace.event("metrics", "textfile", path=n.metrics_file, bytes=len(text))
         except OSError as e:
+            trace.event("metrics", "textfile", "error", path=n.metrics_file, error=type(e).__name__, message=str(e))
             log.warning("메트릭 파일 기록 실패: %s", e)
     if n.pushgateway_url:
         pw = env.get(n.pushgateway_password_env or "") if n.pushgateway_password_env else None
         push_metrics(n.pushgateway_url, certset.name, text, n.pushgateway_user, pw)
     changed = any(r.status != "skipped" for r in results)
+    trace.event("report", "finish", ok=rep["ok"], action=action, targets=[(r.name, r.status) for r in results], notify=bool(changed or not rep["ok"]))
     if changed or not rep["ok"]:
         notifier.summary(f"인증서 배포 {'완료' if rep['ok'] else '문제'} — {certset.name}", report_markdown(rep), rep["ok"])
     return rep

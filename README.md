@@ -1,7 +1,7 @@
 # CertPilot
 
 > **프로젝트 방향 변경 (2026-10-28)**: 인증서 만료 감시는 오픈소스 **Prometheus + ssl_exporter + Grafana** 스택으로 진행합니다 → **[monitoring/](monitoring/README.md)** (설정·알림 규칙·대시보드·교체 체크리스트 도구).
-> 아래의 CertPilot 앱(SSH 파일 조회·감사 로그)은 **보류** 상태로 보존합니다. 근거와 재개 조건은 [ROADMAP](docs/ROADMAP.md), **인증서 발급·자동 배포 도구는 [certdeploy](docs/ops/certdeploy.md)**, 갱신 자동화 설계는 [docs/ops/acme-automation.md](docs/ops/acme-automation.md), 교체 절차는 [docs/ops/cert-rotation-checklist.md](docs/ops/cert-rotation-checklist.md).
+> 아래의 CertPilot 앱(SSH 파일 조회·감사 로그)은 **보류** 상태로 보존합니다. 근거와 재개 조건은 [ROADMAP](docs/ROADMAP.md), **인증서 발급·자동 배포 도구는 [certdeploy](docs/ops/certdeploy.md)**, 갱신 자동화 설계는 [docs/ops/acme-automation.md](docs/ops/acme-automation.md), 교체 절차는 [docs/ops/cert-rotation-checklist.md](docs/ops/cert-rotation-checklist.md). **문제 추적·디버깅(진단 탭, trace/diagnose)은 [docs/ops/debugging.md](docs/ops/debugging.md)**.
 
 Linux 서버에 설치된 SSL/TLS 인증서를 **SSH(디스크 파일)와 TLS 포트(실행 중 서비스)** 로 조회하고, 만료 위험을 한 화면에서 보여주는 MVP.
 
