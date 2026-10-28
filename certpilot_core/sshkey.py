@@ -61,14 +61,27 @@ def load_and_validate(key_text: str) -> None:
         raise KeyError_("지원하지 않는 키 형식입니다 (ed25519/RSA/ECDSA 권장)")
 
 
+def _decode_b64(value: str) -> str:
+    """base64 값을 키 텍스트로 복원. 이미 키 원문(BEGIN 헤더)이면 그대로 쓴다.
+    Windows certutil 의 -----BEGIN CERTIFICATE----- 래퍼 등 헤더 줄과 공백·줄바꿈은 무시한다."""
+    if "PRIVATE KEY-----" in value or "\\n" in value and "BEGIN" in value:
+        return value  # 사용자가 B64 칸에 키 원문을 붙여넣은 경우
+    body = "".join(l for l in value.splitlines() if not l.strip().startswith("-----"))
+    body = re.sub(r"\s+", "", body)
+    try:
+        decoded = base64.b64decode(body + "=" * (-len(body) % 4), validate=True)
+        return decoded.decode("utf-8")
+    except Exception:
+        raise KeyError_(
+            "CERTPILOT_SSH_PRIVATE_KEY_B64 가 올바른 base64 가 아닙니다. 키 파일을 한 줄 base64 로 변환한 값을 넣으세요 "
+            "(Windows PowerShell: [Convert]::ToBase64String([IO.File]::ReadAllBytes('certpilot_scan'))")
+
+
 def key_from_env(environ=os.environ) -> str:
     b64 = environ.get("CERTPILOT_SSH_PRIVATE_KEY_B64", "").strip()
     raw = environ.get("CERTPILOT_SSH_PRIVATE_KEY", "")
     if b64:
-        try:
-            raw = base64.b64decode(b64, validate=False).decode()
-        except Exception:
-            raise KeyError_("CERTPILOT_SSH_PRIVATE_KEY_B64 가 올바른 base64 가 아닙니다")
+        raw = _decode_b64(b64)
     if not raw.strip():
         raise KeyError_("CERTPILOT_SSH_PRIVATE_KEY(또는 _B64)가 비어 있습니다")
     key = normalize_private_key(raw)
