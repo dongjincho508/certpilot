@@ -1,0 +1,81 @@
+# 인증서 알림 라우팅. 심각도별로 수신 채널·반복 주기를 다르게 한다.
+#  critical(3일 이내 만료·만료·수집 중단) → 메일 + 웹훅, 4시간마다 반복
+#  warning (14/7일 이내·갱신 지연·조회 실패) → 메일, 24시간마다 반복
+#  info    (30일 이내·구형 TLS)             → 메일(묶음), 7일마다 반복
+# 비밀 값(SMTP 비밀번호, 웹훅 URL)은 이 파일에 쓰지 않고 ./secrets/ 의 파일로 둔다.
+global:
+  resolve_timeout: 5m
+  smtp_smarthost: "smtp.univ.example:587"       # TODO: 교내 메일 릴레이 주소
+  smtp_from: "cert-monitor@univ.example"        # TODO: 발신 주소
+  smtp_auth_username: "cert-monitor@univ.example"   # 인증이 필요 없는 내부 릴레이면 이 줄과 아래 password_file 줄을 삭제
+  smtp_auth_password_file: /etc/alertmanager/secrets/smtp_password
+  smtp_require_tls: true
+
+templates:
+  - /etc/alertmanager/templates/*.tmpl
+
+route:
+  receiver: ops-warning
+  group_by: [alertname, instance]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 24h
+  routes:
+    - matchers: ['severity="critical"']
+      receiver: ops-critical
+      repeat_interval: 4h
+    - matchers: ['severity="warning"']
+      receiver: ops-warning
+      repeat_interval: 24h
+    - matchers: ['severity="info"']
+      receiver: ops-info
+      group_by: [alertname]          # 정보성은 알림 종류별로 묶어서 한 통으로
+      group_wait: 10m
+      group_interval: 1h
+      repeat_interval: 168h
+
+inhibit_rules:
+  # 이미 임박/만료 경고가 나간 인증서에는 '갱신 지연' 알림을 중복으로 보내지 않는다
+  - source_matchers: ['alertname=~"CertExpired|CertExpiresIn(1Day|3Days|7Days|14Days)"']
+    target_matchers: ['alertname="CertRenewalLagging"']
+    equal: [instance, serial_no]
+  # 연결 자체가 안 되면(수집 실패/조회 실패) 같은 대상의 다른 알림은 억제
+  - source_matchers: ['alertname="CertTargetScrapeFailed"']
+    target_matchers: ['alertname="CertProbeFailed"']
+    equal: [instance]
+  # exporter 전체가 죽으면 개별 수집 실패 알림은 억제
+  - source_matchers: ['alertname="CertExporterDown"']
+    target_matchers: ['alertname=~"CertTargetScrapeFailed|CertProbeFailed"']
+
+receivers:
+  - name: ops-critical
+    email_configs:
+      - to: "cert-admin@univ.example"             # TODO: 담당자 메일(여러 명이면 쉼표로)
+        send_resolved: true
+        headers:
+          subject: '{{ template "cert.subject" . }}'
+        html: '{{ template "cert.email.html" . }}'
+    webhook_configs:
+      # 팀 메신저/ITSM 연동용. URL 은 secrets/webhook_url 파일에 한 줄로 둔다.
+      - url_file: /etc/alertmanager/secrets/webhook_url
+        send_resolved: true
+
+  # --- 메신저 연동 예시(필요하면 ops-critical 에 추가; Alertmanager 0.28 에서 설정 키 유효성 확인됨) ---
+  #   Teams(Workflows 웹훅):  msteamsv2_configs: [{webhook_url_file: /etc/alertmanager/secrets/teams_webhook, send_resolved: true}]
+  #   Slack/Mattermost 호환:   slack_configs:     [{api_url_file: /etc/alertmanager/secrets/slack_webhook, channel: "#cert-alerts", send_resolved: true}]
+
+  - name: ops-warning
+    email_configs:
+      - to: "cert-admin@univ.example"
+        send_resolved: true
+        headers:
+          subject: '{{ template "cert.subject" . }}'
+        html: '{{ template "cert.email.html" . }}'
+
+  - name: ops-info
+    email_configs:
+      - to: "cert-admin@univ.example"
+        send_resolved: false
+        headers:
+          subject: '{{ template "cert.subject" . }}'
+        html: '{{ template "cert.email.html" . }}'

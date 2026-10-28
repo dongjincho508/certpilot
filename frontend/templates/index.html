@@ -139,7 +139,15 @@
             <div class="col-md-4"><label class="form-label" for="f-warn">경고 기준 (일)</label><input class="form-control" id="f-warn" type="number" min="1" max="365" value="30"></div>
             <div class="col-md-6"><label class="form-label" for="f-tls">TLS 포트 (쉼표)</label><input class="form-control" id="f-tls" placeholder="443, 8443"><div class="form-text">실행 중 서비스 인증서를 직접 조회</div></div>
             <div class="col-md-6"><label class="form-label" for="f-group">그룹</label><input class="form-control" id="f-group"></div>
-            <div class="col-12"><label class="form-label" for="f-paths">추가 조회 경로 (줄바꿈 구분, 절대 경로)</label><textarea class="form-control" id="f-paths" rows="2" placeholder="/srv/app/tls"></textarea></div>
+            <div class="col-12">
+                <div class="d-flex justify-content-between align-items-end mb-1">
+                    <label class="form-label mb-0" for="f-paths">추가 조회 경로 (줄바꿈 구분, 절대 경로)</label>
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="btn-probe"><i class="bi bi-plug me-1"></i>연결 테스트 · 경로 탐지</button>
+                </div>
+                <textarea class="form-control" id="f-paths" rows="2" placeholder="/srv/app/tls"></textarea>
+                <div class="form-text">표준 경로(nginx·apache·letsencrypt 등)는 자동 조회됩니다. 그 밖의 경로만 추가하세요. 탐지 버튼은 서버를 저장하지 않고 호스트·포트·계정으로 접속해 확인합니다.</div>
+                <div id="probe-result" class="mt-2" aria-live="polite"></div>
+            </div>
             <div class="col-12"><label class="form-label" for="f-memo">메모</label><input class="form-control" id="f-memo"></div>
             <div class="col-12"><div class="alert alert-info small mb-0"><i class="bi bi-info-circle me-1"></i>SSH 인증은 ssh-agent 개인키만 사용합니다. 패스워드는 저장·사용하지 않습니다.</div></div>
         </div></div>

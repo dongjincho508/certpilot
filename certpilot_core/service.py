@@ -9,7 +9,8 @@ from typing import Callable, Dict, List, Optional
 
 from . import status as st
 from .audit_storage import AuditLogWriter
-from .remote import CAUSE_INFO, ParamikoExecutor, RemoteExecutor
+from .remote import CAUSE_INFO, ParamikoExecutor, RemoteExecutor, is_safe_path
+from .osprofiles import AUTO, VALID_OS_TYPES
 from .scanner import Scanner, Target
 from .store import Store
 
@@ -54,15 +55,25 @@ def validate_server(data: dict) -> dict:
         raise ValidationError("포트 범위는 1~65535 입니다.")
     if not 1 <= warn_days <= 365:
         raise ValidationError("경고 기준은 1~365일이어야 합니다.")
+    os_type = (data.get("os_type") or AUTO)
+    if os_type not in VALID_OS_TYPES:
+        raise ValidationError("지원하지 않는 OS 선택입니다.")
     paths = []
     for p in data.get("paths", []):
-        if not isinstance(p, str) or not p.startswith("/") or ".." in p.split("/") \
-                or re.search(r"[;&|`$<>()\\\s\"'*?{}\[\]~!#]", p):
-            raise ValidationError(f"조회 경로가 올바르지 않습니다: 절대 경로만 허용합니다.")
+        if not is_safe_path(p):
+            raise ValidationError("조회 경로가 올바르지 않습니다: 절대 경로만 허용합니다.")
         paths.append(posixpath.normpath(p))
     return {"name": name, "hostname": hostname, "port": port, "account": account,
-            "paths": paths, "tls_ports": tls_ports, "warn_days": warn_days,
+            "paths": paths, "tls_ports": tls_ports, "warn_days": warn_days, "os_type": os_type,
             "group": (data.get("group") or None), "memo": (data.get("memo") or None)}
+
+
+def validate_connection(data: dict) -> Target:
+    """연결 테스트용 최소 검증(서버명 불필요). 저장하지 않는다."""
+    v = validate_server({"name": "probe", **{k: data.get(k) for k in
+                         ("hostname", "port", "account", "username", "tls_ports", "paths", "os_type") if k in data}})
+    return Target(server_id="probe", name="probe", hostname=v["hostname"], port=v["port"],
+                  account=v["account"], paths=v["paths"], tls_ports=v["tls_ports"], os_type=v["os_type"])
 
 
 class CertPilotService:
@@ -106,7 +117,7 @@ class CertPilotService:
         prev = self.store.get_scan(server_id)
         target = Target(server_id=s["id"], name=s["name"], hostname=s["hostname"], port=s["port"],
                         account=s["account"], paths=s["paths"], tls_ports=s["tls_ports"],
-                        warn_days=s["warn_days"])
+                        warn_days=s["warn_days"], os_type=s.get("os_type", AUTO))
         res = self.scanner.scan(target, prev["file_hashes"] if prev else None)
         out = res.to_dict()
         self.store.save_scan(server_id, out["scanned_at"], out["status"], out, res.file_hashes)
@@ -128,6 +139,15 @@ class CertPilotService:
         ids = [s["id"] for s in self.store.list_servers()]
         with ThreadPoolExecutor(max_workers=MAX_PARALLEL) as pool:
             return list(pool.map(lambda i: self.scan_server(i, actor), ids))
+
+    def probe_server(self, data: dict, actor: str) -> dict:
+        """서버를 저장하지 않고 연결 가능 여부와 조회 가능한 경로를 확인한다(등록 전 점검)."""
+        target = validate_connection(data)
+        out, raw = self.scanner.check_connection(target)
+        self.audit.write({"event_type": "server_probe", "description": f"{target.hostname}:{target.port}",
+                          "details": {"actor": actor, "connected": out["connected"], "cause": out["cause"],
+                                      "raw_error": raw}})
+        return out
 
     # ---- 현황
     def overview(self, status: Optional[str] = None, group: Optional[str] = None) -> List[dict]:

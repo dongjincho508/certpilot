@@ -16,20 +16,13 @@ from . import status as st
 from .cert_parser import (CertificateInfo, extract_pem_certs, parse_der_certificate,
                           parse_pem_blocks)
 from .remote import (CAUSE_INFO, RETRYABLE, FailureCause, PolicyExecutor, PolicyViolation,
-                     RemoteError, RemoteExecutor, parse_openssh_version, path_allowed)
+                     RemoteError, RemoteExecutor, is_key_path, is_safe_path, parse_openssh_version,
+                     path_allowed)
+from .osprofiles import (AUTO, GENERIC, OS_RELEASE, PROFILES, SYSTEM_CA_FILES, OSProfile,
+                         detect_profile)
 from .status import Status
 
-# 조직 표준 경로: 미리 정의된 후보의 존재 여부만 확인하며 find/전체 탐색은 하지 않는다 (B-6)
-STANDARD_CANDIDATES = [
-    "/etc/nginx/ssl", "/etc/apache2/ssl", "/etc/httpd/conf/ssl", "/etc/pki/tls/certs",
-    "/etc/letsencrypt/live", "/etc/ssl/local",
-]
-WEBCFG_FILES = ["/etc/nginx/nginx.conf", "/etc/httpd/conf/httpd.conf", "/etc/apache2/apache2.conf"]
-WEBCFG_DIRS = ["/etc/nginx/conf.d", "/etc/nginx/sites-enabled",
-               "/etc/apache2/sites-enabled", "/etc/httpd/conf.d"]
-# 웹 설정에서 추출한 경로를 등록 후보로 제시할 수 있는 루트 (그 밖은 제시하지 않음)
-SUGGEST_ROOTS = ["/etc/ssl", "/etc/pki", "/etc/letsencrypt", "/etc/nginx", "/etc/apache2",
-                 "/etc/httpd", "/opt", "/usr/local/share/ca-certificates"]
+# 표준 경로는 OS 계열별 프로필(osprofiles)에서 가져온다. 미리 정의된 후보의 존재 여부만 확인하며 find/전체 탐색은 하지 않는다 (B-6)
 CERT_EXT = (".crt", ".pem", ".cer", ".cert")
 KEYSTORE_EXT = (".p12", ".pfx", ".jks")
 MAX_FILE_BYTES = 262144
@@ -51,6 +44,7 @@ class Target:
     paths: List[str] = field(default_factory=list)       # 서버별 예외 경로 (파일 또는 디렉터리)
     tls_ports: List[int] = field(default_factory=list)   # 실행 중 서비스 조회 포트
     warn_days: int = st.DEFAULT_WARN_DAYS
+    os_type: str = AUTO                                  # auto | debian | rhel | suse | alpine | generic
 
 
 @dataclass
@@ -93,6 +87,7 @@ class ScanResult:
     suggested_paths: List[str] = field(default_factory=list)
     file_hashes: Dict[str, str] = field(default_factory=dict)  # path -> sha256 (S-4)
     hostkey_blocked: bool = False
+    os_info: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         now = self.scanned_at
@@ -103,6 +98,7 @@ class ScanResult:
             "cause_label": CAUSE_INFO[self.cause][0] if self.cause else None,
             "action": CAUSE_INFO[self.cause][1] if self.cause else None,
             "hostkey_blocked": self.hostkey_blocked,
+            "os": self.os_info,
             "suggested_paths": self.suggested_paths,
             "certificates": [r.to_dict(now) for r in sorted(
                 self.records, key=lambda r: (st.sort_key(r.status), r.sources))],
@@ -149,23 +145,49 @@ class Scanner:
         self.retries = retries
         self.backoff = backoff
 
+    # --- OS 프로필
+    @staticmethod
+    def _whitelist(target: Target, extra: Sequence[str]) -> List[str]:
+        """명시한 OS 는 그 계열 경로만, 자동 감지는 접속 전이라 모든 계열의 합집합을 허용한다(조회는 감지 후 계열 경로만)."""
+        prof = PROFILES.get(target.os_type, GENERIC)
+        return prof.whitelist() + list(extra)
+
+    @staticmethod
+    def _read_os_release(ex) -> str:
+        rc, out, _ = ex.run(["head", "-c", "4096", OS_RELEASE])
+        return out if rc == 0 else ""
+
+    def _resolve_profile(self, ex, target: Target):
+        """(사용할 프로필, 화면용 OS 정보). 명시 선택이 있으면 그것을 쓰고, 감지된 OS 와 다르면 불일치를 표시한다."""
+        detected_profile, detected_name = detect_profile(self._read_os_release(ex))
+        if target.os_type in PROFILES:
+            used, mode = PROFILES[target.os_type], "manual"
+        else:
+            used, mode = detected_profile, "auto"
+        info = {"mode": mode, "profile": used.id, "label": used.label, "detected": detected_name,
+                "detected_profile": detected_profile.id,
+                "mismatch": mode == "manual" and detected_name is not None
+                and detected_profile.id not in (used.id, "generic") and used.id != "generic"}
+        return used, info
+
     # --- 공개 진입점
     def scan(self, target: Target, prev_hashes: Optional[Dict[str, str]] = None) -> ScanResult:
         now = self.clock()
         prev_hashes = prev_hashes or {}
         res = ScanResult(server_id=target.server_id, scanned_at=now, status=Status.NOT_FOUND)
         extra = [posixpath.normpath(p) for p in target.paths]
-        whitelist = STANDARD_CANDIDATES + SUGGEST_ROOTS + extra
+        whitelist = self._whitelist(target, extra)
 
         ex = None
         try:
             ex = self._connect(target, whitelist)
+            profile, res.os_info = self._resolve_profile(ex, target)
             ver = parse_openssh_version(ex.server_version)
             if ver is not None and ver < MIN_OPENSSH:
                 res.records.append(CertRecord(Status.UNKNOWN, ["ssh"],
                                               note="지원 범위 밖 OpenSSH 버전(7.0 미만): 조회하지 않음"))
             else:
-                self._scan_files(ex, target, extra, now, prev_hashes, res)
+                self._scan_files(ex, target, extra, now, prev_hashes, res, profile)
         except RemoteError as e:
             self._fail(res, ["ssh"], e)
             res.hostkey_blocked = _is_hostkey(e)
@@ -185,6 +207,50 @@ class Scanner:
         res.cause = res.cause or e.cause
         res.cause_detail = res.cause_detail or e.detail
 
+    # --- 등록 전 연결 테스트 + 경로 탐지 (저장하지 않음)
+    def check_connection(self, target: Target):
+        """(결과 dict, 원문 오류) 반환. 원문 오류는 감사 로그 전용이며 화면에 노출하지 않는다."""
+        extra = [posixpath.normpath(p) for p in target.paths]
+        out = {"connected": False, "ssh_version": None, "supported": None, "cause": None,
+               "cause_label": None, "action": None, "hostkey_blocked": False,
+               "os": None, "standard_paths": [], "suggested_paths": [], "tls": []}
+        raw = ""
+        ex = None
+        try:
+            ex = self._connect(target, self._whitelist(target, extra))
+            out["connected"] = True
+            profile, out["os"] = self._resolve_profile(ex, target)
+            out["os"]["candidates"] = list(profile.candidates)
+            ver = parse_openssh_version(ex.server_version)
+            out["ssh_version"] = f"{ver[0]}.{ver[1]}" if ver else (ex.server_version or None)
+            out["supported"] = ver is None or ver >= MIN_OPENSSH
+            if out["supported"]:
+                scanned = []
+                for cand in list(profile.candidates) + extra:
+                    files = self._expand(ex, cand, depth=0)
+                    if files:
+                        scanned += files
+                        out["standard_paths"].append({"path": cand, "files": len(files), "sample": files[:3]})
+                out["suggested_paths"] = self._suggest(ex, scanned, extra, profile)
+        except RemoteError as e:
+            out["cause"], out["cause_label"], out["action"] = e.cause.value, CAUSE_INFO[e.cause][0], CAUSE_INFO[e.cause][1]
+            out["hostkey_blocked"] = e.cause == FailureCause.HOSTKEY
+            raw = e.detail
+        finally:
+            if ex is not None:
+                ex.close()
+        for port in target.tls_ports:
+            try:
+                info = parse_der_certificate(self.probe.fetch(target.hostname, port, sni=target.hostname))
+                out["tls"].append({"port": port, "ok": info is not None,
+                                   "subject": info.subject if info else None,
+                                   "not_after": st.iso_z(info.not_after) if info else None})
+            except RemoteError as e:
+                out["tls"].append({"port": port, "ok": False, "cause_label": CAUSE_INFO[e.cause][0],
+                                   "action": CAUSE_INFO[e.cause][1]})
+                raw = raw or e.detail
+        return out, raw
+
     # --- 연결 + 재시도
     def _connect(self, target: Target, whitelist: Sequence[str]) -> RemoteExecutor:
         attempt = 0
@@ -198,10 +264,10 @@ class Scanner:
                 attempt += 1
 
     # --- 디스크 파일 기반
-    def _scan_files(self, ex, target, extra, now, prev_hashes, res: ScanResult):
+    def _scan_files(self, ex, target, extra, now, prev_hashes, res: ScanResult, profile: OSProfile):
         files: List[str] = []
         scanned_roots: List[str] = []
-        for cand in STANDARD_CANDIDATES + extra:
+        for cand in list(profile.candidates) + extra:
             files += self._expand(ex, cand, depth=0)
             scanned_roots.append(cand)
         files = sorted(set(files))[:MAX_ENTRIES]
@@ -210,11 +276,22 @@ class Scanner:
             self._read_file(ex, path, target, now, prev_hashes, res)
 
         # 웹 서버 설정에서 인증서 경로 추출 → 등록 후보로만 제시 (확정은 사용자)
-        known = set(files)
-        for p in self._extract_webcfg(ex):
-            if p not in known and any(path_allowed(p, [r]) for r in SUGGEST_ROOTS) \
-                    and p not in res.suggested_paths:
-                res.suggested_paths.append(p)
+        for item in self._suggest(ex, files, extra, profile):
+            if item["path"] not in res.suggested_paths:
+                res.suggested_paths.append(item["path"])
+
+    def _suggest(self, ex, scanned_files: Sequence[str], extra: Sequence[str], profile: OSProfile) -> List[dict]:
+        """웹 설정에서 추출한 경로 중 아직 조회 대상이 아닌 것. 인증서 파일명 규칙을 지키고 개인키 이름은 제외한다.
+        이 단계에서는 해당 경로를 읽지 않는다(등록 후에만 조회)."""
+        covered = set(scanned_files)
+        out = []
+        for p in self._extract_webcfg(ex, profile):
+            if p in covered or not is_safe_path(p) or not self._wanted(p):
+                continue
+            if any(path_allowed(p, [e]) for e in extra):
+                continue  # 이미 등록된 경로 하위
+            out.append({"path": p, "in_standard_root": any(path_allowed(p, [r]) for r in profile.roots)})
+        return out
 
     def _expand(self, ex, path: str, depth: int) -> List[str]:
         """후보 경로가 파일이면 그대로, 디렉터리면 (깊이 제한) 인증서 후보 파일만 나열"""
@@ -239,8 +316,10 @@ class Scanner:
     @staticmethod
     def _wanted(path: str) -> bool:
         base = posixpath.basename(path).lower()
-        if base.startswith("privkey") or base.endswith(".key"):
+        if is_key_path(path):
             return False  # 개인키 파일은 열지 않는다
+        if base in SYSTEM_CA_FILES:
+            return False  # OS 기본 CA 번들은 서버 인증서가 아니다
         return base.endswith(CERT_EXT + KEYSTORE_EXT)
 
     def _read_file(self, ex, path, target, now, prev_hashes, res: ScanResult):
@@ -317,11 +396,9 @@ class Scanner:
                                       [source], role, c))
         return out
 
-    def _extract_webcfg(self, ex) -> List[str]:
-        confs = []
-        for f in WEBCFG_FILES:
-            confs.append(f)
-        for d in WEBCFG_DIRS:
+    def _extract_webcfg(self, ex, profile: OSProfile) -> List[str]:
+        confs = list(profile.webcfg_files)
+        for d in profile.webcfg_dirs:
             rc, out, _ = ex.run(["ls", "-1", d])
             if rc == 0:
                 confs += [posixpath.join(d, n) for n in out.split()[:20]]

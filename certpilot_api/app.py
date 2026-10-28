@@ -8,6 +8,7 @@ from flask import Flask, Response, g, jsonify, request, send_from_directory
 
 from certpilot_core.audit_storage import AuditLogWriter
 from certpilot_core.auth import ADMIN, OPERATOR, AuthError, AuthService
+from certpilot_core.osprofiles import list_profiles
 from certpilot_core.scanner import Scanner
 from certpilot_core.service import (CertPilotService, Conflict, NotFound, ValidationError,
                                     default_executor_factory)
@@ -245,6 +246,18 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
     @require(ADMIN)
     def add_server():
         return jsonify({"server": service.add_server(body(), g.user["username"])}), 201
+
+    @app.get("/os-profiles")
+    @require(*both)
+    def os_profiles():
+        """등록 화면의 OS 선택지와 계열별 자동 조회 경로"""
+        return jsonify({"profiles": list_profiles()})
+
+    @app.post("/servers/probe")
+    @require(ADMIN)
+    def probe_server():
+        """등록 전 연결 테스트 + 경로 탐지. 서버를 저장하지 않는다."""
+        return jsonify(service.probe_server(body(), g.user["username"]))
 
     @app.delete("/servers/<server_id>")
     @require(ADMIN)

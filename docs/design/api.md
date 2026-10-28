@@ -14,6 +14,7 @@
 | POST | /users/{name}/unlock | 잠금 해제 | 관리자 |
 | GET | /servers?status=&group= | 서버 현황(위험 순→서버명 정렬) | 운영자+ |
 | POST | /servers | 등록 `{name,hostname,port=22,account,paths[],tls_ports[],warn_days=30,group,memo}` | 관리자 |
+| POST | /servers/probe | **등록 전 연결 테스트·경로 탐지**(저장 안 함). 본문: `hostname, port, account, paths[], tls_ports[]` → `{connected, ssh_version, supported, cause/cause_label/action, hostkey_blocked, standard_paths[{path,files}], suggested_paths[{path,in_standard_root}], tls[]}` | 관리자 |
 | DELETE | /servers/{id} | 삭제 | 관리자 |
 | GET | /servers/{id}/certificates | 최신 조회 결과(인증서 목록·등록 후보 경로) | 운영자+ |
 | POST | /servers/{id}/scan | 조회 실행 | 운영자+ |

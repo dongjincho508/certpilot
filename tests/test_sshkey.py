@@ -87,3 +87,26 @@ def test_cli_exit_codes(tmp_path):
     bad = subprocess.run([sys.executable, "-m", "certpilot_core.sshkey"], capture_output=True, text=True,
                          env={"CERTPILOT_SSH_PRIVATE_KEY": "nope", "PATH": ""})
     assert bad.returncode == 1 and "SSH 키 오류" in bad.stderr and bad.stdout == ""
+
+
+def test_raw_key_pasted_into_b64_field_is_accepted():
+    k = openssh_key()
+    assert squash(key_from_env({"CERTPILOT_SSH_PRIVATE_KEY_B64": k})) == squash(k)
+    assert squash(key_from_env({"CERTPILOT_SSH_PRIVATE_KEY_B64": k.replace("\n", "\\n")})) == squash(k)
+
+
+def test_b64_with_whitespace_padding_and_crlf_source():
+    k = openssh_key().replace("\n", "\r\n")  # Windows ssh-keygen 은 CRLF 로 저장할 수 있다
+    b64 = base64.b64encode(k.encode()).decode()
+    spaced = "\n".join(b64[i:i + 60] for i in range(0, len(b64), 60))
+    orig = serialization.load_ssh_private_key(k.replace("\r\n", "\n").encode(), None).public_key().public_bytes_raw()
+    fixed = serialization.load_ssh_private_key(
+        key_from_env({"CERTPILOT_SSH_PRIVATE_KEY_B64": spaced}).encode(), None).public_key().public_bytes_raw()
+    assert fixed == orig
+    assert key_from_env({"CERTPILOT_SSH_PRIVATE_KEY_B64": spaced}).startswith("-----BEGIN OPENSSH PRIVATE KEY-----")
+    assert key_from_env({"CERTPILOT_SSH_PRIVATE_KEY_B64": b64.rstrip("=")}).startswith("-----BEGIN")  # 패딩 누락
+
+
+def test_garbage_b64_message_mentions_powershell():
+    with pytest.raises(KeyError_, match="PowerShell"):
+        key_from_env({"CERTPILOT_SSH_PRIVATE_KEY_B64": "!!!not base64!!!"})

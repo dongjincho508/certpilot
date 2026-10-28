@@ -12,3 +12,23 @@ jobs:
           python-version: "3.11"
       - run: pip install -r requirements-dev.txt
       - run: scripts/check.sh
+
+  monitoring:
+    # 감시 스택 설정 검증: promtool(설정·규칙·단위 테스트), amtool(Alertmanager 설정)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Prometheus / Alertmanager 도구 설치(버전 고정)
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/tools" && cd "$RUNNER_TEMP/tools"
+          curl -fsSL -o prom.tgz https://github.com/prometheus/prometheus/releases/download/v3.5.0/prometheus-3.5.0.linux-amd64.tar.gz
+          curl -fsSL -o am.tgz https://github.com/prometheus/alertmanager/releases/download/v0.28.1/alertmanager-0.28.1.linux-amd64.tar.gz
+          tar xzf prom.tgz && tar xzf am.tgz
+          echo "PROMTOOL=$PWD/prometheus-3.5.0.linux-amd64/promtool" >> "$GITHUB_ENV"
+          echo "AMTOOL=$PWD/alertmanager-0.28.1.linux-amd64/amtool" >> "$GITHUB_ENV"
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest tests/test_monitoring.py -rs

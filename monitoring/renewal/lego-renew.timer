@@ -1,0 +1,11 @@
+# /etc/systemd/system/lego-renew.timer — 하루 2회 시도(만료 30일 이내일 때만 실제 갱신됨)
+[Unit]
+Description=lego 갱신 점검
+
+[Timer]
+OnCalendar=*-*-* 03,15:17:00
+RandomizedDelaySec=30m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

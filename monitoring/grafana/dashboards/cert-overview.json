@@ -1,0 +1,1133 @@
+{
+  "uid": "cert-overview",
+  "title": "인증서 현황",
+  "tags": [
+    "certificate",
+    "tls"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "graphTooltip": 1,
+  "refresh": "5m",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "감시 대상 수",
+      "description": "등록된 host:port 대상 수",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "count(ssl_probe_success{group=~\"$group\", service=~\"$service\", os=~\"$os\"})",
+          "instant": true,
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "조회 실패",
+      "description": "TLS 연결이 안 되어 감시되지 않는 대상",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "count(ssl_probe_success{group=~\"$group\", service=~\"$service\", os=~\"$os\"} == 0) or vector(0)",
+          "instant": true,
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "30일 이내 만료",
+      "description": "만료되지 않았고 30일 이내인 인증서 수",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "count((ssl_cert_not_after{dnsnames!=\"\", group=~\"$group\", service=~\"$service\", os=~\"$os\", serial_no=~\"$serial_no\"} - time() > 0) and (ssl_cert_not_after{dnsnames!=\"\", group=~\"$group\", service=~\"$service\", os=~\"$os\", serial_no=~\"$serial_no\"} - time() <= 2592000)) or vector(0)",
+          "instant": true,
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "만료됨",
+      "description": "이미 만료된 인증서 수",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "count(ssl_cert_not_after{dnsnames!=\"\", group=~\"$group\", service=~\"$service\", os=~\"$os\", serial_no=~\"$serial_no\"} - time() <= 0) or vector(0)",
+          "instant": true,
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "인증서 현황 (만료 임박 순)",
+      "description": "서버가 제시하는 인증서(SAN 이 있는 인증서)를 만료 임박 순으로 표시. 상단 변수로 그룹·서비스·OS·일련번호를 걸러 볼 수 있다.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 13,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "targets": [
+        {
+          "expr": "(ssl_cert_not_after{dnsnames!=\"\", group=~\"$group\", service=~\"$service\", os=~\"$os\", serial_no=~\"$serial_no\"} - time()) / 86400",
+          "instant": true,
+          "format": "table",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "emails": true,
+              "ips": true,
+              "ou": true,
+              "module": true
+            },
+            "renameByName": {
+              "instance": "대상",
+              "group": "그룹",
+              "service": "서비스",
+              "os": "OS",
+              "cn": "CN",
+              "issuer_cn": "발급자",
+              "dnsnames": "SAN",
+              "serial_no": "일련번호",
+              "owner": "담당",
+              "Value": "잔여일"
+            },
+            "indexByName": {
+              "instance": 0,
+              "group": 1,
+              "service": 2,
+              "os": 3,
+              "owner": 4,
+              "cn": 5,
+              "dnsnames": 6,
+              "issuer_cn": 7,
+              "serial_no": 8,
+              "Value": 9
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "잔여일",
+                "desc": false
+              }
+            ]
+          }
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "잔여일"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: 일"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "dark-red",
+                      "value": null
+                    },
+                    {
+                      "color": "red",
+                      "value": 1
+                    },
+                    {
+                      "color": "orange",
+                      "value": 8
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 15
+                    },
+                    {
+                      "color": "green",
+                      "value": 31
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "같은 인증서를 쓰는 서버 수 (일련번호별)",
+      "description": "교체 대상 파악용. 일련번호 하나가 몇 대의 서버에 설치돼 있는지 보여준다. 일련번호를 위 변수로 고르면 해당 인증서가 설치된 서버만 위 표에 남는다.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 14,
+        "x": 0,
+        "y": 17
+      },
+      "targets": [
+        {
+          "expr": "count by (serial_no, cn, issuer_cn) (ssl_cert_not_after{dnsnames!=\"\", group=~\"$group\", service=~\"$service\", os=~\"$os\", serial_no=~\"$serial_no\"})",
+          "instant": true,
+          "format": "table",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "expr": "min by (serial_no, cn, issuer_cn) ((ssl_cert_not_after{dnsnames!=\"\", group=~\"$group\", service=~\"$service\", os=~\"$os\", serial_no=~\"$serial_no\"} - time()) / 86400)",
+          "instant": true,
+          "format": "table",
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "emails": true,
+              "ips": true,
+              "ou": true,
+              "module": true
+            },
+            "renameByName": {
+              "serial_no": "일련번호",
+              "cn": "CN",
+              "issuer_cn": "발급자",
+              "Value #A": "서버 수",
+              "Value #B": "잔여일"
+            },
+            "indexByName": {
+              "serial_no": 0,
+              "cn": 1,
+              "issuer_cn": 2,
+              "Value #A": 3,
+              "Value #B": 4
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "잔여일",
+                "desc": false
+              }
+            ]
+          }
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "잔여일"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: 일"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "dark-red",
+                      "value": null
+                    },
+                    {
+                      "color": "red",
+                      "value": 1
+                    },
+                    {
+                      "color": "orange",
+                      "value": 8
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 15
+                    },
+                    {
+                      "color": "green",
+                      "value": 31
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "조회 실패 대상",
+      "description": "TLS 연결이 안 된 대상. 서비스 중지·방화벽·포트 변경을 확인하세요. 이 대상은 만료 감시가 되지 않고 있다.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 10,
+        "x": 14,
+        "y": 17
+      },
+      "targets": [
+        {
+          "expr": "ssl_probe_success{group=~\"$group\", service=~\"$service\", os=~\"$os\"} == 0",
+          "instant": true,
+          "format": "table",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "emails": true,
+              "ips": true,
+              "ou": true,
+              "module": true,
+              "Value": true
+            },
+            "renameByName": {
+              "instance": "대상",
+              "group": "그룹",
+              "service": "서비스",
+              "os": "OS",
+              "owner": "담당"
+            },
+            "indexByName": {
+              "instance": 0,
+              "group": 1,
+              "service": 2,
+              "os": 3,
+              "owner": 4
+            }
+          }
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "최근 7일 내 발급된 인증서 (교체 확인)",
+      "description": "갱신·교체가 반영된 서버를 확인한다. 교체 작업 후 이 표에 대상이 나타나면 새 인증서가 서비스되고 있는 것이다.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 14,
+        "x": 0,
+        "y": 26
+      },
+      "targets": [
+        {
+          "expr": "(time() - ssl_cert_not_before{dnsnames!=\"\", group=~\"$group\", service=~\"$service\", os=~\"$os\", serial_no=~\"$serial_no\"}) / 86400 < 7",
+          "instant": true,
+          "format": "table",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "emails": true,
+              "ips": true,
+              "ou": true,
+              "module": true
+            },
+            "renameByName": {
+              "instance": "대상",
+              "group": "그룹",
+              "service": "서비스",
+              "os": "OS",
+              "cn": "CN",
+              "issuer_cn": "발급자",
+              "dnsnames": "SAN",
+              "serial_no": "일련번호",
+              "owner": "담당",
+              "Value": "발급 후 경과일"
+            },
+            "indexByName": {
+              "instance": 0,
+              "group": 1,
+              "service": 2,
+              "cn": 3,
+              "issuer_cn": 4,
+              "serial_no": 5,
+              "Value": 6
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "발급 후 경과일",
+                "desc": false
+              }
+            ]
+          }
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "발급 후 경과일"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: 일"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "와일드카드 인증서 사용 현황",
+      "description": "SAN 에 *.도메인 이 포함된 인증서. 개인키가 여러 서버에 공유되는 범위를 파악한다.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 10,
+        "x": 14,
+        "y": 26
+      },
+      "targets": [
+        {
+          "expr": "count by (serial_no, cn) (ssl_cert_not_after{dnsnames=~\".*,\\\\*\\\\.[^,]*,.*\", group=~\"$group\", service=~\"$service\", os=~\"$os\"})",
+          "instant": true,
+          "format": "table",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "expr": "min by (serial_no, cn) ((ssl_cert_not_after{dnsnames=~\".*,\\\\*\\\\.[^,]*,.*\", group=~\"$group\", service=~\"$service\", os=~\"$os\"} - time()) / 86400)",
+          "instant": true,
+          "format": "table",
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "emails": true,
+              "ips": true,
+              "ou": true,
+              "module": true
+            },
+            "renameByName": {
+              "serial_no": "일련번호",
+              "cn": "CN",
+              "Value #A": "서버 수",
+              "Value #B": "잔여일"
+            },
+            "indexByName": {
+              "serial_no": 0,
+              "cn": 1,
+              "Value #A": 2,
+              "Value #B": 3
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "잔여일",
+                "desc": false
+              }
+            ]
+          }
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "잔여일"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: 일"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "dark-red",
+                      "value": null
+                    },
+                    {
+                      "color": "red",
+                      "value": 1
+                    },
+                    {
+                      "color": "orange",
+                      "value": 8
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 15
+                    },
+                    {
+                      "color": "green",
+                      "value": 31
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "그룹별 최소 잔여일 추이",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 14,
+        "x": 0,
+        "y": 34
+      },
+      "targets": [
+        {
+          "expr": "min by (group) ((ssl_cert_not_after{dnsnames!=\"\", group=~\"$group\", service=~\"$service\", os=~\"$os\", serial_no=~\"$serial_no\"} - time()) / 86400)",
+          "legendFormat": "{{group}}",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix: 일",
+          "decimals": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 7
+              },
+              {
+                "color": "orange",
+                "value": 14
+              },
+              {
+                "color": "yellow",
+                "value": 30
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "bargauge",
+      "title": "TLS 버전 분포",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 10,
+        "x": 14,
+        "y": 34
+      },
+      "targets": [
+        {
+          "expr": "count by (version) (ssl_tls_version_info{group=~\"$group\", service=~\"$service\", os=~\"$os\"})",
+          "legendFormat": "{{version}}",
+          "instant": true,
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "displayMode": "gradient"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "description": "TLS 1.0/1.1 이 보이면 서버 설정 조정이 필요하다."
+    }
+  ],
+  "annotations": {
+    "list": []
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "group",
+        "label": "그룹",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(ssl_cert_not_after, group)",
+          "refId": "v-group"
+        },
+        "definition": "label_values(ssl_cert_not_after, group)",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "sort": 1,
+        "regex": ""
+      },
+      {
+        "name": "service",
+        "label": "서비스",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(ssl_cert_not_after, service)",
+          "refId": "v-service"
+        },
+        "definition": "label_values(ssl_cert_not_after, service)",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "sort": 1,
+        "regex": ""
+      },
+      {
+        "name": "os",
+        "label": "OS",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(ssl_cert_not_after, os)",
+          "refId": "v-os"
+        },
+        "definition": "label_values(ssl_cert_not_after, os)",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "sort": 1,
+        "regex": ""
+      },
+      {
+        "name": "serial_no",
+        "label": "일련번호",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(ssl_cert_not_after{dnsnames!=\"\"}, serial_no)",
+          "refId": "v-serial_no"
+        },
+        "definition": "label_values(ssl_cert_not_after{dnsnames!=\"\"}, serial_no)",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "sort": 1,
+        "regex": ""
+      }
+    ]
+  },
+  "description": "서비스 중인 TLS 인증서의 만료·교체·설치 위치 현황 (ssl_exporter 기반)"
+}

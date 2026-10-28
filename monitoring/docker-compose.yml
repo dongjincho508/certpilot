@@ -1,0 +1,78 @@
+# 인증서 만료 감시 스택: ssl_exporter → Prometheus(규칙·이력 1년) → Alertmanager(메일·웹훅) + Grafana(대시보드)
+# 사용:  cp .env.example .env  (비밀번호 수정)  →  docker compose up -d
+# 이 스택은 감시 대상 서버에 TLS 로 접속할 수 있는 네트워크(교내망)의 VM 에서 실행해야 한다.
+name: cert-monitor
+
+services:
+  ssl-exporter:
+    image: ribbybibby/ssl-exporter:2.4.3
+    command:
+      - --config.file=/etc/ssl_exporter/ssl_exporter.yml
+    volumes:
+      - ./ssl_exporter/ssl_exporter.yml:/etc/ssl_exporter/ssl_exporter.yml:ro
+    restart: unless-stopped
+    networks: [mon]
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=400d       # 인증서 교체·갱신 이력을 1년 이상 보관
+      - --web.enable-lifecycle                   # curl -X POST localhost:9090/-/reload 로 설정 재적재
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - ./prometheus/targets:/etc/prometheus/targets:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"                    # 외부 노출 안 함(필요하면 역프록시 + 인증)
+    depends_on: [ssl-exporter, alertmanager]
+    restart: unless-stopped
+    networks: [mon]
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --cluster.listen-address=                # 단일 인스턴스 운영
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./alertmanager/templates:/etc/alertmanager/templates:ro
+      - ./alertmanager/secrets:/etc/alertmanager/secrets:ro   # secrets.example 를 복사해 값 입력
+      - alertmanager-data:/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    restart: unless-stopped
+    networks: [mon]
+
+  grafana:
+    image: grafana/grafana-oss:11.6.0
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD 를 .env 에 설정하세요}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_USERS_DEFAULT_LANGUAGE: ko-KR
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000}
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/cert-overview.json
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_BIND:-127.0.0.1}:3000:3000"   # 교내 접속이 필요하면 GRAFANA_BIND=0.0.0.0 + HTTPS 역프록시 권장
+    depends_on: [prometheus]
+    restart: unless-stopped
+    networks: [mon]
+
+networks:
+  mon: {}
+
+volumes:
+  prometheus-data: {}
+  alertmanager-data: {}
+  grafana-data: {}

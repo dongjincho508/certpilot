@@ -24,7 +24,7 @@
 | 요구 | 상태 | 비고 |
 |---|---|---|
 | §3.1.1 서버 등록(고유 서버명·기본 포트 22·계정·경로·T 기본 30) | ✅ | 그룹/메모 포함 |
-| §3.1.1 연결 가능 = 인증 세션 수립 | ✅ | 별도 "연결 확인" 엔드포인트 없이 조회가 겸함 |
+| §3.1.1 연결 가능 = 인증 세션 수립 | ✅ | 등록 전 **연결 테스트**(`/servers/probe`)와 조회가 동일 기준(인증 세션 수립) 적용 |
 | §3.1.2 ssh-agent 키 인증, 패스워드 미지원 | ✅ | `ParamikoExecutor` 에 패스워드 인자 없음 |
 | §3.1.2 TOFU + 변경 시 차단·감사 | ✅ | `test_ssh_integration::test_tofu…`, `test_api::test_hostkey_changed…` |
 | §3.1.2 고정 읽기 전용 명령·금지 명령 | ✅ | `test_policy.py` |
@@ -36,7 +36,7 @@
 | §3.1.4 PKCS#12/JKS | 🔶 | 서버 조회는 `UNKNOWN`+사유(B-4), 로컬 CLI 는 파싱 ✅ |
 | §3.1.4 DER 제외·형식 판별 | ✅ | DER/깨진 파일 → `UNKNOWN` |
 | §3.1.4 경로 화이트리스트·전체 탐색 금지·심볼릭 링크 | ✅ | `test_custom_path_and_whitelist`, `test_symlink…` |
-| §3.1.4 웹 설정 경로 추출(후보 제시) | ✅ | 정규식 기반(nginx/apache 기본 지시어만) |
+| §3.1.4 웹 설정 경로 추출(후보 제시) | ✅ | 정규식 기반(nginx/apache 기본 지시어만). 등록 화면의 **연결 테스트·경로 탐지**(`POST /servers/probe`)에서 선택해 추가 — `test_check_connection_*`, `test_probe_*` |
 | §3.1.5 시간 기준 판정·UTC·T 설정 | ✅ | `status.py` |
 | §3.1.6 위험 순 정렬·상태/그룹 필터·수동 갱신 | ✅ | `test_overview_sort_and_filter` |
 | §5 서버 요약 = 최악 상태 | ✅ | `status.worst` |

@@ -1,0 +1,94 @@
+# 인증서 만료·갱신 지연·조회 실패 알림 규칙.
+# 모든 만료 규칙은 '서버가 제시하는 모든 인증서(리프+중간 CA)'를 대상으로 한다 — 체인 중간의 만료도 장애를 일으키기 때문이다.
+# 단계가 겹쳐 중복 알림이 나오지 않도록 구간을 나눴다(30/14/7/3/1일).
+groups:
+  - name: cert-expiry
+    rules:
+      - alert: CertExpired
+        expr: ssl_cert_not_after - time() <= 0
+        labels: {severity: critical}
+        annotations:
+          summary: "인증서 만료됨: {{ $labels.instance }}"
+          description: "{{ $labels.instance }} 가 제공하는 인증서(CN={{ $labels.cn }}, 일련번호 {{ $labels.serial_no }})가 이미 만료되었습니다."
+
+      - alert: CertExpiresIn1Day
+        expr: (ssl_cert_not_after - time() > 0) and (ssl_cert_not_after - time() <= 86400)
+        labels: {severity: critical}
+        annotations:
+          summary: "인증서 1일 이내 만료: {{ $labels.instance }}"
+          description: "{{ $labels.instance }} (CN={{ $labels.cn }}) 인증서가 {{ $value | humanizeDuration }} 후 만료됩니다."
+
+      - alert: CertExpiresIn3Days
+        expr: (ssl_cert_not_after - time() > 86400) and (ssl_cert_not_after - time() <= 86400 * 3)
+        labels: {severity: critical}
+        annotations:
+          summary: "인증서 3일 이내 만료: {{ $labels.instance }}"
+          description: "{{ $labels.instance }} (CN={{ $labels.cn }}) 인증서가 {{ $value | humanizeDuration }} 후 만료됩니다."
+
+      - alert: CertExpiresIn7Days
+        expr: (ssl_cert_not_after - time() > 86400 * 3) and (ssl_cert_not_after - time() <= 86400 * 7)
+        labels: {severity: warning}
+        annotations:
+          summary: "인증서 7일 이내 만료: {{ $labels.instance }}"
+          description: "{{ $labels.instance }} (CN={{ $labels.cn }}) 인증서가 {{ $value | humanizeDuration }} 후 만료됩니다."
+
+      - alert: CertExpiresIn14Days
+        expr: (ssl_cert_not_after - time() > 86400 * 7) and (ssl_cert_not_after - time() <= 86400 * 14)
+        labels: {severity: warning}
+        annotations:
+          summary: "인증서 14일 이내 만료: {{ $labels.instance }}"
+          description: "{{ $labels.instance }} (CN={{ $labels.cn }}) 인증서가 {{ $value | humanizeDuration }} 후 만료됩니다."
+
+      - alert: CertExpiresIn30Days
+        expr: (ssl_cert_not_after - time() > 86400 * 14) and (ssl_cert_not_after - time() <= 86400 * 30)
+        labels: {severity: info}
+        annotations:
+          summary: "인증서 30일 이내 만료: {{ $labels.instance }}"
+          description: "{{ $labels.instance }} (CN={{ $labels.cn }}) 인증서가 {{ $value | humanizeDuration }} 후 만료됩니다. 갱신 일정을 확인하세요."
+
+      # 수명의 75% 가 지났는데 아직 교체되지 않았다 = 자동 갱신이 조용히 실패 중일 가능성.
+      # (90일 인증서는 약 22일 남았을 때, 200일 인증서는 50일 남았을 때 발동. 보통 갱신은 만료 30일 전에 이뤄진다)
+      - alert: CertRenewalLagging
+        expr: >
+          (ssl_cert_not_after - time() > 0)
+          and
+          ((ssl_cert_not_after - time()) < 0.25 * (ssl_cert_not_after - ssl_cert_not_before))
+        for: 1h
+        labels: {severity: warning}
+        annotations:
+          summary: "인증서 갱신 지연 의심: {{ $labels.instance }}"
+          description: "{{ $labels.instance }} (CN={{ $labels.cn }}) 인증서 수명의 75% 이상이 지났습니다. 자동 갱신·배포가 동작하는지 확인하세요."
+
+  - name: cert-collection
+    rules:
+      - alert: CertProbeFailed
+        expr: ssl_probe_success == 0
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "인증서 조회 실패: {{ $labels.instance }}"
+          description: "{{ $labels.instance }} 에 TLS 연결을 할 수 없습니다(서비스 중지·방화벽·포트 변경 가능). 이 대상은 만료 감시가 되지 않고 있습니다."
+
+      - alert: CertTargetScrapeFailed
+        expr: up{job="ssl-endpoints"} == 0
+        for: 10m
+        labels: {severity: critical}
+        annotations:
+          summary: "인증서 수집 실패(exporter 호출 오류): {{ $labels.instance }}"
+          description: "Prometheus 가 ssl_exporter 로부터 {{ $labels.instance }} 결과를 받지 못했습니다. 감시가 중단된 상태입니다."
+
+      - alert: CertExporterDown
+        expr: up{job="ssl-exporter-self"} == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "ssl_exporter 중단"
+          description: "ssl_exporter 가 응답하지 않아 모든 인증서 감시가 중단되었습니다."
+
+      - alert: CertLegacyTlsVersion
+        expr: ssl_tls_version_info{version=~"TLS 1\\.[01]|SSL 3\\.0"} == 1
+        for: 1h
+        labels: {severity: info}
+        annotations:
+          summary: "구형 TLS 사용: {{ $labels.instance }} ({{ $labels.version }})"
+          description: "{{ $labels.instance }} 가 {{ $labels.version }} 로 협상되었습니다. TLS 1.2 이상으로 올리세요."

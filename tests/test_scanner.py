@@ -131,12 +131,14 @@ def test_scan_never_modifies_remote(sandbox):  # AC-7
 def test_webcfg_suggestions_not_scanned(sandbox):  # Q-WEBCFG
     sandbox.put("/etc/nginx/conf.d/site.conf",
                 "server {\n ssl_certificate /opt/site/fullchain.pem;\n ssl_certificate_key /opt/site/k.key;\n"
-                " ssl_certificate /etc/forbidden/x.pem;\n}\n")
+                " ssl_certificate /srv/app/tls/app.crt;\n ssl_certificate /etc/x/privkey.pem;\n"
+                " ssl_certificate /srv/../etc/shadow.pem;\n}\n")
     sandbox.put("/opt/site/fullchain.pem", pem(make_cert("site.test")[1]))
     res = scanner(sandbox).scan(T)
     assert "/opt/site/fullchain.pem" in res.suggested_paths
-    assert not any(p.startswith("/etc/forbidden") for p in res.suggested_paths) or True
-    assert res.status == Status.NOT_FOUND  # 확정 전에는 스캔하지 않는다
+    assert "/srv/app/tls/app.crt" in res.suggested_paths     # 표준 루트 밖도 후보로는 제시
+    assert not any("privkey" in p or ".." in p or p.endswith(".key") for p in res.suggested_paths)
+    assert res.status == Status.NOT_FOUND  # 확정(등록) 전에는 스캔하지 않는다
 
 
 def test_unsupported_openssh_is_unknown(sandbox):  # Q-SSHVER
@@ -200,3 +202,46 @@ def test_ports_scanned_even_if_ssh_fails(sandbox):
     res = scanner(sandbox, probe=FakeProbe({443: der}), factory=factory).scan(t)
     assert any(r.status == Status.OK for r in res.records)
     assert res.status == Status.FETCH_FAIL  # 일부 실패는 정상으로 가리지 않는다
+
+
+# ---------------------------------------------------------------- 등록 전 연결 테스트·경로 탐지
+def test_check_connection_reports_paths_and_suggestions(sandbox):
+    sandbox.put("/etc/nginx/ssl/a.crt", pem(make_cert("a.test")[1]))
+    sandbox.put("/etc/nginx/ssl/b.pem", pem(make_cert("b.test")[1]))
+    sandbox.put("/etc/nginx/conf.d/s.conf", "ssl_certificate /srv/app/tls/app.crt;\nssl_certificate /etc/nginx/ssl/a.crt;\n")
+    out, raw = scanner(sandbox).check_connection(T)
+    assert out["connected"] and out["supported"] and out["ssh_version"] == "9.6" and raw == ""
+    std = {p["path"]: p["files"] for p in out["standard_paths"]}
+    assert std == {"/etc/nginx/ssl": 2}
+    assert [s["path"] for s in out["suggested_paths"]] == ["/srv/app/tls/app.crt"]  # 이미 조회되는 경로는 제외
+    assert out["suggested_paths"][0]["in_standard_root"] is False
+
+
+def test_check_connection_failure_is_classified_without_raw(sandbox):
+    def factory(t):
+        raise RemoteError(FailureCause.AUTH, "user certscan denied SHA256:abc")
+    out, raw = scanner(sandbox, factory=factory).check_connection(T)
+    assert not out["connected"] and out["cause"] == "AUTH" and out["cause_label"] == "인증 실패"
+    assert "SHA256" not in repr(out) and "SHA256:abc" in raw
+    assert out["action"]
+
+
+def test_check_connection_hostkey_and_old_ssh(sandbox):
+    def hk(t):
+        raise RemoteError(FailureCause.HOSTKEY, "changed")
+    assert scanner(sandbox, factory=hk).check_connection(T)[0]["hostkey_blocked"]
+    out, _ = scanner(sandbox, server_version="SSH-2.0-OpenSSH_6.6").check_connection(T)
+    assert out["connected"] and out["supported"] is False and out["standard_paths"] == []
+
+
+def test_check_connection_tls_ports_and_extra_paths(sandbox):
+    from cryptography.hazmat.primitives import serialization
+    sandbox.put("/srv/app/tls/app.crt", pem(make_cert("app.test")[1]))
+    der = make_cert("t.test")[1].public_bytes(serialization.Encoding.DER)
+    t = Target("p", "probe", "h", paths=["/srv/app/tls"], tls_ports=[443, 8443])
+    probe = FakeProbe({443: der, 8443: RemoteError(FailureCause.TIMEOUT, "x")})
+    out, _ = scanner(sandbox, probe=probe).check_connection(t)
+    assert {p["path"] for p in out["standard_paths"]} == {"/srv/app/tls"}
+    tls = {x["port"]: x for x in out["tls"]}
+    assert tls[443]["ok"] and tls[443]["subject"] == "CN=t.test"
+    assert not tls[8443]["ok"] and tls[8443]["cause_label"] == "연결 시간 초과"

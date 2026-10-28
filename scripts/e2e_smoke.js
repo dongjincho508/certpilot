@@ -29,6 +29,18 @@ const { chromium } = require('playwright');
   await page.waitForTimeout(500); // 색 전환(transition) 종료 대기
   await page.screenshot({ path: `${out}/3b-dark.png` });
   await page.click('#theme-toggle');
+  // 서버 등록 모달: 연결 테스트 · 경로 탐지
+  await page.click('button:has-text("서버 등록")');
+  await page.waitForSelector('#server-modal.show');
+  await page.fill('#f-host', 'web-new.example');
+  await page.fill('#f-account', 'certscan');
+  await page.click('#btn-probe');
+  await page.waitForSelector('#probe-result .alert-success');
+  console.log('probe:', (await page.innerText('#probe-result')).replace(/\s+/g, ' ').slice(0, 160));
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: `${out}/5-probe.png` });
+  await page.click('#server-modal button:has-text("취소")');
+  await page.waitForSelector('#server-modal', { state: 'hidden' });
   await page.click('[data-view=audit]');
   await page.click('#btn-verify');
   await page.waitForFunction(() => document.getElementById('audit-integrity').textContent.includes('무결성 정상'));

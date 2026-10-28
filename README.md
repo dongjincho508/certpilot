@@ -1,5 +1,8 @@
 # CertPilot
 
+> **프로젝트 방향 변경 (2026-10-28)**: 인증서 만료 감시는 오픈소스 **Prometheus + ssl_exporter + Grafana** 스택으로 진행합니다 → **[monitoring/](monitoring/README.md)** (설정·알림 규칙·대시보드·교체 체크리스트 도구).
+> 아래의 CertPilot 앱(SSH 파일 조회·감사 로그)은 **보류** 상태로 보존합니다. 근거와 재개 조건은 [ROADMAP](docs/ROADMAP.md), 갱신 자동화 설계는 [docs/ops/acme-automation.md](docs/ops/acme-automation.md), 교체 절차는 [docs/ops/cert-rotation-checklist.md](docs/ops/cert-rotation-checklist.md).
+
 Linux 서버에 설치된 SSL/TLS 인증서를 **SSH(디스크 파일)와 TLS 포트(실행 중 서비스)** 로 조회하고, 만료 위험을 한 화면에서 보여주는 MVP.
 
 - 대상: Linux 서버(SSH, OpenSSH 7.0+). 형식: PEM(단일·번들), 키스토어(PKCS#12/JKS)는 존재만 표시
@@ -46,6 +49,7 @@ docs/            PRD · 결정 기록 · ARCHITECTURE · TRACEABILITY · OPEN_IT
 | [ARCHITECTURE](docs/ARCHITECTURE.md) | 구현 구조·조회 흐름·설계 결정 |
 | [TRACEABILITY](docs/TRACEABILITY.md) | 요구사항 → 코드 → 테스트, AC 상태 |
 | [OPEN_ITEMS](docs/OPEN_ITEMS.md) | 미확정·이월 항목 |
+| [ROADMAP](docs/ROADMAP.md) | 제품 방향·단계별 계획·오너 결정 사항(제안) |
 | [설계 색인](docs/design/README.md) | API · 인프라 · PKI · UI · 위협 모델 · 테스트 |
 | [결정 기록](docs/decisions.md) · [릴리스 상태](docs/release-approval.md) | |
 

@@ -1,0 +1,22 @@
+{{ define "cert.subject" -}}
+[인증서 {{ if eq .Status "firing" }}경보{{ else }}해소{{ end }}] {{ .CommonLabels.alertname }}{{ if .CommonLabels.instance }} · {{ .CommonLabels.instance }}{{ end }} ({{ len .Alerts }}건)
+{{- end }}
+
+{{ define "cert.email.html" -}}
+<div style="font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;font-size:14px;color:#222">
+  <h3 style="margin:0 0 8px">{{ if eq .Status "firing" }}⚠ 인증서 경보{{ else }}✔ 해소됨{{ end }} — {{ .CommonLabels.alertname }}</h3>
+  <table cellpadding="6" cellspacing="0" style="border-collapse:collapse;border:1px solid #ccc">
+    <tr style="background:#f2f2f2"><th align="left">대상</th><th align="left">내용</th><th align="left">CN</th><th align="left">일련번호</th><th align="left">심각도</th></tr>
+    {{ range .Alerts -}}
+    <tr style="border-top:1px solid #ddd">
+      <td>{{ .Labels.instance }}{{ if .Labels.group }}<br><small>{{ .Labels.group }}{{ if .Labels.service }} / {{ .Labels.service }}{{ end }}</small>{{ end }}</td>
+      <td>{{ .Annotations.description }}</td>
+      <td>{{ .Labels.cn }}</td>
+      <td style="font-family:monospace;font-size:11px;word-break:break-all">{{ .Labels.serial_no }}</td>
+      <td>{{ .Labels.severity }}</td>
+    </tr>
+    {{ end -}}
+  </table>
+  <p style="color:#666;font-size:12px;margin-top:12px">Grafana 대시보드에서 같은 일련번호를 쓰는 다른 서버와 만료일을 확인하세요.</p>
+</div>
+{{- end }}
