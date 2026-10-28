@@ -260,4 +260,6 @@ cd /opt/cert-monitor/src/monitoring && docker compose stop prometheus && docker 
 - [ ] 담당자 2인 이상이 접속·재기동·복구 방법을 숙지
 
 ## 11. 다음 단계
+
+> 전체 순서표·시험 항목표·버그 수집 절차는 [VM 설치·테스트 매뉴얼](vm-install-and-test.md).
 감시가 안정되면 [교체 체크리스트](cert-rotation-checklist.md)로 현재 인증서의 설치 위치를 확정하고, 발급·갱신 자동화는 별도 VM 에서 [갱신 자동화 설계](acme-automation.md)대로 진행한다(개인키를 다루므로 감시 VM 과 분리).

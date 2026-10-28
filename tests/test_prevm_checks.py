@@ -52,10 +52,11 @@ def test_doc_certdeploy_commands_exist_in_cli():
     """문서의 `certdeploy [-c 파일] [--옵션] <명령>` 줄이 실제 CLI 하위 명령과 일치하는지(명령 위치에 있을 때만 검사)."""
     sub = set(cd_main.commands)
     pat = re.compile(r"^\s*(?:\$ )?(?:sudo(?:\s+-u\s+\w+)?\s+)?(?:\S*/)?certdeploy(?:\s+(?:-c|--cert)\s+\S+|\s+--(?:debug|verbose)|\s+-v)*\s+([a-z][a-z-]+)\b")
+    cd_var = re.compile(r"^\s*\$CD(?:\s+--debug)?\s+([a-z][a-z-]+)\b")        # 시험 시나리오의 $CD <명령>
     seen = set()
     for _, block in bash_blocks():
         for line in block.splitlines():
-            m = pat.match(line)
+            m = pat.match(line) or cd_var.match(line)
             if m:
                 seen.add(m.group(1))
     assert seen, "검사할 명령을 하나도 찾지 못했습니다(패턴 점검 필요)"
@@ -105,8 +106,9 @@ def test_compose_renders_and_fails_fast_without_secrets(tmp_path):
 
 def test_example_config_parses_and_matches_schema():
     jsonschema = pytest.importorskip("jsonschema")
-    example = yaml.safe_load(read(os.path.join(ROOT, "certdeploy", "certdeploy.example.yml")))
-    jsonschema.validate(example, config_schema())
+    for name in ("certdeploy.example.yml", "certdeploy.manual.example.yml"):
+        jsonschema.validate(yaml.safe_load(read(os.path.join(ROOT, "certdeploy", name))), config_schema())
+        parse_config(yaml.safe_load(read(os.path.join(ROOT, "certdeploy", name))))
     bad = {"state_dir": "relative", "targets": [{"name": "x y", "type": "iis"}]}
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(bad, config_schema())
@@ -250,3 +252,29 @@ def test_scan_all_50_servers_is_fast(tmp_path, sandbox):
     r = c.post("/scan")
     assert r.status_code == 200 and r.json["scanned"] == 50 and time.monotonic() - t0 < 30
     assert all(s["status"] == "OK" for s in r.json["servers"])
+
+
+def test_scenario_doc_covers_all_tests_and_commands():
+    text = read(os.path.join(ROOT, "docs", "ops", "test-scenarios.md"))
+    for n in range(1, 14):
+        assert f"### T-{n:02d} " in text, f"T-{n:02d} 시나리오 누락"
+        assert f"| T-{n:02d} |" in text                                          # 결과 기록표
+    used = set(re.findall(r"^\$CD ([a-z][a-z-]+)", text, re.M))
+    assert {"validate", "preflight", "csr", "import", "deploy", "status", "check", "verify-audit", "backup", "restore", "trace", "plan"} <= used
+    assert not (used - set(cd_main.commands))
+
+
+def test_install_manual_commands_and_files_exist():
+    text = read(os.path.join(ROOT, "docs", "ops", "vm-install-and-test.md"))
+    for rel in re.findall(r"/opt/cert-monitor/src/([\w./*-]+)", text):
+        if rel.endswith("/"):
+            continue
+        import glob
+        assert glob.glob(os.path.join(ROOT, rel)), f"매뉴얼이 가리키는 파일 없음: {rel}"
+    used = set(re.findall(r"(?:^|&& )\$CD ([a-z][a-z-]+)", text, re.M))
+    assert {"validate", "preflight", "csr", "import", "plan", "deploy", "check", "diagnose", "backup"} <= used
+    assert not (used - set(cd_main.commands))
+    for img in re.findall(r"prom/(?:prometheus|alertmanager):v[\d.]+", text):
+        assert img in read(os.path.join(ROOT, "monitoring", "docker-compose.yml")), f"compose 와 이미지 태그가 다름: {img}"
+    for svc in ("ssl-exporter", "prometheus", "pushgateway", "alertmanager", "grafana"):
+        assert svc in text

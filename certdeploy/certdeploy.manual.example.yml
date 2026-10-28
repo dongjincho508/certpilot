@@ -1,0 +1,48 @@
+# 수동 구매 인증서(와일드카드 등) + 자동 배포용 설정 — DNS(Infoblox)·lego 연동 없음
+# 복사:  sudo cp certdeploy/certdeploy.manual.example.yml /etc/certdeploy/certdeploy.yml
+# 흐름:  certdeploy csr → CA 제출 → certdeploy import --deploy   (docs/ops/certdeploy.md 5-1, docs/ops/vm-install-and-test.md)
+# 비밀번호·토큰은 이 파일에 쓰지 않는다(키스토어 비밀번호는 /etc/certdeploy/env 의 환경변수 이름으로만 참조).
+
+state_dir: /var/lib/certdeploy
+audit_log: /var/lib/certdeploy/audit            # 변조 탐지 해시 체인 감사 로그(검증: certdeploy verify-audit)
+
+# import 가 인증서(서버+중간 CA)와 개인키를 설치하는 위치 = 배포 원본
+certificate:
+  cert_file: /var/lib/certdeploy/managed/wildcard.crt
+  key_file: /var/lib/certdeploy/managed/wildcard.key
+
+# 관리 서버(같은 VM)의 감시 스택으로 결과 전달
+notify:
+  alertmanager_url: http://127.0.0.1:9093
+  pushgateway_url: http://127.0.0.1:9091
+  # smtp: {host: smtp.univ.example, port: 587, starttls: true, from: cert-deploy@univ.example, to: [cert-admin@univ.example], username: cert-deploy, password_env: SMTP_PASSWORD}
+  # webhook: {url_env: CERTDEPLOY_WEBHOOK_URL, format: teams}
+
+defaults:
+  transport: {kind: ssh, user: deploy, key_file: /var/lib/certdeploy/.ssh/id_ed25519, known_hosts: /var/lib/certdeploy/.ssh/known_hosts}
+
+options:
+  verify_attempts: 6
+  verify_interval: 5
+  keep_backups: 3
+
+# 처음에는 시험용 1대(canary)만 두고 preflight → deploy → 확인 후 대상을 늘린다.
+targets:
+  - name: web-canary
+    type: apache
+    canary: true
+    order: 1
+    transport: {host: www1.univ.example}
+    cert_path: /etc/ssl/univ/fullchain.pem
+    key_path: /etc/ssl/univ/privkey.pem
+    reload_cmd: sudo -n systemctl reload httpd
+    verify: {host: www1.univ.example, port: 443, strict: true}
+
+  # - name: sugang-tomcat
+  #   type: tomcat
+  #   format: pkcs12
+  #   keystore_path: /opt/tomcat/conf/ssl/keystore.p12
+  #   password_env: TOMCAT_KS_PASS
+  #   transport: {host: sugang.univ.example}
+  #   reload_cmd: sudo -n systemctl restart tomcat
+  #   verify: {host: sugang.univ.example, port: 8443}
