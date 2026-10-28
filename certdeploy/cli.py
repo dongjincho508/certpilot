@@ -15,6 +15,8 @@ from .bundle import BundleError, key_permission_problems, load_bundle
 from .config import HOST_RE, NAME_RE, ConfigError, load_config
 from .engine import Deployer
 from .handlers import TYPES
+from .manual import (ManualError, build_bundle, collect_certs, generate_csr, install_bundle, load_key_file, load_pfx,
+                     pending_dir, save_pending)
 from .issuer import BackoffActive, IssueBackoff, IssueError, LegoIssuer, lego_output_paths
 from .notify import build_notifier
 from .preflight import run_preflight
@@ -320,6 +322,96 @@ def renew(obj, staging, no_deploy, force_deploy, ignore_backoff):
 
 
 # ------------------------------------------------------------------ 운영 편의
+# ------------------------------------------------------------------ 수동 발급 인증서(상용 CA 구매 등)
+def _one_set(obj):
+    cfg, sets = _sets(obj)
+    if len(sets) != 1:
+        raise click.ClickException("인증서가 여러 개입니다 — 전역 옵션 --cert 이름 으로 하나를 지정하세요")
+    return cfg, sets[0]
+
+
+@main.command()
+@click.option("--domains", help="쉼표로 구분한 도메인(첫 번째가 CN). 생략하면 lego.domains 를 사용")
+@click.option("--key-type", default="rsa2048", show_default=True, type=click.Choice(["rsa2048", "rsa3072", "rsa4096", "ec256", "ec384"]))
+@click.option("--country", help="국가 코드(예: KR)")
+@click.option("--state")
+@click.option("--locality")
+@click.option("--org", help="조직명(OV 인증서용)")
+@click.option("--ou", help="부서")
+@click.option("--force", is_flag=True, help="대기 중인 키/CSR 을 덮어씀(이미 제출한 CSR 의 키를 잃는다)")
+@click.pass_obj
+def csr(obj, domains, key_type, country, state, locality, org, ou, force):
+    """수동 발급용 키와 CSR 을 만든다. 키는 이 서버의 대기 디렉터리(0600)에만 저장되고, CSR 만 CA 에 제출한다."""
+    cfg, cs = _one_set(obj)
+    names = [d.strip() for d in (domains.split(",") if domains else (cs.lego or {}).get("domains", [])) if d.strip()]
+    if not names:
+        raise click.ClickException("--domains 로 도메인을 지정하세요(예: --domains '*.univ.example,univ.example')")
+    subject = {k: v for k, v in {"C": country, "ST": state, "L": locality, "O": org, "OU": ou}.items() if v}
+    try:
+        key_pem, csr_pem = generate_csr(names, key_type, subject)
+        kp, cp = save_pending(cs.state_dir, cs.name, key_pem, csr_pem, force)
+    except ManualError as e:
+        raise click.ClickException(str(e))
+    click.echo(f"키(0600): {kp}\nCSR: {cp}\n\n아래 CSR 을 CA(예: RapidSSL/DigiCert)에 제출하세요. 개인키는 외부로 보내지 마세요.\n")
+    click.echo(csr_pem.decode())
+    click.echo("CA 에서 인증서를 받으면: certdeploy import --file <서버 인증서> [--file <중간 CA 번들>] --deploy")
+
+
+@main.command("import")
+@click.option("--file", "files", multiple=True, type=click.Path(), help="CA 가 준 인증서 파일(서버 인증서, 중간 CA 번들 등; PEM/DER/PKCS#7 가능). 여러 번 지정")
+@click.option("--key-file", type=click.Path(), help="개인키 PEM(생략하면 csr 로 만든 대기 키 사용)")
+@click.option("--key-pass-env", help="개인키 암호가 든 환경변수 이름")
+@click.option("--pfx", type=click.Path(), help="키+인증서가 든 PFX/P12 (이 경우 --file 불필요)")
+@click.option("--pfx-pass-env", help="PFX 비밀번호가 든 환경변수 이름")
+@click.option("--dry-run", is_flag=True, help="검증·정리 결과만 보여주고 설치하지 않음")
+@click.option("--deploy", "do_deploy", is_flag=True, help="설치 후 바로 배포")
+@click.option("--force-deploy", is_flag=True)
+@click.pass_obj
+def import_cmd(obj, files, key_file, key_pass_env, pfx, pfx_pass_env, dry_run, do_deploy, force_deploy):
+    """수동으로 받은 인증서를 검증·정리(체인 정렬)해 설정된 위치에 설치한다. 선택적으로 바로 배포."""
+    cfg, cs = _one_set(obj)
+    used_pending = None
+    try:
+        if pfx:
+            key, certs = load_pfx(pfx, os.environ.get(pfx_pass_env or ""))
+            certs += collect_certs(list(files)) if files else []
+        else:
+            if not files:
+                raise ManualError("--file 로 CA 가 준 인증서 파일을 지정하거나 --pfx 를 사용하세요")
+            certs = collect_certs(list(files))
+            if key_file:
+                key = load_key_file(key_file, os.environ.get(key_pass_env or ""))
+            else:
+                used_pending = os.path.join(pending_dir(cs.state_dir, cs.name), "key.pem")
+                if not os.path.exists(used_pending):
+                    raise ManualError("개인키가 없습니다 — 먼저 `certdeploy csr` 로 키/CSR 을 만들었거나 --key-file 을 지정해야 합니다")
+                key = load_key_file(used_pending)
+        bundle, notes = build_bundle(certs, key)
+    except ManualError as e:
+        click.echo(f"가져오기 실패: {e}", err=True)
+        sys.exit(2)
+    click.echo(f"서버 인증서: 일련번호 {bundle.serial:x}, 유효 {bundle.not_before:%Y-%m-%d} ~ {bundle.not_after:%Y-%m-%d} (남은 {bundle.days_left():.0f}일)")
+    click.echo(f"SAN: {', '.join(bundle.names)}   중간 CA {len(bundle.chain)}개")
+    for n in notes:
+        click.echo(f"주의: {n}")
+    if dry_run:
+        click.echo("(--dry-run) 설치하지 않았습니다.")
+        return
+    os.makedirs(os.path.dirname(cs.cert_file), mode=0o700, exist_ok=True)
+    os.makedirs(os.path.dirname(cs.key_file), mode=0o700, exist_ok=True)
+    backups = install_bundle(cs.cert_file, cs.key_file, bundle)
+    click.echo(f"설치 완료: {cs.cert_file} (서버+중간 CA), {cs.key_file} (0600)")
+    for b in backups:
+        click.echo(f"이전 파일 백업: {b}")
+    if used_pending:                      # 개인키 사본이 두 곳에 남지 않도록 대기 키 삭제
+        try:
+            os.remove(used_pending)
+        except OSError:
+            pass
+    if do_deploy:
+        sys.exit(_run_deploy(cfg, cs, _bundle(cs), force_deploy, False, (), False, action="import"))
+
+
 @main.command("verify-audit")
 @click.pass_obj
 def verify_audit(obj):

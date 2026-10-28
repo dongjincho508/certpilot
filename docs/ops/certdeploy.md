@@ -170,7 +170,18 @@ echo 'TOMCAT_KS_PASS=...' | sudo tee /etc/certdeploy/env >/dev/null && sudo chow
 | `--cert NAME`(전역 옵션) | `certificates:` 목록 중 하나만 대상으로 실행 |
 | `rollback --target N` | 마지막 배포 이전 파일로 되돌리고 재로드 |
 | `issue [--staging] [--no-deploy]` / `renew` | lego 발급·갱신 후 배포(타이머가 `renew` 를 호출) |
+| `csr --domains A,B [--key-type rsa2048\|rsa3072\|rsa4096\|ecdsa256\|ecdsa384] [--org ..] [--force]` | **수동 발급용** 개인키+CSR 생성. 키는 `state_dir/pending/<name>/key.pem`(0600), CSR 은 화면 출력 |
+| `import --file F... [--key-file K] [--pfx P --pfx-pass-env V] [--dry-run] [--deploy]` | CA 가 준 인증서(PEM/DER/p7b)·PFX 를 정리·검증·설치(+배포) |
 종료 코드: 0 성공 · 1 배포/점검 문제 · 2 설정·인증서 오류 · 3 다른 작업 실행 중(동시 실행 방지 잠금)
+
+## 5-1. DNS 연동 없이: 상용 와일드카드를 수동 추가하고 자동 배포
+lego/Infoblox 없이도 배포 자동화는 그대로 쓸 수 있다. 설정에는 `lego:` 를 빼고 `certificate:`(cert_file/key_file)와 `targets:` 만 둔다.
+
+1. `certdeploy -c cd.yml csr --domains '*.univ.example,univ.example' --country KR --org '대학명'` → 출력된 CSR 을 CA(RapidSSL 등) 주문 화면에 붙여 넣는다. 개인키는 서버를 떠나지 않는다.
+2. CA 가 보낸 서버 인증서·중간 CA(.cer/.pem/.p7b)를 서버에 올린다(순서·루트 포함 여부 무관).
+3. `certdeploy -c cd.yml import --file server.cer --file intermediates.p7b --dry-run` 로 검증(키 일치·유효기간·SAN·체인) 후, `--deploy` 로 설치와 배포를 한 번에 한다. 이전 파일은 `.bak-<시각>` 으로 보존되고 대기 키는 삭제된다.
+4. CA 에서 PFX 를 받았다면 `import --pfx F --pfx-pass-env PW`. (CSR 없이 CA 가 키를 만든 경우)
+5. 갱신 주기마다(현재 약 200일, 단축 예정) 1~3 을 반복. 만료 전 알림은 감시 스택의 만료 임박 규칙이 담당한다.
 
 ## 6. 실패했을 때
 | 상황 | 동작 |

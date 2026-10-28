@@ -122,3 +122,6 @@ targets:
 #     lego: {email: cert-admin@univ.example, http_webroot: /var/www/html, domains: ["portal.univ.example"], path: /var/lib/lego/portal, key_type: ec256}
 #     targets: [...]
 # 인증서별 상태는 state_dir/<name>/ 에 분리 저장되며, --cert <name> 으로 하나만 실행할 수 있다.
+
+# ---- DNS 연동 없이 수동 구매 인증서를 쓸 때: 위 lego 블록을 지우고 certificate/targets 만 두면 된다.
+#      발급: certdeploy csr → CA 제출 → certdeploy import --deploy  (docs/ops/certdeploy.md 5-1)

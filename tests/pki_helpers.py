@@ -50,3 +50,17 @@ def make_pki(tmp_path, name="issued", san=("univ.example", "*.univ.example"), da
     key_path.write_bytes((key_to or key).private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
                                                        serialization.NoEncryption()))
     return cert_path, key_path, leaf, key
+
+
+def sign_csr(csr_pem: bytes, shared_ca: dict, days_from=-1, days_to=200):
+    """테스트용 CA(shared_ca)가 CSR 을 서명해 서버 인증서를 발급한다(상용 CA 의 동작 모사)."""
+    csr = x509.load_pem_x509_csr(csr_pem)
+    now = dt.datetime.now(dt.timezone.utc)
+    b = (x509.CertificateBuilder().subject_name(csr.subject).issuer_name(shared_ca["inter"].subject)
+         .public_key(csr.public_key()).serial_number(x509.random_serial_number())
+         .not_valid_before(now + dt.timedelta(days=days_from)).not_valid_after(now + dt.timedelta(days=days_to))
+         .add_extension(x509.SubjectKeyIdentifier.from_public_key(csr.public_key()), critical=False)
+         .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(shared_ca["inter_key"].public_key()), critical=False))
+    for ext in csr.extensions:
+        b = b.add_extension(ext.value, ext.critical)
+    return b.sign(shared_ca["inter_key"], hashes.SHA256())
