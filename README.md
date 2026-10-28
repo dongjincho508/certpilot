@@ -46,6 +46,7 @@ docs/            PRD · 결정 기록 · ARCHITECTURE · TRACEABILITY · OPEN_IT
 | [ARCHITECTURE](docs/ARCHITECTURE.md) | 구현 구조·조회 흐름·설계 결정 |
 | [TRACEABILITY](docs/TRACEABILITY.md) | 요구사항 → 코드 → 테스트, AC 상태 |
 | [OPEN_ITEMS](docs/OPEN_ITEMS.md) | 미확정·이월 항목 |
+| [ROADMAP](docs/ROADMAP.md) | 제품 방향·단계별 계획·오너 결정 사항(제안) |
 | [설계 색인](docs/design/README.md) | API · 인프라 · PKI · UI · 위협 모델 · 테스트 |
 | [결정 기록](docs/decisions.md) · [릴리스 상태](docs/release-approval.md) | |
 
