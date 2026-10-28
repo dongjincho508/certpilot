@@ -173,9 +173,11 @@ echo 'TOMCAT_KS_PASS=...' | sudo tee /etc/certdeploy/env >/dev/null && sudo chow
 | `schema` | 설정 파일 JSON Schema 출력(편집기 자동완성) — `certdeploy schema > certdeploy.schema.json` |
 | `rollback --target N` | 마지막 배포 이전 파일로 되돌리고 재로드 |
 | `issue [--staging] [--no-deploy]` / `renew` | lego 발급·갱신 후 배포(타이머가 `renew` 를 호출) |
+| `issue`/`renew`(설정에 `acme:`) | **내장 ACME(Let's Encrypt, DNS-01)**: 연동(infoblox) 자동 또는 수동(TXT 안내→재실행). [auto-issue.md](auto-issue.md) |
+| `acme-reset` | 진행 중인 내장 ACME 주문(대기 키·TXT 안내) 폐기 |
 | `csr --domains A,B [--key-type rsa2048\|rsa3072\|rsa4096\|ecdsa256\|ecdsa384] [--org ..] [--force]` | **수동 발급용** 개인키+CSR 생성. 키는 `state_dir/pending/<name>/key.pem`(0600), CSR 은 화면 출력 |
 | `import --file F... [--key-file K] [--pfx P --pfx-pass-env V] [--dry-run] [--deploy]` | CA 가 준 인증서(PEM/DER/p7b)·PFX 를 정리·검증·설치(+배포) |
-종료 코드: 0 성공 · 1 배포/점검 문제 · 2 설정·인증서 오류 · 3 다른 작업 실행 중(동시 실행 방지 잠금)
+종료 코드: 0 성공 · 1 배포/점검 문제 · 2 설정·인증서 오류 · 3 다른 작업 실행 중(동시 실행 방지 잠금) · 4 DNS TXT 등록 대기(수동 발급, 오류 아님)
 
 ## 5-1. DNS 연동 없이: 상용 와일드카드를 수동 추가하고 자동 배포
 lego/Infoblox 없이도 배포 자동화는 그대로 쓸 수 있다. 설정에는 `lego:` 를 빼고 `certificate:`(cert_file/key_file)와 `targets:` 만 둔다.

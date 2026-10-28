@@ -222,7 +222,10 @@ echo 'TOMCAT_KS_PASS=<비밀번호>' | sudo tee /etc/certdeploy/env >/dev/null &
 CD="sudo -u certdeploy /opt/certdeploy/venv/bin/certdeploy -c /etc/certdeploy/certdeploy.yml"
 ```
 
-### 7-3. (선택) lego 자동 발급을 쓸 때만
+### 7-3. (선택) 자동 발급 — **내장 ACME(권장, lego 불필요)** 또는 lego
+내장 ACME(Let's Encrypt, DNS-01)는 [자동 발급 가이드](auto-issue.md)를 따른다(설정 예시 `certdeploy/certdeploy.acme.example.yml`, Infoblox 연동 또는 수동 TXT 방식). 아래는 lego 를 대신 쓰고 싶을 때만 필요하다.
+
+#### lego 설치(대체 방식)
 ```bash
 LEGO_VER=X.Y.Z   # https://github.com/go-acme/lego/releases 에서 확인한 최신 버전 번호로 바꾼다
 ```

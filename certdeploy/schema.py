@@ -30,10 +30,20 @@ def _target() -> dict:
         "order": _I, "canary": _B, "soak_seconds": _I, "soak_interval": _I, "hook_env": {"type": "array", "items": _S}}}
 
 
+def _acme() -> dict:
+    infoblox = {"type": "object", "required": ["host", "user_env", "password_env"], "properties": {
+        "host": _S, "wapi_version": _S, "view": _S, "user_env": _S, "password_env": _S, "ca_file": _PATH, "verify": _B, "ttl": _I, "scheme": {"enum": ["https", "http"]}}}
+    dns = {"type": "object", "additionalProperties": False, "properties": {
+        "mode": {"enum": ["infoblox", "manual"]}, "check_resolvers": {"type": "array", "items": _S}, "propagation_timeout": _I, "infoblox": infoblox}}
+    return {"type": "object", "required": ["domains"], "additionalProperties": False, "properties": {
+        "directory": {"type": "string", "pattern": "^https://"}, "email": _S, "domains": {"type": "array", "minItems": 1, "items": _S},
+        "key_type": {"enum": ["rsa2048", "rsa3072", "rsa4096", "ec256", "ec384"]}, "renew_days": _I, "dns": dns}}
+
+
 def config_schema() -> dict:
     target = _target()
     certset = {"type": "object", "properties": {"name": _S, "certificate": {"type": "object", "properties": {
-        "cert_file": _PATH, "key_file": _PATH, "key_password_env": _S}}, "lego": {"type": "object"},
+        "cert_file": _PATH, "key_file": _PATH, "key_password_env": _S}}, "lego": {"type": "object"}, "acme": _acme(),
         "targets": {"type": "array", "items": target}}}
     notify = {"type": "object", "additionalProperties": False, "properties": {
         "alertmanager_url": {"type": "string", "pattern": "^https?://"}, "pushgateway_url": {"type": "string", "pattern": "^https?://"},
@@ -44,5 +54,5 @@ def config_schema() -> dict:
             "properties": {"state_dir": _PATH, "audit_log": _PATH, "options": _options(), "notify": notify, "defaults": {"type": "object"},
                            "lego": {"type": "object", "properties": {"binary": _S, "email": _S, "dns_provider": _S, "domains": {"type": "array", "items": _S},
                                                                     "path": _PATH, "env_file": _PATH, "renew_days": _I, "server": _S, "dns_resolvers": {"type": "array", "items": _S}}},
-                           "certificate": certset["properties"]["certificate"], "targets": {"type": "array", "items": target},
+                           "acme": _acme(), "certificate": certset["properties"]["certificate"], "targets": {"type": "array", "items": target},
                            "certificates": {"type": "array", "items": certset}}}

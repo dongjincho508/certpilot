@@ -1,4 +1,4 @@
-"""certdeploy 명령행. 종료 코드: 0 성공 · 1 배포/점검 문제 · 2 설정·인증서 오류 · 3 다른 작업 실행 중."""
+"""certdeploy 명령행. 종료 코드: 0 성공 · 1 배포/점검 문제 · 2 설정·인증서 오류 · 3 다른 작업 실행 중 · 4 DNS TXT 등록 대기(수동 발급)."""
 import csv
 import json
 import logging
@@ -11,7 +11,9 @@ import yaml
 
 from certpilot_core import diag as cpdiag, trace
 
-from . import __version__, diagnose as dg
+from . import __version__, acme, diagnose as dg
+from .dnsprov import DnsProviderError, build_provider
+from .dnsquery import DnsError, system_resolvers
 from .backup import BackupError, create_backup, restore_backup
 from .bundle import BundleError, key_permission_problems, load_bundle
 from .config import HOST_RE, NAME_RE, ConfigError, load_config
@@ -19,7 +21,7 @@ from .engine import Deployer
 from .handlers import TYPES
 from .manual import (ManualError, build_bundle, collect_certs, generate_csr, install_bundle, load_key_file, load_pfx,
                      pending_dir, save_pending)
-from .issuer import BackoffActive, IssueBackoff, IssueError, LegoIssuer, lego_output_paths
+from .issuer import STAGING as LE_STAGING, BackoffActive, IssueBackoff, IssueError, LegoIssuer, lego_output_paths
 from .notify import build_notifier
 from .preflight import run_preflight
 from .runlog import (STATUS_KO, finish_run, issue_failure_metrics, load_report, push_metrics, report_markdown)
@@ -267,7 +269,87 @@ def _lego_label(cs):
     return "lego" if cs.name == "default" else f"lego:{cs.name}"
 
 
+def _report_issue_failure(cs, notifier, backoff, message):
+    click.echo(f"발급 실패: {message}", err=True)
+    existing = _bundle(cs, exit_on_error=False)
+    left = existing.days_left() if existing else None
+    sev = "critical" if (left is None or left < 14) else "warning"
+    extra = f" (현재 인증서 만료까지 {left:.0f}일)" if left is not None else " (현재 사용 가능한 인증서 없음)"
+    notifier.fire(_lego_label(cs), f"인증서 발급·갱신 실패: {cs.name}", message + extra, sev)
+    if cs.notify.pushgateway_url:
+        pw = os.environ.get(cs.notify.pushgateway_password_env or "") if cs.notify.pushgateway_password_env else None
+        push_metrics(cs.notify.pushgateway_url, cs.name, issue_failure_metrics(cs.name, backoff.failures),
+                     cs.notify.pushgateway_user, pw)
+    return 1
+
+
+EXIT_WAITING_DNS = 4          # 사람이 DNS 에 TXT 를 등록하기를 기다리는 중(수동 모드)
+
+
+def _issue_acme(cfg, cs, staging, force_run, no_deploy, force_deploy, ignore_backoff):
+    """내장 ACME(DNS-01). 연동(infoblox)은 한 번에, 수동(manual)은 'TXT 안내 → 등록 후 재실행' 두 단계."""
+    a = cs.acme
+    notifier = build_notifier(cs.notify)
+    backoff = IssueBackoff(cs.state_dir)
+    directory = LE_STAGING if staging else a["directory"]
+    existing = _bundle(cs, exit_on_error=False)
+    pend = acme.load_pending(cs.state_dir, cs.name)
+    if pend and pend.get("directory") != directory:
+        click.echo("이전에 시작한 주문이 다른 CA/디렉터리용이라 폐기하고 새로 시작합니다", err=True)
+        acme.clear_pending(cs.state_dir, cs.name)
+        pend = None
+    if not pend and not staging and existing and not force_run and existing.days_left() > a["renew_days"]:
+        click.echo(f"[{cs.name}] 갱신 불필요: 만료까지 {existing.days_left():.0f}일(기준 {a['renew_days']}일 이내에 갱신)")
+        return 0 if no_deploy else _run_deploy(cfg, cs, existing, force_deploy, False, (), False, action="renew")
+    try:
+        if not ignore_backoff:
+            backoff.check(cs.options.lego_backoff_minutes)
+        client = acme.load_account(cs.state_dir, directory, a["email"])
+        provider = build_provider(a["dns"])
+        resolvers = a["dns"]["check_resolvers"] or system_resolvers()
+        if provider.automatic:
+            if pend:
+                acme.clear_pending(cs.state_dir, cs.name)
+            key_pem, chain = acme.issue_with_provider(client, provider, cs.state_dir, cs.name, a["domains"], a["key_type"],
+                                                      resolvers, a["dns"]["propagation_timeout"])
+        else:
+            if not pend:
+                pend = acme.start_order(client, cs.state_dir, cs.name, a["domains"], a["key_type"])
+            missing = acme.wait_visible(acme.txt_records(pend), resolvers, 0) if acme.txt_records(pend) else []
+            if missing:
+                text = acme.instructions(pend)
+                click.echo(f"[{cs.name}] DNS TXT 등록 대기 중\n{text}")
+                if missing != acme.txt_records(pend):
+                    click.echo("아직 보이지 않는 레코드: " + ", ".join(n for n, _ in missing))
+                notifier.fire(_lego_label(cs) + ":dns", f"DNS TXT 등록 필요: {cs.name}", text, "warning")
+                return EXIT_WAITING_DNS
+            key_pem, chain = acme.complete_order(client, pend, cs.state_dir)
+        if staging:                                   # 시험 발급분은 신뢰되지 않으므로 운영 위치에 설치·배포하지 않는다
+            sdir = os.path.join(cs.state_dir, "acme", "staging")
+            bundle, _ = acme.install_issued(key_pem, chain, os.path.join(sdir, cs.name + ".crt"), os.path.join(sdir, cs.name + ".key"))
+            acme.clear_pending(cs.state_dir, cs.name)
+            click.echo(f"[{cs.name}] 스테이징 발급 성공(일련번호 {bundle.serial:x}) — 운영 위치에는 설치하지 않았습니다. 이제 --staging 없이 실행하세요")
+            return 0
+        bundle, _ = acme.install_issued(key_pem, chain, cs.cert_file, cs.key_file)
+        acme.clear_pending(cs.state_dir, cs.name)
+    except BackoffActive as e:
+        click.echo(f"발급 건너뜀: {e}", err=True)
+        return 0
+    except (acme.AcmeError, DnsProviderError, ManualError, DnsError, OSError) as e:
+        backoff.record_failure()
+        return _report_issue_failure(cs, notifier, backoff, f"{type(e).__name__}: {e}")
+    backoff.record_success()
+    notifier.resolve(_lego_label(cs))
+    notifier.resolve(_lego_label(cs) + ":dns")
+    click.echo(f"[{cs.name}] 발급 완료: 일련번호 {bundle.serial:x}, 만료 {bundle.not_after:%Y-%m-%d} → {cs.cert_file}")
+    if no_deploy:
+        return 0
+    return _run_deploy(cfg, cs, _bundle(cs), force_deploy, False, (), False, action="renew", issue_failures=0)
+
+
 def _issue_one(cfg, cs, staging, force_run, no_deploy, force_deploy, ignore_backoff):
+    if cs.acme:
+        return _issue_acme(cfg, cs, staging, force_run, no_deploy, force_deploy, ignore_backoff)
     if not cs.lego:
         click.echo(f"[{cs.name}] lego 설정이 없어 발급을 건너뜁니다", err=True)
         return 1
@@ -281,17 +363,7 @@ def _issue_one(cfg, cs, staging, force_run, no_deploy, force_deploy, ignore_back
         click.echo(f"발급 건너뜀: {e}", err=True)
         action = None
     except IssueError as e:
-        click.echo(f"발급 실패: {e}", err=True)
-        existing = _bundle(cs, exit_on_error=False)
-        left = existing.days_left() if existing else None
-        sev = "critical" if (left is None or left < 14) else "warning"
-        extra = f" (현재 인증서 만료까지 {left:.0f}일)" if left is not None else " (현재 사용 가능한 인증서 없음)"
-        notifier.fire(_lego_label(cs), f"인증서 발급·갱신 실패: {cs.name}", str(e) + extra, sev)
-        if cs.notify.pushgateway_url:
-            pw = os.environ.get(cs.notify.pushgateway_password_env or "") if cs.notify.pushgateway_password_env else None
-            push_metrics(cs.notify.pushgateway_url, cs.name, issue_failure_metrics(cs.name, backoff.failures),
-                         cs.notify.pushgateway_user, pw)
-        return 1
+        return _report_issue_failure(cs, notifier, backoff, str(e))
     if action:
         notifier.resolve(_lego_label(cs))
         click.echo(f"lego {action} 완료 → {lego_output_paths(cs.lego)[0]}")
@@ -473,6 +545,16 @@ def schema():
     """설정 파일의 JSON Schema 를 출력한다(편집기 자동완성·검증용: yaml-language-server 등)."""
     from .schema import config_schema
     click.echo(json.dumps(config_schema(), ensure_ascii=False, indent=2))
+
+
+@main.command("acme-reset")
+@click.pass_obj
+def acme_reset(obj):
+    """진행 중인 내장 ACME 주문(대기 키·TXT 안내)을 폐기한다. 처음부터 다시 시작할 때 사용."""
+    cfg, cs = _one_set(obj)
+    had = acme.load_pending(cs.state_dir, cs.name) is not None
+    acme.clear_pending(cs.state_dir, cs.name)
+    click.echo("대기 중인 주문을 폐기했습니다" if had else "대기 중인 주문이 없습니다")
 
 
 @main.command("trace")

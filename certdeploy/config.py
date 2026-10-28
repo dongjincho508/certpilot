@@ -114,6 +114,7 @@ class CertSet:
     lego: Optional[dict]
     state_dir: str                    # 이 인증서의 상태 디렉터리
     audit_dir: Optional[str] = None
+    acme: Optional[dict] = None       # 내장 ACME 클라이언트 설정(검증·기본값 적용 후)
 
 
 @dataclass
@@ -128,7 +129,7 @@ class Config:
         """인증서가 하나일 때 cfg.targets, cfg.cert_file 같은 접근을 그 인증서로 위임(하위 호환)."""
         if name == "certs":      # copy/pickle 중 속성이 아직 없을 때의 무한 재귀 방지
             raise AttributeError(name)
-        if name in ("cert_file", "key_file", "key_password_env", "targets", "lego", "name") and len(self.certs) == 1:
+        if name in ("cert_file", "key_file", "key_password_env", "targets", "lego", "acme", "name") and len(self.certs) == 1:
             return getattr(self.certs[0], name)
         raise AttributeError(name)
 
@@ -260,10 +261,48 @@ def _parse_target(raw, defaults, label_prefix, problems, seen) -> Optional[Targe
                   int(raw.get("soak_interval", 10)), [str(x) for x in (raw.get("hook_env") or [])])
 
 
+def _parse_acme(a, label, problems) -> Optional[dict]:
+    if not isinstance(a, dict):
+        problems.append(f"{label} acme 는 매핑이어야 합니다")
+        return None
+    out = {"directory": a.get("directory", "https://acme-v02.api.letsencrypt.org/directory"), "email": a.get("email"),
+           "domains": [str(d).strip() for d in (a.get("domains") or [])], "key_type": a.get("key_type", "rsa2048"),
+           "renew_days": int(a.get("renew_days", 30))}
+    if not out["domains"]:
+        problems.append(f"{label} acme.domains 가 필요합니다")
+    for d in out["domains"]:
+        if " " in d or "/" in d or d.count("*") > 1 or ("*" in d and not d.startswith("*.")):
+            problems.append(f"{label} acme.domains 형식이 올바르지 않습니다: {d!r}")
+    if out["key_type"] not in ("rsa2048", "rsa3072", "rsa4096", "ec256", "ec384"):
+        problems.append(f"{label} acme.key_type 이 올바르지 않습니다: {out['key_type']!r}")
+    if not (out["directory"].startswith("https://") or out["directory"].startswith("http://127.0.0.1")):
+        problems.append(f"{label} acme.directory 는 https:// 여야 합니다")
+    dns = a.get("dns") or {}
+    mode = dns.get("mode", "manual")
+    out["dns"] = {"mode": mode, "check_resolvers": [str(x) for x in (dns.get("check_resolvers") or [])],
+                  "propagation_timeout": int(dns.get("propagation_timeout", 300))}
+    if mode == "infoblox":
+        i = dns.get("infoblox") or {}
+        for k in ("host", "user_env", "password_env"):
+            if not i.get(k):
+                problems.append(f"{label} acme.dns.infoblox.{k} 가 필요합니다")
+        out["dns"]["infoblox"] = i
+    elif mode != "manual":
+        problems.append(f"{label} acme.dns.mode 는 infoblox 또는 manual 이어야 합니다")
+    return out
+
+
 def _parse_certset(spec, name, defaults, state_dir, options, notify, audit_dir, problems, multi) -> Optional[CertSet]:
     cert = spec.get("certificate") or {}
     lego = spec.get("lego")
     cert_file, key_file = cert.get("cert_file"), cert.get("key_file")
+    acme = _parse_acme(spec["acme"], f"[{name}]", problems) if spec.get("acme") else None
+    if acme and lego:
+        problems.append(f"[{name}] acme 와 lego 를 함께 쓸 수 없습니다")
+    cert_state = f"{state_dir.rstrip('/')}/{name}" if multi else state_dir
+    if acme and acme["domains"] and not (cert_file and key_file):
+        base = acme["domains"][0].replace("*", "_")
+        cert_file, key_file = f"{cert_state}/managed/{base}.crt", f"{cert_state}/managed/{base}.key"
     if lego and not (cert_file and key_file):
         if not lego.get("domains"):
             problems.append(f"[{name}] lego.domains 가 필요합니다")
@@ -283,7 +322,7 @@ def _parse_certset(spec, name, defaults, state_dir, options, notify, audit_dir, 
     if not spec.get("targets"):
         problems.append(f"[{name}] targets 가 비어 있습니다")
     return CertSet(name, cert_file or "", key_file or "", cert.get("key_password_env"), targets, options, notify,
-                   lego, f"{state_dir.rstrip('/')}/{name}" if multi else state_dir, audit_dir)
+                   lego, cert_state, audit_dir, acme)
 
 
 def parse_config(data: dict) -> Config:
@@ -304,8 +343,8 @@ def parse_config(data: dict) -> Config:
 
     certs: List[CertSet] = []
     if data.get("certificates"):
-        if data.get("targets") or data.get("certificate") or data.get("lego"):
-            problems.append("certificates 와 최상위 targets/certificate/lego 를 함께 쓸 수 없습니다")
+        if data.get("targets") or data.get("certificate") or data.get("lego") or data.get("acme"):
+            problems.append("certificates 와 최상위 targets/certificate/lego/acme 를 함께 쓸 수 없습니다")
         names = set()
         for i, spec in enumerate(data["certificates"], start=1):
             name = spec.get("name", "") if isinstance(spec, dict) else ""
