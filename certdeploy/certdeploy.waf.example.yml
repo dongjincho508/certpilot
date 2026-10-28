@@ -1,4 +1,5 @@
 # 웹방화벽(WAF)·로드밸런서·어플라이언스 배포 예시 — type: http_api (제품 관리 API 를 설정으로 기술)
+# 옵션: A=HTTP API(이 파일의 waf-main), B=SSH CLI(아래 주석 C 예시), C=사람이 교체 → certdeploy.waf-manual.example.yml
 # ※ 아래 경로·필드명·응답 형식은 "구조를 보여 주는 가상 예시"다. 실제 제품(WAPPLES, WEBFRONT, FortiWeb, F5 등)의 관리 API 문서와
 #    장비로 확인해 url/필드를 바꿔야 한다. API 가 없는 장비는 아래 SSH(generic) 방식이나 GUI 수동 교체를 쓴다.
 #    docs/ops/compatibility.md 참고.

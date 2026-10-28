@@ -34,7 +34,9 @@ def _target() -> dict:
     files = {"type": "array", "items": {"type": "object", "required": ["path", "content"], "properties": {
         "path": _PATH, "content": {"enum": list(CONTENT_KINDS)}, "mode": _S, "password_env": _S, "password_file": _PATH, "alias": _S, "legacy_pkcs12": _B}}}
     return {"type": "object", "required": ["name", "type"], "properties": {
-        "name": {"type": "string", "pattern": r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"}, "type": {"enum": list(TYPES) + ["http_api"]}, "api": _api(),
+        "name": {"type": "string", "pattern": r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"}, "type": {"enum": list(TYPES) + ["http_api", "manual"]}, "api": _api(),
+        "manual": {"type": "object", "properties": {"instructions": _S, "export_dir": _PATH, "formats": {"type": "array", "items": {"enum": ["pem", "pfx"]}},
+                                                    "pfx_password_env": _S, "pfx_alias": _S, "remind_days": _I}},
         "transport": transport, "cert_path": _PATH, "key_path": _PATH, "keystore_path": _PATH, "format": {"enum": ["pkcs12", "jks", "pem"]},
         "password_env": _S, "password_file": _PATH, "alias": _S, "legacy_pkcs12": _B, "files": files,
         "check_cmd": _S, "reload_cmd": _S, "pre_cmd": _S, "post_cmd": _S, "verify": verify, "health": health,
@@ -54,7 +56,7 @@ def _acme() -> dict:
 def config_schema() -> dict:
     target = _target()
     certset = {"type": "object", "properties": {"name": _S, "certificate": {"type": "object", "properties": {
-        "cert_file": _PATH, "key_file": _PATH, "key_password_env": _S}}, "lego": {"type": "object"}, "acme": _acme(),
+        "cert_file": _PATH, "key_file": _PATH, "key_password_env": _S, "key_encryption": {"enum": ["none", "passphrase"]}}}, "lego": {"type": "object"}, "acme": _acme(),
         "targets": {"type": "array", "items": target}}}
     notify = {"type": "object", "additionalProperties": False, "properties": {
         "alertmanager_url": {"type": "string", "pattern": "^https?://"}, "pushgateway_url": {"type": "string", "pattern": "^https?://"},

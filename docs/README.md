@@ -32,7 +32,8 @@
 |---|---|
 | `certdeploy.manual.example.yml` | 상용 인증서(와일드카드)를 **수동으로 가져와** 자동 배포 |
 | `certdeploy.acme.example.yml` | Let's Encrypt **자동 발급**(`hnu.kr`=Infoblox 연동, `hannam.ac.kr`=수동 TXT) + 배포 |
-| `certdeploy.waf.example.yml` | 웹방화벽(HTTP API)·F5 형 CLI 장비 배포 구조 예시(가상 필드) |
+| `certdeploy.waf.example.yml` | 웹방화벽 옵션 A(HTTP API)·B(SSH CLI, F5 형) 구조 예시(가상 필드) |
+| `certdeploy.waf-manual.example.yml` | 웹방화벽 옵션 C — **사람이 교체**(교체용 파일 준비·메일 안내·독촉·서빙 확인) |
 | `certdeploy.example.yml` | lego 엔진 포함 전체 항목 설명 |
 | `certdeploy schema` | 설정 JSON Schema 출력(편집기 자동완성) |
 

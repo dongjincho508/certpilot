@@ -57,6 +57,22 @@ def generate_csr(domains: List[str], key_type: str = "rsa2048", subject: Optiona
             csr.public_bytes(serialization.Encoding.PEM))
 
 
+def encrypt_key_pem(key_pem: bytes, password: str) -> bytes:
+    """개인키 PEM 을 암호(PKCS#8, AES-256)로 보호한 PEM 으로 바꾼다."""
+    key = serialization.load_pem_private_key(key_pem, None)
+    return key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.BestAvailableEncryption(password.encode()))
+
+
+def decrypt_key_pem(key_pem: bytes, password: Optional[str]) -> bytes:
+    try:
+        key = serialization.load_pem_private_key(key_pem, password.encode() if password else None)
+    except TypeError:
+        raise ManualError("개인키가 암호로 보호되어 있습니다(암호 환경변수 필요)")
+    except ValueError:
+        raise ManualError("개인키를 해석할 수 없습니다(형식 오류 또는 암호 불일치)")
+    return key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
+
+
 def pending_dir(state_dir: str, name: str) -> str:
     return os.path.join(state_dir, "pending", name)
 
@@ -71,13 +87,13 @@ def _write_private(path: str, data: bytes, mode: int = 0o600) -> None:
     os.replace(tmp, path)
 
 
-def save_pending(state_dir: str, name: str, key_pem: bytes, csr_pem: bytes, force: bool = False) -> Tuple[str, str]:
+def save_pending(state_dir: str, name: str, key_pem: bytes, csr_pem: bytes, force: bool = False, key_password: Optional[str] = None) -> Tuple[str, str]:
     """대기 키/CSR 저장. 이미 대기 중인 키가 있으면 덮어쓰지 않는다(CA 에 이미 제출한 CSR 의 키를 잃지 않도록)."""
     d = pending_dir(state_dir, name)
     kp, cp = os.path.join(d, "key.pem"), os.path.join(d, f"{name}.csr")
     if os.path.exists(kp) and not force:
         raise ManualError(f"이미 대기 중인 키가 있습니다({kp}). 새로 만들려면 --force (제출한 CSR 의 키를 잃게 됩니다)")
-    _write_private(kp, key_pem, 0o600)
+    _write_private(kp, encrypt_key_pem(key_pem, key_password) if key_password else key_pem, 0o600)
     _write_private(cp, csr_pem, 0o644)
     return kp, cp
 
@@ -185,7 +201,7 @@ def build_bundle(certs: List[x509.Certificate], key) -> Tuple[Bundle, List[str]]
 
 
 # ------------------------------------------------------------------ 설치
-def install_bundle(cert_file: str, key_file: str, b: Bundle, now: Optional[datetime] = None) -> List[str]:
+def install_bundle(cert_file: str, key_file: str, b: Bundle, now: Optional[datetime] = None, key_password: Optional[str] = None) -> List[str]:
     """fullchain(서버+중간 CA)과 키를 설정된 위치에 원자적으로 설치한다. 기존 파일은 `.bak-<시각>` 으로 보존."""
     now = now or datetime.now(timezone.utc)
     ts = now.strftime("%Y%m%d%H%M%S")
@@ -197,5 +213,5 @@ def install_bundle(cert_file: str, key_file: str, b: Bundle, now: Optional[datet
             _write_private(bak, data, 0o600)          # 백업에 키가 있을 수 있으므로 600
             backups.append(bak)
     _write_private(cert_file, b.fullchain_pem(), 0o644)
-    _write_private(key_file, b.key_pem(), 0o600)
+    _write_private(key_file, encrypt_key_pem(b.key_pem(), key_password) if key_password else b.key_pem(), 0o600)    # 암호 지정 시 저장본은 암호화(배포 때만 메모리에서 복호화)
     return backups

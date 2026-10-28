@@ -9,6 +9,9 @@ audit_log: /var/lib/certdeploy/audit
 notify:
   alertmanager_url: http://127.0.0.1:9093
   pushgateway_url: http://127.0.0.1:9091
+  # 메일(우선 채널): 실패·수동 교체 필요·DNS TXT 등록 필요는 항상, 성공 요약은 on_success 가 true 일 때. 비밀번호는 /etc/certdeploy/env 의 SMTP_PASSWORD
+  smtp: {host: smtp.hnu.kr, port: 587, starttls: true, from: cert-deploy@hnu.kr, to: [cert-admin@hnu.kr], username: cert-deploy, password_env: SMTP_PASSWORD, on_success: true}
+  # webhook: {url_env: CERTDEPLOY_WEBHOOK_URL, format: teams}      # Teams 는 이후 추가(웹훅 URL 은 환경변수로)
 
 defaults:
   transport: {kind: ssh, user: deploy, key_file: /var/lib/certdeploy/.ssh/id_ed25519, known_hosts: /var/lib/certdeploy/.ssh/known_hosts}

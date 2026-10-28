@@ -54,8 +54,27 @@ def _hdr(cs, many):
         click.echo(f"== {cs.name} ==")
 
 
-def _bundle(cs, exit_on_error=True):
+def _key_read_pw(cs):
+    """저장된 개인키를 읽을 때 쓸 암호(환경변수가 있으면). 암호화 옵션이 켜져 있는데 없으면 안내와 함께 중단."""
     pw = os.environ.get(cs.key_password_env) if cs.key_password_env else None
+    if cs.key_encryption == "passphrase" and not pw:
+        raise click.ClickException(f"개인키 암호화가 켜져 있습니다 — 환경변수 {cs.key_password_env} 를 설정하세요(/etc/certdeploy/env)")
+    return pw
+
+
+def _key_write_pw(cs):
+    """개인키를 저장할 때 암호화할 암호. key_encryption: passphrase 일 때만(none 이면 평문 0600)."""
+    return _key_read_pw(cs) if cs.key_encryption == "passphrase" else None
+
+
+def _bundle(cs, exit_on_error=True):
+    try:
+        pw = _key_read_pw(cs)
+    except click.ClickException as e:
+        if not exit_on_error:
+            return None
+        click.echo(f"인증서 오류: {e.message}", err=True)
+        sys.exit(2)
     try:
         return load_bundle(cs.cert_file, cs.key_file, pw)
     except BundleError as e:
@@ -76,7 +95,7 @@ def _deployer(cs, bundle):
 def _print_results(results):
     for r in results:
         click.echo(f"[{r.name}] {STATUS_LABEL.get(r.status, r.status)}" + (f" — {r.message}" if r.message else ""))
-    ok = all(r.status in ("deployed", "skipped", "dry_run") for r in results)
+    ok = all(r.status in ("deployed", "skipped", "dry_run", "manual_pending") for r in results)
     n = {k: sum(1 for r in results if r.status == k) for k in STATUS_LABEL}
     click.echo("요약: " + ", ".join(f"{STATUS_LABEL[k]} {v}" for k, v in n.items() if v))
     return 0 if ok else 1
@@ -115,6 +134,11 @@ def validate(obj):
         _hdr(cs, len(sets) > 1)
         b = _bundle(cs)
         d = _deployer(cs, b)
+        enc = open(cs.key_file, "rb").read(400).find(b"ENCRYPTED") >= 0
+        click.echo(f"개인키 저장: {'암호화됨(' + cs.key_password_env + ')' if enc else '평문(권한 600으로 보호)'}  설정 key_encryption={cs.key_encryption}")
+        if enc != (cs.key_encryption == 'passphrase'):
+            click.echo(f"문제: 설정(key_encryption={cs.key_encryption})과 실제 키 파일 상태가 다릅니다 — certdeploy key-{'encrypt' if cs.key_encryption == 'passphrase' else 'decrypt'} 로 맞추세요")
+            code = 1
         click.echo(f"인증서 OK: 일련번호 {b.serial:x}, 만료 {b.not_after:%Y-%m-%d}(남은 {b.days_left():.0f}일), SAN {', '.join(b.names)}")
         for w in b.warnings:
             click.echo(f"주의: {w}")
@@ -311,10 +335,10 @@ def _issue_acme(cfg, cs, staging, force_run, no_deploy, force_deploy, ignore_bac
             if pend:
                 acme.clear_pending(cs.state_dir, cs.name)
             key_pem, chain = acme.issue_with_provider(client, provider, cs.state_dir, cs.name, a["domains"], a["key_type"],
-                                                      resolvers, a["dns"]["propagation_timeout"])
+                                                      resolvers, a["dns"]["propagation_timeout"], key_password=_key_write_pw(cs))
         else:
             if not pend:
-                pend = acme.start_order(client, cs.state_dir, cs.name, a["domains"], a["key_type"])
+                pend = acme.start_order(client, cs.state_dir, cs.name, a["domains"], a["key_type"], _key_write_pw(cs))
             missing = acme.wait_visible(acme.txt_records(pend), resolvers, 0) if acme.txt_records(pend) else []
             if missing:
                 text = acme.instructions(pend)
@@ -323,14 +347,14 @@ def _issue_acme(cfg, cs, staging, force_run, no_deploy, force_deploy, ignore_bac
                     click.echo("아직 보이지 않는 레코드: " + ", ".join(n for n, _ in missing))
                 notifier.fire(_lego_label(cs) + ":dns", f"DNS TXT 등록 필요: {cs.name}", text, "warning")
                 return EXIT_WAITING_DNS
-            key_pem, chain = acme.complete_order(client, pend, cs.state_dir)
+            key_pem, chain = acme.complete_order(client, pend, cs.state_dir, _key_read_pw(cs))
         if staging:                                   # 시험 발급분은 신뢰되지 않으므로 운영 위치에 설치·배포하지 않는다
             sdir = os.path.join(cs.state_dir, "acme", "staging")
-            bundle, _ = acme.install_issued(key_pem, chain, os.path.join(sdir, cs.name + ".crt"), os.path.join(sdir, cs.name + ".key"))
+            bundle, _ = acme.install_issued(key_pem, chain, os.path.join(sdir, cs.name + ".crt"), os.path.join(sdir, cs.name + ".key"), _key_write_pw(cs))
             acme.clear_pending(cs.state_dir, cs.name)
             click.echo(f"[{cs.name}] 스테이징 발급 성공(일련번호 {bundle.serial:x}) — 운영 위치에는 설치하지 않았습니다. 이제 --staging 없이 실행하세요")
             return 0
-        bundle, _ = acme.install_issued(key_pem, chain, cs.cert_file, cs.key_file)
+        bundle, _ = acme.install_issued(key_pem, chain, cs.cert_file, cs.key_file, _key_write_pw(cs))
         acme.clear_pending(cs.state_dir, cs.name)
     except BackoffActive as e:
         click.echo(f"발급 건너뜀: {e}", err=True)
@@ -431,7 +455,7 @@ def csr(obj, domains, key_type, country, state, locality, org, ou, force):
     subject = {k: v for k, v in {"C": country, "ST": state, "L": locality, "O": org, "OU": ou}.items() if v}
     try:
         key_pem, csr_pem = generate_csr(names, key_type, subject)
-        kp, cp = save_pending(cs.state_dir, cs.name, key_pem, csr_pem, force)
+        kp, cp = save_pending(cs.state_dir, cs.name, key_pem, csr_pem, force, key_password=_key_write_pw(cs))
     except ManualError as e:
         raise click.ClickException(str(e))
     click.echo(f"키(0600): {kp}\nCSR: {cp}\n\n아래 CSR 을 CA(예: RapidSSL/DigiCert)에 제출하세요. 개인키는 외부로 보내지 마세요.\n")
@@ -467,7 +491,7 @@ def import_cmd(obj, files, key_file, key_pass_env, pfx, pfx_pass_env, dry_run, d
                 used_pending = os.path.join(pending_dir(cs.state_dir, cs.name), "key.pem")
                 if not os.path.exists(used_pending):
                     raise ManualError("개인키가 없습니다 — 먼저 `certdeploy csr` 로 키/CSR 을 만들었거나 --key-file 을 지정해야 합니다")
-                key = load_key_file(used_pending)
+                key = load_key_file(used_pending, _key_read_pw(cs))
         with trace.span("import", "build_bundle", files=len(certs), pfx=bool(pfx), pending_key=bool(used_pending)) as ctx:
             bundle, notes = build_bundle(certs, key)
             ctx.update(serial=f"{bundle.serial:x}", chain=len(bundle.chain), notes=notes)
@@ -485,7 +509,7 @@ def import_cmd(obj, files, key_file, key_pass_env, pfx, pfx_pass_env, dry_run, d
     os.makedirs(os.path.dirname(cs.cert_file), mode=0o700, exist_ok=True)
     os.makedirs(os.path.dirname(cs.key_file), mode=0o700, exist_ok=True)
     with trace.span("import", "install", cert_file=cs.cert_file, key_file=cs.key_file) as ctx:
-        backups = install_bundle(cs.cert_file, cs.key_file, bundle)
+        backups = install_bundle(cs.cert_file, cs.key_file, bundle, key_password=_key_write_pw(cs))
         ctx["backups"] = backups
     click.echo(f"설치 완료: {cs.cert_file} (서버+중간 CA), {cs.key_file} (0600)")
     for b in backups:
@@ -545,6 +569,86 @@ def schema():
     """설정 파일의 JSON Schema 를 출력한다(편집기 자동완성·검증용: yaml-language-server 등)."""
     from .schema import config_schema
     click.echo(json.dumps(config_schema(), ensure_ascii=False, indent=2))
+
+
+@main.command("notify-test")
+@click.pass_obj
+def notify_test(obj):
+    """설정된 알림 채널(메일·Alertmanager·웹훅)로 시험 알림을 보낸다. 수신 여부는 받는 쪽에서 확인한다."""
+    cfg = _cfg(obj)
+    n = cfg.certs[0].notify
+    chans = []
+    if n.alertmanager_url:
+        chans.append(f"Alertmanager({n.alertmanager_url})")
+    if n.smtp:
+        chans.append(f"메일({', '.join(n.smtp.to)} ← {n.smtp.host}:{n.smtp.port})")
+    if n.webhook:
+        chans.append(f"웹훅({n.webhook.format})")
+    if not chans:
+        raise click.ClickException("알림 채널이 설정되어 있지 않습니다(notify.smtp / alertmanager_url / webhook)")
+    notifier = build_notifier(n)
+    notifier.fire("notify-test", "certdeploy 알림 시험", "알림 경로 시험입니다. 이 메시지가 도착했다면 정상이며, 무시하셔도 됩니다.", "warning")
+    notifier.resolve("notify-test")
+    click.echo("시험 알림을 보냈습니다: " + ", ".join(chans) + "\n전송 오류는 `certdeploy trace --errors` 의 notify/* 이벤트로 확인할 수 있습니다(수신함도 확인하세요).")
+
+
+@main.command()
+@click.option("--target", "name", required=True, help="수동 교체 대상 이름")
+@click.pass_obj
+def confirm(obj, name):
+    """수동 교체 대상(type: manual)의 교체 완료를 기록하고 교체용 파일(개인키 포함)을 삭제한다."""
+    cfg, sets = _sets(obj)
+    for cs in sets:
+        t = next((x for x in cs.targets if x.name == name), None)
+        if t is None:
+            continue
+        if not t.manual:
+            raise click.ClickException(f"{name} 은(는) 수동 교체 대상이 아닙니다")
+        d = _deployer(cs, _bundle(cs))
+        d.manual_done(t)
+        click.echo(f"[{name}] 수동 교체 완료를 기록했고 교체용 파일을 삭제했습니다")
+        return
+    raise click.ClickException(f"대상을 찾을 수 없습니다: {name}")
+
+
+@main.command("key-encrypt")
+@click.pass_obj
+def key_encrypt(obj):
+    """저장된 개인키를 암호(certificate.key_password_env)로 보호된 형태로 바꾼다. 이후 설정에 key_encryption: passphrase 를 켠다."""
+    _convert_key(obj, encrypt=True)
+
+
+@main.command("key-decrypt")
+@click.pass_obj
+def key_decrypt(obj):
+    """암호로 보호된 개인키를 평문(권한 600)으로 바꾼다. 이후 설정을 key_encryption: none 으로 바꾼다."""
+    _convert_key(obj, encrypt=False)
+
+
+def _convert_key(obj, encrypt: bool):
+    from .manual import decrypt_key_pem, encrypt_key_pem, _write_private
+    cfg, cs = _one_set(obj)
+    pw = os.environ.get(cs.key_password_env or "")
+    if not pw:
+        raise click.ClickException(f"암호가 든 환경변수 {cs.key_password_env or '(certificate.key_password_env 미설정)'} 가 필요합니다")
+    try:
+        data = open(cs.key_file, "rb").read()
+    except OSError as e:
+        raise click.ClickException(f"개인키 파일을 읽을 수 없습니다: {e.strerror}")
+    already = b"ENCRYPTED" in data
+    if encrypt == already:
+        click.echo(f"이미 {'암호화' if already else '평문'} 상태입니다 — 변경하지 않았습니다")
+        return
+    try:
+        out = encrypt_key_pem(data, pw) if encrypt else decrypt_key_pem(data, pw)
+    except ManualError as e:
+        click.echo(f"변환 실패: {e}", err=True)
+        sys.exit(2)
+    bak = f"{cs.key_file}.bak-{datetime.now(timezone.utc):%Y%m%d%H%M%S}"
+    _write_private(bak, data, 0o600)                       # 변환 전 원본(600) — 새 키로 정상 동작을 확인한 뒤 안전하게 삭제(shred)
+    _write_private(cs.key_file, out, 0o600)
+    click.echo(f"개인키를 {'암호화' if encrypt else '평문으로 변환'}했습니다: {cs.key_file}\n변환 전 파일: {bak} (확인 후 삭제하세요)\n"
+               f"설정에 key_encryption: {'passphrase' if encrypt else 'none'} 를 지정하고 `certdeploy validate` 로 확인하세요")
 
 
 @main.command("acme-reset")

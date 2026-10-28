@@ -175,6 +175,9 @@ echo 'TOMCAT_KS_PASS=...' | sudo tee /etc/certdeploy/env >/dev/null && sudo chow
 | `issue [--staging] [--no-deploy]` / `renew` | lego 발급·갱신 후 배포(타이머가 `renew` 를 호출) |
 | `issue`/`renew`(설정에 `acme:`) | **내장 ACME(Let's Encrypt, DNS-01)**: 연동(infoblox) 자동 또는 수동(TXT 안내→재실행). [auto-issue.md](auto-issue.md) |
 | 배포 대상 `type: http_api` | **웹방화벽·어플라이언스**: 관리 API 요청 순서(로그인→업로드→적용)를 설정으로 기술, 확인·롤백 포함. [compatibility.md](compatibility.md) |
+| `confirm --target N` | 수동 교체 대상(`type: manual`)의 교체 완료를 기록하고 교체용 파일(개인키 사본) 삭제 |
+| `notify-test` | 설정된 알림 채널(메일·Alertmanager·웹훅)로 시험 알림 발송 |
+| `key-encrypt` / `key-decrypt` | 저장된 개인키를 암호로 보호/평문으로 전환(설정 `certificate.key_encryption` 과 함께). 옵션 설명: [pre-vm-checklist D9](pre-vm-checklist.md) |
 | `acme-reset` | 진행 중인 내장 ACME 주문(대기 키·TXT 안내) 폐기 |
 | `csr --domains A,B [--key-type rsa2048\|rsa3072\|rsa4096\|ecdsa256\|ecdsa384] [--org ..] [--force]` | **수동 발급용** 개인키+CSR 생성. 키는 `state_dir/pending/<name>/key.pem`(0600), CSR 은 화면 출력 |
 | `import --file F... [--key-file K] [--pfx P --pfx-pass-env V] [--dry-run] [--deploy]` | CA 가 준 인증서(PEM/DER/p7b)·PFX 를 정리·검증·설치(+배포) |

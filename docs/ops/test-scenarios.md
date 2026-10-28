@@ -33,6 +33,12 @@ curl -s -XPOST http://127.0.0.1:9093/api/v2/alerts -H 'Content-Type: application
 
 ---
 ## 발급·배포 (발급·배포 VM)
+### T-02a 메일 알림 시험 (메일 우선)
+```bash
+$CD notify-test
+```
+- **기대**: `시험 알림을 보냈습니다: 메일(수신자…)` 출력, 수신함에 "WARNING certdeploy 알림 시험" 도착. 도착하지 않으면 `$CD trace --errors` 의 `notify/smtp` 이벤트(접속 거부·인증 실패·TLS 오류)와 SMTP 릴레이의 허용 IP 설정 확인
+
 ### T-03 사전 점검 (변경 없음)
 - **절차**
 ```bash
@@ -238,6 +244,36 @@ $CD diagnose --prometheus http://127.0.0.1:9090 --alertmanager http://127.0.0.1:
 - **기대**: 모든 점검 `OK`. 수신함/Teams 에서 (a) DNS TXT 등록 필요 알림(수동 모드), (b) 배포 실패 알림(T-07), (c) 해소 알림을 각각 1건 이상 확인. Grafana 「certdeploy」 패널에 대상별 상태·마지막 성공 경과·연속 발급 실패가 표시
 
 
+### T-20 개인키 저장 방식: 평문 ↔ 암호 보호 (둘 다 시험)
+- **절차**: 기본(평문)에서 `validate` 가 `평문(권한 600으로 보호)` 로 표시되는지 확인 → 암호 환경변수 준비(`/etc/certdeploy/env` 에 `CERTDEPLOY_KEY_PASSPHRASE`, 설정에 `key_password_env`) → 전환
+```bash
+$CD key-encrypt
+```
+  설정에 `key_encryption: passphrase` 를 켜고
+```bash
+$CD validate
+```
+```bash
+$CD deploy --force --target web-canary
+```
+- **기대**: `key-encrypt` 후 키 파일이 `BEGIN ENCRYPTED PRIVATE KEY`(0600), 변환 전 파일은 `*.key.bak-<시각>`(0600)으로 남음(확인 후 `shred -u` 로 삭제), `validate` 가 `암호화됨(…)`, **대상 서버에 배포된 키 파일은 평문(0600)** 이고 서비스 정상. 암호 환경변수를 빼고 실행하면 `개인키 암호화가 켜져 있습니다 — 환경변수 … 를 설정하세요` 로 중단. 되돌리기: `$CD key-decrypt` 후 설정을 `none` 으로
+- **재부팅 시험**: 암호 보호 상태에서 재부팅 → 타이머(`renew`)가 환경변수 파일의 암호로 정상 동작하는지(T-12 와 함께)
+
+### T-21 수동 교체 대상(웹방화벽 옵션 C) — API 문서 확인 전에도 가능
+- **사전조건**: `certdeploy.waf-manual.example.yml` 기반 설정, `WAF_PFX_PASSWORD` 설정, 메일 수신 가능
+```bash
+$CD deploy --target waf-main
+```
+- **기대**: `[waf-main] 수동 교체 대기 — 교체용 파일 …`, 종료 코드 **0**, `state_dir/handoff/waf-main/` 에 파일(디렉터리 0700, 개인키·PFX 0600)이 생기고 **메일로 '수동 교체 필요'** 도착. 담당자가 모니터랩 화면에서 PFX 업로드·적용 → WAF 앞단에서 새 일련번호가 서빙되면
+```bash
+$CD deploy --target waf-main
+```
+  `건너뜀 — 수동 교체 확인됨`, 교체용 파일 삭제, 해소 알림. 교체하지 않고 두면 다음 실행마다 같은 안내(3일 후 긴급 표시)와 감시 알림(1일 경고·3일 긴급), Grafana 「수동 교체 대기 장비」 패널에 대기 시간이 표시됨
+- `verify` 를 두지 않은 경우: 교체 후 `$CD confirm --target waf-main`
+```bash
+$CD confirm --target waf-main
+```
+
 ---
 ## 결과 기록표
 | ID | 일시 | 수행자 | 합격(O/X) | 증거 파일/링크 | 비고(실패 시 번들 경로) |
@@ -261,3 +297,6 @@ $CD diagnose --prometheus http://127.0.0.1:9090 --alertmanager http://127.0.0.1:
 | T-17 | | | | | |
 | T-18 | | | | | |
 | T-19 | | | | | |
+| T-20 | | | | | |
+| T-21 | | | | | |
+| T-02a | | | | | |

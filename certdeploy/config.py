@@ -59,6 +59,7 @@ class Target:
     soak_interval: int = 10
     hook_env: List[str] = field(default_factory=list)   # 훅에 전달할 환경변수 이름(그 밖의 비밀은 전달하지 않는다)
     api: Optional[dict] = None        # type: http_api (웹방화벽·어플라이언스) 전용: HTTP 요청 단계 설정
+    manual: Optional[dict] = None     # type: manual (자동화할 수 없는 장비) 전용: 교체용 파일 준비·안내·확인 설정
 
 
 @dataclass
@@ -116,6 +117,7 @@ class CertSet:
     state_dir: str                    # 이 인증서의 상태 디렉터리
     audit_dir: Optional[str] = None
     acme: Optional[dict] = None       # 내장 ACME 클라이언트 설정(검증·기본값 적용 후)
+    key_encryption: str = "none"      # none: 평문(권한 600) | passphrase: 저장본 개인키를 암호(key_password_env)로 보호
 
 
 @dataclass
@@ -130,7 +132,7 @@ class Config:
         """인증서가 하나일 때 cfg.targets, cfg.cert_file 같은 접근을 그 인증서로 위임(하위 호환)."""
         if name == "certs":      # copy/pickle 중 속성이 아직 없을 때의 무한 재귀 방지
             raise AttributeError(name)
-        if name in ("cert_file", "key_file", "key_password_env", "targets", "lego", "acme", "name") and len(self.certs) == 1:
+        if name in ("cert_file", "key_file", "key_password_env", "targets", "lego", "acme", "name", "key_encryption") and len(self.certs) == 1:
             return getattr(self.certs[0], name)
         raise AttributeError(name)
 
@@ -216,6 +218,26 @@ def _parse_target(raw, defaults, label_prefix, problems, seen) -> Optional[Targe
     if name in seen:
         problems.append(f"{label}: 이름이 중복됩니다")
     seen.add(name)
+    if raw.get("type") == "manual":
+        m = raw.get("manual") or {}
+        fmts = [str(x) for x in (m.get("formats") or ["pem"])]
+        if not set(fmts) <= {"pem", "pfx"}:
+            problems.append(f"{label}: manual.formats 는 pem, pfx 만 가능합니다")
+        if "pfx" in fmts and not m.get("pfx_password_env"):
+            problems.append(f"{label}: manual.formats 에 pfx 가 있으면 pfx_password_env 가 필요합니다")
+        if m.get("export_dir"):
+            _abs(m["export_dir"], f"{label} manual.export_dir", problems)
+        verify = None
+        if raw.get("verify"):
+            v = raw["verify"]
+            if not v.get("host"):
+                problems.append(f"{label}: verify.host 가 필요합니다")
+            else:
+                verify = Verify(v["host"], int(v.get("port", 443)), v.get("sni"), bool(v.get("strict", False)), v.get("ca_file"), bool(v.get("lenient_x509", False)))
+        manual = {"instructions": str(m.get("instructions") or ""), "export_dir": m.get("export_dir"), "formats": fmts,
+                  "pfx_password_env": m.get("pfx_password_env"), "pfx_alias": m.get("pfx_alias", "server"), "remind_days": int(m.get("remind_days", 3))}
+        return Target(name, "manual", {"kind": "manual"}, [], None, None, verify, int(raw.get("order", 100)), bool(raw.get("canary", False)),
+                      None, None, None, 0, 10, [], None, manual)
     if raw.get("type") == "http_api":
         from .apideploy import validate_api
         api = validate_api(raw.get("api"), label, problems)
@@ -332,6 +354,14 @@ def _parse_certset(spec, name, defaults, state_dir, options, notify, audit_dir, 
     else:
         _abs(cert_file, f"[{name}] certificate.cert_file", problems)
         _abs(key_file, f"[{name}] certificate.key_file", problems)
+    key_enc = cert.get("key_encryption", "none")
+    if key_enc not in ("none", "passphrase"):
+        problems.append(f"[{name}] certificate.key_encryption 은 none 또는 passphrase 여야 합니다")
+    elif key_enc == "passphrase":
+        if not cert.get("key_password_env"):
+            problems.append(f"[{name}] key_encryption: passphrase 에는 certificate.key_password_env(암호가 든 환경변수 이름)가 필요합니다")
+        if lego:
+            problems.append(f"[{name}] lego 엔진은 개인키를 평문으로 저장하므로 key_encryption: passphrase 와 함께 쓸 수 없습니다(내장 acme 또는 수동 import 사용)")
     targets, seen = [], set()
     for i, raw in enumerate(spec.get("targets") or [], start=1):
         t = _parse_target(raw, defaults, f"[{name}] targets[{i}]", problems, seen)
@@ -340,7 +370,7 @@ def _parse_certset(spec, name, defaults, state_dir, options, notify, audit_dir, 
     if not spec.get("targets"):
         problems.append(f"[{name}] targets 가 비어 있습니다")
     return CertSet(name, cert_file or "", key_file or "", cert.get("key_password_env"), targets, options, notify,
-                   lego, cert_state, audit_dir, acme)
+                   lego, cert_state, audit_dir, acme, key_enc if key_enc in ("none", "passphrase") else "none")
 
 
 def parse_config(data: dict) -> Config:

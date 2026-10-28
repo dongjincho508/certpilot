@@ -68,3 +68,44 @@ tests:
             exp_annotations:
               summary: "Pushgateway 중단"
               description: "Pushgateway 가 응답하지 않아 certdeploy 결과를 수집할 수 없습니다."
+
+  - name: 수동 교체 대기 - 1일 초과 경고, 3일 초과 긴급, 완료되면 해소
+    interval: 1h
+    input_series:
+      # 시각 0 에 안내(pending_since=0). waf 는 100시간 뒤(= 값 0) 교체 완료로 대기 해제, 나머지는 계속 대기
+      - series: 'certdeploy_target_manual_pending{cert="hnu",target="waf"}'
+        values: '1+0x99 0+0x300'
+      - series: 'certdeploy_target_manual_pending_since_timestamp_seconds{cert="hnu",target="waf"}'
+        values: '0+0x400'
+      - series: 'certdeploy_target_manual_pending{cert="hnu",target="new-pending"}'
+        values: '0+0x20 1+0x380'
+      - series: 'certdeploy_target_manual_pending_since_timestamp_seconds{cert="hnu",target="new-pending"}'
+        values: '72000+0x400'            # 20시간 시점에 안내
+    alert_rule_test:
+      - eval_time: 20h                   # 1일 미만: 아직 아님
+        alertname: CertDeployManualReplacementPending
+        exp_alerts: []
+      - eval_time: 30h                   # waf 는 1일 초과(+for 10m 충족), new-pending 은 10시간 경과라 제외
+        alertname: CertDeployManualReplacementPending
+        exp_alerts:
+          - exp_labels: {severity: warning, cert: hnu, target: waf}
+            exp_annotations:
+              summary: "수동 교체 대기 1일 초과: hnu/waf"
+              description: "waf 장비의 인증서를 직접 교체해야 하는데 안내 후 하루가 넘게 지났습니다. 교체 후 certdeploy deploy --target waf (또는 confirm)으로 완료를 기록하세요."
+      - eval_time: 30h
+        alertname: CertDeployManualReplacementOverdue
+        exp_alerts: []
+      - eval_time: 80h                   # 3일 초과 → 긴급
+        alertname: CertDeployManualReplacementOverdue
+        exp_alerts:
+          - exp_labels: {severity: critical, cert: hnu, target: waf}
+            exp_annotations:
+              summary: "수동 교체 대기 3일 초과: hnu/waf"
+              description: "waf 장비의 인증서 수동 교체가 3일 넘게 지연되고 있습니다. 만료 전에 교체되도록 담당자를 확인하세요."
+      - eval_time: 110h                  # waf 는 교체 완료(값 0)로 해소, new-pending 은 91시간 경과(3일 초과)
+        alertname: CertDeployManualReplacementOverdue
+        exp_alerts:
+          - exp_labels: {severity: critical, cert: hnu, target: new-pending}
+            exp_annotations:
+              summary: "수동 교체 대기 3일 초과: hnu/new-pending"
+              description: "new-pending 장비의 인증서 수동 교체가 3일 넘게 지연되고 있습니다. 만료 전에 교체되도록 담당자를 확인하세요."

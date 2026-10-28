@@ -14,10 +14,10 @@ from certpilot_core import netutil, trace
 from .engine import TargetResult
 
 log = logging.getLogger("certdeploy")
-STATUSES = ("deployed", "skipped", "failed", "rolled_back", "not_run", "dry_run")
-OK_STATUSES = ("deployed", "skipped", "dry_run")
+STATUSES = ("deployed", "skipped", "failed", "rolled_back", "not_run", "dry_run", "manual_pending")
+OK_STATUSES = ("deployed", "skipped", "dry_run", "manual_pending")      # 수동 교체 대기는 실패가 아니다(별도 지표·알림으로 독촉)
 STATUS_KO = {"deployed": "배포 완료", "skipped": "건너뜀", "failed": "실패", "rolled_back": "롤백됨",
-             "not_run": "실행 안 함", "dry_run": "계획만"}
+             "not_run": "실행 안 함", "dry_run": "계획만", "manual_pending": "수동 교체 대기"}
 
 
 def _now() -> datetime:
@@ -43,7 +43,7 @@ def build_report(cert_name: str, bundle, results: List[TargetResult], started: d
         "certificate": {"serial": f"{bundle.serial:x}", "not_after": bundle.not_after.isoformat(),
                         "days_left": round(bundle.days_left(), 1), "names": bundle.names},
         "ok": all(r.status in OK_STATUSES for r in results),
-        "results": [{"target": r.name, "status": r.status, "message": r.message} for r in results],
+        "results": [{"target": r.name, "status": r.status, "message": r.message, **({"since": r.since} if r.since else {})} for r in results],
     }
 
 
@@ -99,6 +99,13 @@ def metrics_text(rep: dict, state: dict, prev_success_ts: Optional[float] = None
     for r in rep["results"]:
         ok = 1 if r["status"] in OK_STATUSES else 0
         out.append(f'certdeploy_target_ok{{cert="{cert}",target="{_esc(r["target"])}"}} {ok}')
+    out += ["# HELP certdeploy_target_manual_pending 사람이 직접 교체해야 하는 대상이 교체를 기다리는 중(1)인지.", "# TYPE certdeploy_target_manual_pending gauge"]
+    for r in rep["results"]:
+        out.append(f'certdeploy_target_manual_pending{{cert="{cert}",target="{_esc(r["target"])}"}} {1 if r["status"] == "manual_pending" else 0}')
+    out += ["# HELP certdeploy_target_manual_pending_since_timestamp_seconds 수동 교체를 처음 안내한 시각(Unix).", "# TYPE certdeploy_target_manual_pending_since_timestamp_seconds gauge"]
+    for r in rep["results"]:
+        if r["status"] == "manual_pending" and r.get("since"):
+            out.append(f'certdeploy_target_manual_pending_since_timestamp_seconds{{cert="{cert}",target="{_esc(r["target"])}"}} {datetime.fromisoformat(r["since"]).timestamp():.0f}')
     out += ["# HELP certdeploy_target_status 대상의 마지막 상태(원-핫).", "# TYPE certdeploy_target_status gauge"]
     for r in rep["results"]:
         for st in STATUSES:
@@ -188,7 +195,9 @@ def finish_run(certset, bundle, results, started, notifier, env=os.environ, acti
     changed = any(r.status != "skipped" for r in results)
     trace.event("report", "finish", ok=rep["ok"], action=action, targets=[(r.name, r.status) for r in results], notify=bool(changed or not rep["ok"]))
     if changed or not rep["ok"]:
-        notifier.summary(f"인증서 배포 {'완료' if rep['ok'] else '문제'} — {certset.name}", report_markdown(rep), rep["ok"])
+        waiting = any(r.status == "manual_pending" for r in results)
+        word = "문제" if not rep["ok"] else ("수동 교체 필요" if waiting else "완료")
+        notifier.summary(f"인증서 배포 {word} — {certset.name}", report_markdown(rep), rep["ok"] and not waiting)
     return rep
 
 

@@ -230,6 +230,12 @@ sudo cp /opt/cert-monitor/src/certdeploy/certdeploy.manual.example.yml /etc/cert
 ```bash
 echo 'TOMCAT_KS_PASS=<비밀번호>' | sudo tee /etc/certdeploy/env >/dev/null && sudo chown certdeploy:certdeploy /etc/certdeploy/env && sudo chmod 600 /etc/certdeploy/env
 ```
+**알림은 메일 우선**: 설정의 `notify.smtp`(예시 파일에 포함)에 SMTP 서버·수신자를 채우고 비밀번호는 `/etc/certdeploy/env` 에 `SMTP_PASSWORD=…` 로 둔다. Alertmanager(감시 알림)의 메일 설정은 5단계. 설정 후 시험 메일을 보낸다(아래 `$CD` 정의 뒤):
+```bash
+$CD notify-test
+```
+**개인키 저장 방식(선택)**: 기본은 평문(권한 600). 암호로 보호하려면 설정에 `key_encryption: passphrase`, `key_password_env: CERTDEPLOY_KEY_PASSPHRASE` 를 켜고 암호를 `/etc/certdeploy/env` 에 둔 뒤 `$CD key-encrypt` 로 변환한다(설명·장단점: [준비 체크리스트 D9](pre-vm-checklist.md), 시험 T-20). 어느 쪽이든 대상 서버에 배포되는 키는 평문이다.
+
 편의 변수(이후 명령에서 사용 — 새 터미널마다 다시 지정):
 ```bash
 CD="sudo -u certdeploy /opt/certdeploy/venv/bin/certdeploy -c /etc/certdeploy/certdeploy.yml"

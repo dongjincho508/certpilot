@@ -25,7 +25,7 @@ from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 from certpilot_core import netutil, trace
 
 from . import dnsquery
-from .manual import build_bundle, generate_csr, install_bundle
+from .manual import ManualError, build_bundle, decrypt_key_pem, encrypt_key_pem, generate_csr, install_bundle
 
 LE_PRODUCTION = "https://acme-v02.api.letsencrypt.org/directory"
 LE_STAGING = "https://acme-staging-v02.api.letsencrypt.org/directory"
@@ -227,7 +227,7 @@ def clear_pending(state_dir: str, name: str) -> None:
             pass
 
 
-def start_order(client: AcmeClient, state_dir: str, name: str, domains: List[str], key_type: str = "rsa2048") -> dict:
+def start_order(client: AcmeClient, state_dir: str, name: str, domains: List[str], key_type: str = "rsa2048", key_password: Optional[str] = None) -> dict:
     """주문을 만들고 DNS-01 챌린지 목록을 상태 파일에 저장한다. 반환: pending dict."""
     with trace.span("acme", "new_order", domains=domains):
         key_pem, csr_pem = generate_csr(domains, key_type)
@@ -248,7 +248,7 @@ def start_order(client: AcmeClient, state_dir: str, name: str, domains: List[str
             "created_at": datetime.now(timezone.utc).isoformat(), "directory": client.directory_url,
             "csr_der_b64": b64u(x509.load_pem_x509_csr(csr_pem).public_bytes(serialization.Encoding.DER))}
     jp, kp = pending_paths(state_dir, name)
-    _write_private(kp, key_pem)
+    _write_private(kp, encrypt_key_pem(key_pem, key_password) if key_password else key_pem)
     _write_private(jp, json.dumps(pend, ensure_ascii=False).encode())
     trace.event("acme", "order_started", name=name, txt=[(c["txt_name"]) for c in challenges if not c["valid"]])
     return pend
@@ -277,7 +277,7 @@ def wait_visible(records: List[Tuple[str, str]], resolvers: List[str], timeout: 
         waited += interval
 
 
-def complete_order(client: AcmeClient, pend: dict, state_dir: str) -> Tuple[bytes, bytes]:
+def complete_order(client: AcmeClient, pend: dict, state_dir: str, key_password: Optional[str] = None) -> Tuple[bytes, bytes]:
     """챌린지 응답 → 검증 대기 → finalize → 인증서 다운로드. (키 PEM, 인증서 체인 PEM) 반환."""
     for c in pend["challenges"]:
         if c.get("valid"):
@@ -299,24 +299,29 @@ def complete_order(client: AcmeClient, pend: dict, state_dir: str) -> Tuple[byte
         chain = client.download(order["certificate"])
     with open(pending_paths(state_dir, pend["name"])[1], "rb") as f:
         key_pem = f.read()
+    if b"ENCRYPTED" in key_pem:
+        try:
+            key_pem = decrypt_key_pem(key_pem, key_password)
+        except ManualError as e:
+            raise AcmeError(f"대기 중인 개인키를 열 수 없습니다: {e}") from None
     return key_pem, chain
 
 
-def install_issued(key_pem: bytes, chain_pem: bytes, cert_file: str, key_file: str) -> Tuple[object, List[str]]:
+def install_issued(key_pem: bytes, chain_pem: bytes, cert_file: str, key_file: str, key_password: Optional[str] = None) -> Tuple[object, List[str]]:
     """발급된 체인과 키를 검증해 설정된 위치에 설치한다(manual.build_bundle/install_bundle 재사용)."""
     certs = x509.load_pem_x509_certificates(chain_pem)
     key = serialization.load_pem_private_key(key_pem, None)
     bundle, _ = build_bundle(certs, key)
     os.makedirs(os.path.dirname(cert_file), mode=0o700, exist_ok=True)
     os.makedirs(os.path.dirname(key_file), mode=0o700, exist_ok=True)
-    return bundle, install_bundle(cert_file, key_file, bundle)
+    return bundle, install_bundle(cert_file, key_file, bundle, key_password=key_password)
 
 
 def issue_with_provider(client: AcmeClient, provider, state_dir: str, name: str, domains: List[str], key_type: str,
                         resolvers: List[str], propagation_timeout: float, sleep=time.sleep,
-                        check=dnsquery.txt_visible) -> Tuple[bytes, bytes]:
+                        check=dnsquery.txt_visible, key_password: Optional[str] = None) -> Tuple[bytes, bytes]:
     """연동 모드: TXT 등록 → 전파 확인 → 검증·발급 → (성공·실패와 무관하게) 등록한 TXT 정리."""
-    pend = start_order(client, state_dir, name, domains, key_type)
+    pend = start_order(client, state_dir, name, domains, key_type, key_password)
     recs = txt_records(pend)
     try:
         for n, v in recs:
@@ -325,7 +330,7 @@ def issue_with_provider(client: AcmeClient, provider, state_dir: str, name: str,
             missing = wait_visible(recs, resolvers, propagation_timeout, sleep=sleep, check=check)
             if missing:
                 raise AcmeError("TXT 가 DNS 에 전파되지 않았습니다: " + ", ".join(n for n, _ in missing))
-        return complete_order(client, pend, state_dir)
+        return complete_order(client, pend, state_dir, key_password)
     finally:
         for n, v in recs:
             try:

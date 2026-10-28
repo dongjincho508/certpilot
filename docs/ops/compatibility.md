@@ -50,7 +50,13 @@ aws route53 change-resource-record-sets --hosted-zone-id "$ROUTE53_ZONE_ID" --ch
 |---|---|---|---|
 | **① HTTP API** | 관리용 REST API 가 있는 WAF·LB | `type: http_api` + `api.steps` | 로그인(세션 쿠키·토큰) → 업로드(JSON/폼/multipart/PFX) → 적용 → TLS 로 확인, 실패 시 이전 인증서로 롤백 |
 | **② SSH(CLI)** | CLI 로 반영하는 장비(F5 tmsh 등) | `type: generic` + 파일 + `reload_cmd` | 기존 SSH 배포와 같은 방식(점검·롤백 포함) |
-| **③ 수동** | API/CLI 가 없는 장비 | — | GUI 에서 교체. `certdeploy` 는 감시와 알림(만료·서빙 일련번호 점검 `check`)만 담당 |
+| **③ 수동 교체(`type: manual`)** | API/CLI 가 없거나 아직 확인 전인 장비(모니터랩 등) | `type: manual` + `manual:` | `certdeploy` 가 **교체용 파일(PEM/PFX) 준비 → 메일로 알림 → 미교체면 독촉(3일 지나면 긴급, 감시 알림 1일/3일) → WAF 앞단 서빙 인증서로 완료 자동 확인**(또는 `confirm`). 교체 담당자는 GUI 에서 파일만 올리면 된다. 예시: `certdeploy.waf-manual.example.yml` |
+
+### ③ 수동 교체 상세 (`type: manual`)
+- `deploy` 가 `state_dir/handoff/<대상>/`(0700)에 `fullchain.pem`·`cert.pem`·`chain.pem`·`privkey.pem`(0600)·`server.pfx`(0600, 비밀번호는 환경변수)·`INSTRUCTIONS.txt` 를 준비하고 메일(Alertmanager/SMTP)로 알린다. 상태는 **수동 교체 대기**(`manual_pending`)이며 **실패가 아니다**(종료 코드 0, `run_ok` 유지)
+- 교체 후 다시 `certdeploy deploy`(또는 타이머)가 `verify` 로 서빙 일련번호를 확인하면 자동 완료 → 교체용 파일(개인키 사본) 삭제·알림 해소. `verify` 가 없으면 `certdeploy confirm --target <이름>`
+- 감시: 지표 `certdeploy_target_manual_pending`/`..._since_timestamp_seconds`, 알림 `CertDeployManualReplacementPending`(1일 초과 경고)·`…Overdue`(3일 초과 긴급), Grafana 「수동 교체 대기 장비」 패널
+- 주의: 교체용 파일에는 **개인키가 들어 있다** — 전달은 SSH/보안 경로로만, 완료되면 삭제됨. 이중화 장비는 양쪽을 각각 대상으로 등록
 
 ### ① HTTP API (`type: http_api`)
 - **구조 예시**: [`certdeploy/certdeploy.waf.example.yml`](../../certdeploy/certdeploy.waf.example.yml) — 경로·필드명은 가상이며 제품 API 문서로 바꿔야 한다

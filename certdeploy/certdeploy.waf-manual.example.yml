@@ -1,0 +1,25 @@
+# 웹방화벽(모니터랩 등)을 "사람이 직접 교체"하는 방식(옵션 C) — 관리 API/CLI 가 없거나 확인되기 전에도 안전하게 시작할 수 있다.
+# certdeploy 가 하는 일: 교체용 파일(PEM/PFX)을 준비하고, 메일로 교체를 알리고(미완료면 독촉), 교체 후 WAF 앞단 서빙 인증서로 완료를 확인한다.
+# 옵션 A(HTTP API)·B(SSH CLI)는 certdeploy.waf.example.yml 참고. 한 WAF 에는 A·B·C 중 하나만 쓴다. docs/ops/compatibility.md
+state_dir: /var/lib/certdeploy
+
+certificate:
+  cert_file: /var/lib/certdeploy/managed/wildcard.crt
+  key_file: /var/lib/certdeploy/managed/wildcard.key
+
+notify:
+  alertmanager_url: http://127.0.0.1:9093
+  pushgateway_url: http://127.0.0.1:9091
+  smtp: {host: smtp.hnu.kr, port: 587, starttls: true, from: cert-deploy@hnu.kr, to: [cert-admin@hnu.kr], username: cert-deploy, password_env: SMTP_PASSWORD, on_success: true}
+
+targets:
+  - name: waf-main
+    type: manual
+    manual:
+      formats: [pem, pfx]                    # WAF 가 받는 형식. pfx 는 비밀번호 환경변수가 필요
+      pfx_password_env: WAF_PFX_PASSWORD     # /etc/certdeploy/env 에 설정(메일·로그에 노출되지 않음)
+      remind_days: 3                         # 안내 후 3일이 지나면 긴급(critical)로 승격해 독촉
+      instructions: |
+        모니터랩 관리 화면 → SSL 인증서 → 가져오기: server.pfx 업로드(비밀번호는 담당자 보관본) → '적용' 실행.
+        적용이 다른 대기 설정 변경까지 반영하는지 확인하고, 점검 시간대에 진행. 이중화면 양쪽 장비에서 확인.
+    verify: {host: www.hnu.kr, port: 443}    # WAF 앞단에서 새 인증서가 서빙되면 자동으로 완료 처리(없으면 certdeploy confirm --target waf-main)

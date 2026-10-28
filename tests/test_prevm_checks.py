@@ -104,7 +104,7 @@ def test_compose_renders_and_fails_fast_without_secrets(tmp_path):
 
 def test_example_config_parses_and_matches_schema():
     jsonschema = pytest.importorskip("jsonschema")
-    for name in ("certdeploy.example.yml", "certdeploy.manual.example.yml", "certdeploy.acme.example.yml", "certdeploy.waf.example.yml"):
+    for name in ("certdeploy.example.yml", "certdeploy.manual.example.yml", "certdeploy.acme.example.yml", "certdeploy.waf.example.yml", "certdeploy.waf-manual.example.yml"):
         jsonschema.validate(yaml.safe_load(read(os.path.join(ROOT, "certdeploy", name))), config_schema())
         parse_config(yaml.safe_load(read(os.path.join(ROOT, "certdeploy", name))))
     bad = {"state_dir": "relative", "targets": [{"name": "x y", "type": "iis"}]}
@@ -254,11 +254,11 @@ def test_scan_all_50_servers_is_fast(tmp_path, sandbox):
 
 def test_scenario_doc_covers_all_tests_and_commands():
     text = read(os.path.join(ROOT, "docs", "ops", "test-scenarios.md"))
-    for n in range(1, 20):
+    for n in range(1, 22):
         assert f"### T-{n:02d} " in text, f"T-{n:02d} 시나리오 누락"
         assert f"| T-{n:02d} |" in text                                          # 결과 기록표
     used = set(re.findall(r"^\$CD ([a-z][a-z-]+)", text, re.M))
-    assert {"validate", "preflight", "csr", "import", "deploy", "status", "check", "verify-audit", "backup", "restore", "trace", "plan", "acme-reset", "rollback", "diagnose"} <= used
+    assert {"validate", "preflight", "csr", "import", "deploy", "status", "check", "verify-audit", "backup", "restore", "trace", "plan", "acme-reset", "rollback", "diagnose", "notify-test", "key-encrypt", "confirm"} <= used
     assert not (used - set(cd_main.commands))
 
 

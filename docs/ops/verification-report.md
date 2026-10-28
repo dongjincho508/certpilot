@@ -5,7 +5,7 @@
 ## 1. 한눈에
 | 구분 | 결과 |
 |---|---|
-| 자동 테스트 | **639개 통과·건너뜀 0 (promtool·amtool 포함)** (`scripts/check.sh`, promtool/amtool 포함 실행 기준) |
+| 자동 테스트 | **668개 통과·건너뜀 0 (promtool·amtool 포함)** (`scripts/check.sh`, promtool/amtool 포함 실행 기준) |
 | 정적 보안 분석(bandit, 중간 이상) | 지적 **0건** (CI `security` 잡) |
 | 의존성 취약점(pip-audit) | 알려진 취약점 **0건** |
 | 실제 바이너리로 확인 | Prometheus 3.5.0 · Alertmanager 0.28.1 · ssl_exporter 2.4.3(설정 검증·규칙 단위 시험·실수집), OpenSSL(체인 검증), JDK keytool(JKS), systemd-analyze(유닛), docker compose config |
@@ -20,7 +20,7 @@
 | 수집 대상 파일(CSV→file_sd), 인벤토리 도구 | ✅ `test_monitoring.py` | — |
 | 알림 규칙 9종+certdeploy 규칙 | ✅ promtool 규칙 단위 시험, PromQL 구문 | ⬜ T-02 (메일/Teams 수신) |
 | Alertmanager 설정·라우팅·템플릿 | 🔶 amtool check-config, 실제 Alertmanager 로 페이로드 확인 | ⬜ T-02 |
-| 대시보드 14패널 쿼리 | 🔶 **실제 Prometheus+ssl_exporter 로 모든 패널 쿼리 실행**(예상 화면 이미지) | ⬜ T-01 (Grafana 렌더링은 미확인) |
+| 대시보드 15패널 쿼리 | 🔶 **실제 Prometheus+ssl_exporter 로 모든 패널 쿼리 실행**(예상 화면 이미지) | ⬜ T-01 (Grafana 렌더링은 미확인) |
 | docker compose(5서비스, localhost 바인딩, 비밀번호 필수) | 🔶 `docker compose config` 렌더링·검증 | ⬜ T-01 (실제 기동) |
 | SELinux 라벨(`:ro,z`), nginx 역프록시 설정 | ✅ 정적 검사 | ⬜ 설치 5~6단계 |
 
@@ -45,6 +45,9 @@
 | IIS | 초안 스크립트만(`deploy-iis.ps1`), **미검증** | ⬜ 별도 협의 |
 | 알림(Alertmanager·SMTP·Webhook[slack/teams/generic]), 지표(textfile·Pushgateway), 해시 체인 감사 로그, 보고서 | ✅ 가짜 수신기·실제 Alertmanager 페이로드 | ⬜ T-02, T-10, T-19 |
 | 암호화 백업/복원(AES-256-GCM/scrypt), 키 파일 권한 점검 | ✅ | ⬜ T-11 |
+| **수동 교체 대상 `type: manual`**(WAF 옵션 C): 교체용 파일(PEM/PFX) 준비·메일 안내·독촉 승격·서빙 확인으로 자동 완료·`confirm`·개인키 사본 삭제, 지표·알림 규칙(1일/3일)·Grafana 패널 | ✅ `test_certdeploy_options.py`(수동 교체 9개) + promtool 규칙 단위 시험 | ⬜ **T-21** (모니터랩 화면에서 실제 교체) |
+| **개인키 저장 방식 선택**: `key_encryption: none/passphrase` — import·csr·내장 ACME(대기 키 포함) 저장본 암호화, 배포 때만 복호화, `key-encrypt`/`key-decrypt` 전환·백업, 설정↔실제 상태 불일치 점검 | ✅ `test_certdeploy_options.py`(암호화 8개) | ⬜ **T-20** (재부팅·타이머 환경에서 암호 공급) |
+| 알림 시험 `notify-test`(메일 우선 설정), 전송 실패 진단 이벤트 | ✅ | ⬜ **T-02a** (실제 SMTP 수신) |
 | `check`(Nagios 형식 종료 코드), `schema`, `diagnose`, `trace`, `--debug` | ✅ `test_prevm_checks.py`, `test_debug_tools.py` | ⬜ T-19 |
 
 ### 보안 설계 (코드로 확인된 것)
@@ -76,17 +79,18 @@
 ## 5. 테스트 구성 (파일별)
 | 파일 | 개수 | 내용 |
 |---|---|---|
-| `tests/test_prevm_checks.py` | 230 | 문서 정합성(bash 문법·명령·링크·이미지 태그), 설정 예시↔스키마, systemd·compose, OpenSSL 교차 검증, 퍼징, check/export-targets, 보안 보강, 50대 성능 |
+| `tests/test_prevm_checks.py` | 238 | 문서 정합성(bash 문법·명령·링크·이미지 태그), 설정 예시↔스키마, systemd·compose, OpenSSL 교차 검증, 퍼징, check/export-targets, 보안 보강, 50대 성능 |
 | `tests/test_certdeploy_features.py` | 50 | 멀티 인증서, 훅, soak, 백업, 알림 3종, 지표, 감사, scaffold 등 부가 기능 |
 | `tests/test_api.py` | 39 | CertPilot API(보류 앱): 인증·권한·서버·조회 |
 | `tests/test_certdeploy_engine.py` | 33 | 배포 엔진: 교체·롤백·canary·멱등·잠금 |
 | `tests/test_certdeploy_acme.py` | 30 | 내장 ACME + DNS 제공자 7종(가짜 CA/WAPI/DNS/Cloudflare/PowerDNS/RFC2136/웹훅/exec) |
-| `tests/test_monitoring.py` | 29 | 감시 설정: promtool/amtool, 규칙 단위 시험, 대시보드, 도구 |
+| `tests/test_monitoring.py` | 29 | 감시 설정: promtool/amtool, 규칙 단위 시험(수동 교체 알림 포함), 대시보드 15패널, 도구 |
 | `tests/test_policy.py` | 28 | 원격 명령 정책(읽기 전용 화이트리스트) |
 | `tests/test_certdeploy_cli.py` | 26 | certdeploy CLI·lego 래퍼·설정 검증 |
 | `tests/test_certdeploy_manual.py` | 25 | 수동 인증서 csr/import |
-| `tests/test_certdeploy_waf.py` | 24 | 웹방화벽 HTTP API 배포 |
+| `tests/test_certdeploy_waf.py` | 24 | 웹방화벽 HTTP API 배포(옵션 A) |
 | `tests/test_scanner.py` | 22 | CertPilot 조회기(보류 앱) |
+| `tests/test_certdeploy_options.py` | 21 | 개인키 암호 사용/미사용 옵션, 수동 교체 대상(옵션 C), 알림 시험 |
 | `tests/test_debug_tools.py` | 19 | 진단 트레이스·진단 API·trace/diagnose·감시 점검 |
 | `tests/test_certdeploy_bundle.py` | 18 | 번들 검증·PKCS12/JKS 변환 |
 | `tests/test_sshkey.py` | 18 | SSH 키 정규화(보류 앱) |
