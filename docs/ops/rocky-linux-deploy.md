@@ -50,6 +50,15 @@ getenforce
 ```bash
 sudo firewall-cmd --list-all
 ```
+**관리자 계정과 SSH 키 등록**(설치 때 만들지 않았다면; PC 에서 `ssh-keygen -t ed25519` 로 만든 공개키 사용)
+```bash
+sudo useradd -m -G wheel certadmin && sudo passwd certadmin
+```
+```bash
+sudo -u certadmin mkdir -p -m 700 /home/certadmin/.ssh && echo '<PC 의 공개키 한 줄>' | sudo -u certadmin tee -a /home/certadmin/.ssh/authorized_keys && sudo chmod 600 /home/certadmin/.ssh/authorized_keys && sudo restorecon -R /home/certadmin/.ssh
+```
+새 창에서 **키로 접속되는지 확인한 뒤에** 비밀번호 로그인을 끈다.
+
 **SSH 보안**(`/etc/ssh/sshd_config.d/10-hardening.conf` 신규 작성)
 ```
 PermitRootLogin no
@@ -212,10 +221,21 @@ sudo firewall-cmd --permanent --add-service=https && sudo firewall-cmd --reload
 | 대상 추가·변경 | `servers.yml` 수정(1분 내 자동 반영) |
 | 규칙·설정 변경 | 수정 후 5-4 검증 → `curl -X POST http://127.0.0.1:9090/-/reload` (알림 설정은 `docker compose restart alertmanager`) |
 | 업그레이드 | `git pull` → 이미지 태그 변경 시 `docker compose pull && docker compose up -d` |
-| 백업 | 핵심 상태는 Prometheus 이력(`prometheus-data`). 점검 시간대에 `docker compose stop prometheus` 후 볼륨 tar 백업 → `docker compose start prometheus`. 설정은 Git 이 곧 백업(`.env`·`secrets/` 는 Git 에 없으므로 별도 안전 보관) |
+| 백업 | 아래 8-1 참고. 핵심 상태는 Prometheus 이력(`cert-monitor_prometheus-data`). 설정은 Git 이 곧 백업(`.env`·`secrets/` 는 Git 에 없으므로 별도 안전 보관) |
 | 디스크 점검 | `docker system df`, `df -h /var` (이력 400일 보관 설정) |
 | 로그 | `docker compose logs -f --tail=100 <서비스>` |
 | 계정 | Grafana 사용자는 관리자 화면에서 추가, 교내 계정 연동은 Grafana LDAP/OIDC 설정 |
+
+### 8-1. 백업과 복원 (명령)
+백업(점검 시간대, Prometheus 를 잠시 멈춰 일관성 확보):
+```bash
+mkdir -p /opt/cert-monitor/backup && cd /opt/cert-monitor/src/monitoring && docker compose stop prometheus && docker run --rm -v cert-monitor_prometheus-data:/data:ro -v /opt/cert-monitor/backup:/backup:z alpine tar czf /backup/prometheus-$(date +%F).tgz -C /data . && docker compose start prometheus
+```
+복원(새 VM 등):
+```bash
+cd /opt/cert-monitor/src/monitoring && docker compose stop prometheus && docker run --rm -v cert-monitor_prometheus-data:/data -v /opt/cert-monitor/backup:/backup:ro,z alpine sh -c "rm -rf /data/* && tar xzf /backup/prometheus-<날짜>.tgz -C /data" && docker compose start prometheus
+```
+`.env` 와 `alertmanager/secrets/` 는 암호화한 별도 저장소에 보관한다.
 
 ## 9. 장애 대응 (Rocky 특화 포함)
 | 증상 | 원인·조치 |
