@@ -5,6 +5,7 @@ WORM(Write Once Read Many) 방식의 감사 로그 저장 모듈
 import os
 import hashlib
 import json
+import threading
 import uuid
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
@@ -55,10 +56,22 @@ class AuditLogWriter:
         os.chmod(self.storage_path, 0o700)
         self.log_file = self.storage_path / f"audit_{log_type}.log"
         self.log_file.touch(exist_ok=True)
+        self._lock = threading.Lock()  # 동시 기록 시 체인이 갈라지지 않도록 직렬화
+
+    def _last_hash(self) -> str:
+        last = None
+        with open(self.log_file, "r") as f:
+            for line in f:
+                if line.strip():
+                    last = line
+        return json.loads(last)["hash"] if last else GENESIS_HASH
 
     def write(self, event_data: dict) -> dict:
-        """감사 이벤트를 체인 끝에 추가한다"""
-        logs = _read_jsonl(self.log_file)
+        """감사 이벤트를 체인 끝에 추가한다 (스레드 안전)"""
+        with self._lock:
+            return self._write_locked(event_data)
+
+    def _write_locked(self, event_data: dict) -> dict:
         event = {
             "id": str(uuid.uuid4()),
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -66,7 +79,7 @@ class AuditLogWriter:
             "event_type": event_data.get("event_type", "unknown"),
             "description": event_data.get("description", "no description"),
             "details": event_data.get("details", {}),
-            "prev_hash": logs[-1]["hash"] if logs else GENESIS_HASH,
+            "prev_hash": self._last_hash(),
         }
         event["hash"] = _entry_hash(event)
         with open(self.log_file, "a") as f:

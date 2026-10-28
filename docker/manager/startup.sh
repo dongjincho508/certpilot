@@ -1,44 +1,12 @@
-#!/bin/bash
-# CertPilot Manager - 컨테이너 시작 스크립트 (Flask API 전용)
-
+#!/bin/sh
+# CertPilot 시작: gunicorn 으로 API+UI 를 포그라운드 실행한다.
 set -e
+PORT="${PORT:-${CERTPILOT_API_PORT:-8080}}"
 
-echo "=== CertPilot Manager 시작 ==="
+if [ -z "$CERTPILOT_ADMIN_USER" ] || [ -z "$CERTPILOT_ADMIN_PASSWORD" ]; then
+  echo "경고: CERTPILOT_ADMIN_USER / CERTPILOT_ADMIN_PASSWORD 가 없으면 최초 관리자가 만들어지지 않아 로그인할 수 없습니다." >&2
+fi
 
-# 환경 변수 설정
-export CERTPILOT_API_PORT=${CERTPILOT_API_PORT:-8080}
-export CERTPILOT_DATA_DIR=${CERTPILOT_DATA_DIR:-/data}
-export CERTPILOT_LOG_DIR=${CERTPILOT_LOG_DIR:-/var/log/certpilot}
-
-# Flask API 시작 (백그라운드)
-echo "[1/2] CertPilot API 시작..."
-cd /app/certpilot_api
-export PYTHONPATH=/app/certpilot_core:/app/certpilot_cli:/app
-nohup python app.py > /data/logs/certpilot-api.log 2>&1 &
-
-API_PID=$!
-echo "CertPilot API PID: $API_PID"
-
-# 로그 디렉토리 생성
-mkdir -p /data/logs
-mkdir -p /data/certs
-
-# 헬스체크 대기
-echo "[2/2] 헬스체크 대기..."
-for i in {1..10}; do
-    if curl -f http://localhost:8080/health 2>/dev/null; then
-        echo "✅ CertPilot API 정상 동작 확인"
-        break
-    fi
-    echo "   대기 중... ($i/10)"
-    sleep 3
-done
-
-echo "========================================"
-echo "✅ CertPilot Manager 실행 시작"
-echo "   웹 UI: http://localhost"
-echo "   API: http://localhost:8080"
-echo "========================================"
-
-# 메인 프로세스 유지
-wait $API_PID
+# 단일 워커·다중 스레드: SQLite 와 해시 체인 감사 로그의 동시 쓰기 안전성을 위해 프로세스는 1개로 둔다.
+exec gunicorn --workers 1 --threads 8 --timeout 600 --bind "0.0.0.0:${PORT}" \
+  'certpilot_api.app:create_app()'

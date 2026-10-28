@@ -208,3 +208,14 @@ def test_scan_unknown_server_404(ctx):
 def test_security_headers(ctx):
     r = ctx.client().get("/health")
     assert r.headers["X-Content-Type-Options"] == "nosniff" and r.headers["X-Frame-Options"] == "DENY"
+
+
+def test_change_password_flow(ctx):  # S-6
+    c = admin(ctx)
+    assert c.post("/auth/password", json={"old_password": "bad", "new_password": PW + "2"}).status_code == 401
+    assert c.post("/auth/password", json={"old_password": PW, "new_password": "weak"}).status_code == 422
+    assert c.post("/auth/password", json={"old_password": PW, "new_password": PW}).status_code == 422
+    assert c.post("/auth/password", json={"old_password": PW, "new_password": PW + "2"}).status_code == 200
+    assert c.get("/servers").status_code == 401  # 기존 세션 폐기
+    assert login(ctx.client(), pw=PW).status_code == 401
+    assert login(ctx.client(), pw=PW + "2").status_code == 200

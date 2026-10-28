@@ -98,7 +98,8 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
 
     @app.errorhandler(AuthError)
     def _a(e):
-        return _err(e.code, e.message, 422 if e.code in ("weak_password", "bad_role", "bad_username") else 409)
+        status = {"invalid": 401, "locked": 423, "exists": 409}.get(e.code, 422)
+        return _err(e.code, e.message, status)
 
     def body() -> dict:
         data = request.get_json(silent=True)
@@ -149,6 +150,17 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
     @require(*both)
     def me():
         return jsonify(g.user)
+
+    @app.post("/auth/password")
+    @require(*both)
+    def change_password():
+        d = body()
+        auth.change_password(g.user["username"], str(d.get("old_password", "")), str(d.get("new_password", "")))
+        audit.write({"event_type": "password_change", "description": g.user["username"],
+                     "details": {"actor": g.user["username"]}})
+        resp = jsonify({"status": "ok", "message": "비밀번호를 변경했습니다. 다시 로그인하세요."})
+        resp.delete_cookie(COOKIE)
+        return resp
 
     # ---------------------------------------------------------------- 사용자 (관리자)
     @app.get("/users")

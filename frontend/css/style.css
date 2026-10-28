@@ -1114,3 +1114,20 @@ main {
         font-size: var(--font-size-xs);
     }
 }
+
+/* ========== 상태 표시 보정 (가독성 우선; 정의되지 않은 변수에 의존하지 않음) ========== */
+.summary-card { background: #ffffff; }
+.summary-card .card-number { color: #1f2937; }
+.summary-card .card-title { color: #4b5563; text-transform: none; letter-spacing: 0; }
+.badge { display: inline-block; padding: 4px 10px; border-radius: 999px; font-weight: 600; font-size: 0.8rem; white-space: nowrap; }
+.badge-valid   { background: #dcfce7; color: #166534; }
+.badge-warning { background: #fef3c7; color: #92400e; }
+.badge-expired { background: #fee2e2; color: #991b1b; }
+.badge-danger  { background: #fecaca; color: #7f1d1d; }
+.badge-other   { background: #e5e7eb; color: #374151; }
+.badge-unknown { background: #e0e7ff; color: #3730a3; }
+.sidebar .nav-link, .sidebar-section-title, #whoami { padding-left: 16px; padding-right: 16px; }
+.table td, .table th { vertical-align: middle; }
+.table-sm td:nth-child(-n+2) { white-space: nowrap; }
+.table-sm td:nth-child(6), .table-sm td:nth-child(7) { white-space: nowrap; }
+@media (max-width: 768px) { .app-layout { display: block; } .sidebar { width: 100%; } }

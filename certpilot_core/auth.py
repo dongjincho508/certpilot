@@ -98,3 +98,15 @@ class AuthService:
 
     def unlock(self, username: str) -> None:
         self.store.update_user(username, failed_count=0, locked_until=None)
+
+    def change_password(self, username: str, old: str, new: str) -> None:
+        """본인 비밀번호 변경: 현재 비밀번호 확인 + 정책 검증 + 기존 세션 전부 폐기"""
+        user = self.store.get_user(username)
+        if not user or not check_password_hash(user["password_hash"], old or ""):
+            raise AuthError("invalid", "현재 비밀번호가 올바르지 않습니다.")
+        validate_password(username, new, self.min_length)
+        if check_password_hash(user["password_hash"], new):
+            raise AuthError("weak_password", "이전과 다른 비밀번호를 사용해야 합니다.")
+        self.store.update_user(username, password_hash=generate_password_hash(new))
+        for sess in self.store.user_sessions(username):
+            self.store.delete_session(sess["token_hash"])

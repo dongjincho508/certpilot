@@ -1,3 +1,5 @@
+> ⚠️ **보관용(폐기)**: 이 문서는 현재 구현과 맞지 않는 계획·주장을 담고 있어 더 이상 기준 문서가 아니다. 현재 기준은 [ARCHITECTURE](../ARCHITECTURE.md) · [TRACEABILITY](../TRACEABILITY.md) · [OPEN_ITEMS](../OPEN_ITEMS.md) 이다.
+
 # MVP 검증 시나리오 실행 계획 (QA_SRE)
 
 **대상**: CertPilot MVP (PRD v0.3, 릴리스 승인 완료)

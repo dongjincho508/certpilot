@@ -1,3 +1,5 @@
+> ⚠️ **보관용(폐기)**: 이 문서는 현재 구현과 맞지 않는 계획·주장을 담고 있어 더 이상 기준 문서가 아니다. 현재 기준은 [ARCHITECTURE](../ARCHITECTURE.md) · [TRACEABILITY](../TRACEABILITY.md) · [OPEN_ITEMS](../OPEN_ITEMS.md) 이다.
+
 # CI/CD 및 배포 가이드
 
 CertPilot MVP의 CI/CD 파이프라인과 배포 절차에 대한 가이드입니다.

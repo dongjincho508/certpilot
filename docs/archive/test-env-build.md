@@ -1,3 +1,5 @@
+> ⚠️ **보관용(폐기)**: 이 문서는 현재 구현과 맞지 않는 계획·주장을 담고 있어 더 이상 기준 문서가 아니다. 현재 기준은 [ARCHITECTURE](../ARCHITECTURE.md) · [TRACEABILITY](../TRACEABILITY.md) · [OPEN_ITEMS](../OPEN_ITEMS.md) 이다.
+
 # 격리 테스트 환경 구축 절차
 
 **대상**: CertPilot MVP 검증 (릴리스 승인 완료)

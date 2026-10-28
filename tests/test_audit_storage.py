@@ -50,3 +50,14 @@ def test_reader_aggregates(tmp_path):
     AuditLogWriter(str(tmp_path), "y").write({"event_type": "b"})
     r = AuditLogReader(str(tmp_path))
     assert len(r.read_all_logs()) == 2 and r.verify_integrity()["integrity_valid"]
+
+
+def test_concurrent_writes_keep_chain_valid(tmp_path):
+    import threading
+    w = AuditLogWriter(str(tmp_path))
+    threads = [threading.Thread(target=lambda: [w.write({"event_type": "x"}) for _ in range(25)])
+               for _ in range(8)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    r = w.verify_integrity()
+    assert r["total_logs"] == 200 and r["integrity_valid"]
