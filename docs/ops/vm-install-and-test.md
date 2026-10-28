@@ -25,11 +25,31 @@
 - [ ] 상용 인증서 주문 계정(RapidSSL 등) 접근 권한
 - 인터넷이 막혀 있으면: 교내 프록시 주소(2·3단계에 설정 위치 표시), 또는 이미지 반입([rocky-linux-deploy.md](rocky-linux-deploy.md) 5-5)
 
+### 0-1. VMware(vSphere/ESXi) VM 생성 설정
+VM 을 **만들기 전에** 아래를 정한다(생성 후 바꾸기 어렵거나 설치가 막히는 항목 위주). 메뉴 이름은 vSphere 버전에 따라 다를 수 있다.
+| 항목 | 설정 | 이유 |
+|---|---|---|
+| CPU 호환성 | **EVC 모드/CPU 호환성 마스크가 구형이면 해제하거나 x86-64-v3(AVX2) 이상을 노출하는 모드**로. 클러스터 EVC 가 구형 기준이면 담당자와 협의 | Rocky 10 은 x86-64-v3 CPU 를 요구한다. 구형 호환 모드에서는 설치 미디어가 부팅되지 않는다 |
+| 호환성(가상 하드웨어 버전) | 호스트가 지원하는 **최신 버전** | 최신 CPU 기능·드라이버 |
+| 게스트 OS 종류 | 목록에 Rocky Linux/RHEL 10 이 있으면 그것, 없으면 *Other Linux (64-bit)* 계열 중 가장 최신 | 드라이버·튜닝 선택용(동작에는 영향 적음) |
+| 펌웨어 | UEFI(Secure Boot 사용 가능) | Rocky 는 Secure Boot 서명 지원 |
+| 디스크 | 한 개 100 GB 이상, **씬 프로비저닝 가능**(데이터스토어 여유 확인), SCSI 컨트롤러 *VMware Paravirtual* | `/var` 에 Docker 이미지·Prometheus 이력이 쌓임 |
+| 네트워크 | 어댑터 *VMXNET3*, 대상 서버와 통신 가능한 포트 그룹, 고정 IP | 관리 서버 → 대상 서버(443/22) 도달성 |
+| 시간 | **VMware Tools 의 주기적 시간 동기화는 끄고** 게스트의 chrony 로 동기화(2단계) | 만료 계산·알림이 시각에 의존. 이중 동기화는 시각을 흔든다 |
+| CD/DVD | Rocky 10 ISO(Minimal) 연결 후 설치가 끝나면 분리 | |
+| 리소스 예약 | 메모리 예약 8 GB(가능하면) | 감시 컨테이너가 스왑으로 밀리지 않게 |
+| 스냅샷 | 평소에는 **스냅샷 없음**, 작업 전에만 생성 후 확인되면 삭제(10단계 정책) | 스냅샷에는 개인키가 들어 있고 오래 두면 성능·용량 문제 |
+| 위치 | 일반 업무 VM 과 **접근 권한이 분리된 폴더/리소스 풀**, VM 콘솔·스냅샷·내보내기 권한을 최소 인원에게만 | 개인키가 VM 디스크에 있으므로 vSphere 권한이 곧 키 접근 권한 |
+
 ## 1. Rocky Linux 10 설치
 1. Rocky 10 ISO(Minimal) 부팅 → 시간대 `Asia/Seoul`, 소프트웨어 선택 **최소 설치**
 2. 파티션(LVM): `/` 30 GB 이상, **`/var` 40 GB 이상**(Docker 이미지·Prometheus 이력)
 3. 고정 IP·게이트웨이·교내 DNS·호스트명 설정
-4. root SSH 비밀번호 로그인은 쓰지 않고, **일반 관리자 계정(wheel)** 을 만든 뒤 재부팅 → 그 계정으로 SSH 접속
+4. **디스크 암호화(LUKS) 결정** — 설치 화면의 *Installation Destination → Encrypt my data* 를 선택하면 디스크 전체가 암호화된다. 설치 중에만 선택할 수 있다.
+   - 장점: VM 디스크(VMDK)·스냅샷·백업 이미지를 반출/유출해도 개인키를 읽을 수 없다
+   - 단점(운영에 영향): **재부팅마다 암호를 콘솔에 직접 입력**해야 부팅된다(무인 재부팅 불가, 정전·호스트 장애 후 사람이 필요). 암호 분실 = 복구 불가 → 암호는 2인 이상이 봉인 보관
+   - 대안: vSphere VM Encryption/데이터스토어 암호화(KMS 필요)를 전산실이 제공하면 게스트 LUKS 없이 같은 효과를 얻을 수 있다. 어느 쪽도 못 쓰면 10단계의 VM 백업·스냅샷 접근 통제로 보완
+5. root SSH 비밀번호 로그인은 쓰지 않고, **일반 관리자 계정(wheel)** 을 만든 뒤 재부팅 → 그 계정으로 SSH 접속
 
 ## 2. 초기 설정
 ```bash
@@ -41,6 +61,14 @@ sudo hostnamectl set-hostname mgmt.univ.example
 ```bash
 sudo timedatectl set-timezone Asia/Seoul
 ```
+**VMware 게스트 도구**(VMware 위에서만)
+```bash
+sudo dnf -y install open-vm-tools && sudo systemctl enable --now vmtoolsd
+```
+```bash
+vmware-toolbox-cmd timesync disable && vmware-toolbox-cmd timesync status
+```
+(`Disabled` 여야 한다. VMware 의 시간 동기화는 끄고 아래 chrony 만 쓴다.)
 **시각 동기화(필수)** — 만료 계산·알림이 서버 시각에 의존한다. 교내 NTP 가 있으면 `/etc/chrony.conf` 의 `pool` 줄을 교내 NTP 로 바꾼다.
 ```bash
 sudo systemctl enable --now chronyd
@@ -287,6 +315,22 @@ sudo reboot
 ```bash
 docker compose -f /opt/cert-monitor/src/monitoring/docker-compose.yml ps && systemctl is-active docker nginx chronyd firewalld
 ```
+**VM 스냅샷·VM 백업 정책(VMware)**
+- 스냅샷은 **작업 직전에만** 만들고(OS 업데이트, 감시/certdeploy 업그레이드, 설정 대변경) 정상 확인 후 **당일 삭제**한다. 오래 둔 스냅샷은 디스크 용량·I/O 성능을 해친다. *메모리 포함* 스냅샷은 메모리의 개인키까지 담으므로 필요할 때만 쓴다
+- VM 단위 백업 제품(Veeam 등)을 쓰면 **백업 이미지에 개인키가 들어 있다** → 백업 저장소를 암호화하고 접근 인원을 관리 서버 관리자와 같은 수준으로 제한한다
+- **복구(스냅샷 되돌리기/백업 복원) 직후 점검**: 시각이 어긋나 있을 수 있고(`sudo chronyc makestep && chronyc tracking`), certdeploy 의 배포 기록이 과거 상태일 수 있다. 다음을 실행해 실제 서빙 상태와 대조한다:
+```bash
+sudo chronyc makestep && chronyc tracking
+```
+```bash
+$CD status
+```
+```bash
+$CD check
+```
+  서빙 인증서와 기록이 다르면 `$CD plan` 후 `$CD deploy` 로 맞춘다(이미 같은 인증서면 건너뛴다). Prometheus 이력은 되돌린 시점 이후 구간이 비는 것이 정상이다
+- VM 전체 백업과 별개로 아래 **애플리케이션 백업**(암호화)을 유지한다. VM 이 깨져도 이것만 있으면 새 VM 에서 복원된다
+
 **백업**(개인키 포함 → 암호화, 안전한 곳에 보관)
 ```bash
 export BACKUP_PW='<12자 이상 비밀번호>' && $CD backup --out /home/certadmin/certdeploy-$(date +%F).cdbk --passphrase-env BACKUP_PW
@@ -327,6 +371,7 @@ $CD diagnose --out /tmp/diag.json
 - [ ] 5개 컨테이너 실행, 재부팅 후 자동 복구, nginx HTTPS 로 Grafana 접속
 - [ ] 등록 대상 전부 Prometheus `up`, 대시보드에 인증서 표시, 테스트 알림 수신
 - [ ] T-01~T-13 합격 · 결과표 보관
+- [ ] VMware: EVC/CPU 호환성 확인, VMware Tools 시간 동기화 끔, 스냅샷 없음(작업 시에만), VM 콘솔·스냅샷·백업 접근 인원 최소화, 디스크 암호화 방식(LUKS 또는 vSphere 암호화) 결정·암호 봉인 보관
 - [ ] 개인키 권한 600, `certdeploy` 계정 외 접근 불가, 백업본 암호화 보관·복원 시험 완료
 - [ ] 알림 수신자·야간/휴일 담당 확정, 갱신 달력(약 200일 주기, 단축 예정) 등록
 - [ ] 담당자 2인 이상이 접속·재기동·롤백(`rollback --target`)·복구 방법 숙지
