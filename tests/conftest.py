@@ -70,3 +70,26 @@ def jks_file(tmp_path):
     if r.returncode != 0:
         pytest.skip(f"keytool unavailable: {r.stderr}")
     return path
+
+
+@pytest.fixture
+def sandbox(tmp_path):
+    """원격 파일시스템 역할의 디렉터리. put(path, content) 로 파일을 심는다."""
+    root = tmp_path / "remote"
+    root.mkdir()
+
+    class Box:
+        path = str(root)
+
+        def put(self, remote_path, content):
+            f = root / remote_path.lstrip("/")
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_bytes(content if isinstance(content, bytes) else content.encode())
+            return f
+
+        def link(self, remote_path, target):
+            f = root / remote_path.lstrip("/")
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.symlink_to(target)
+
+    return Box()

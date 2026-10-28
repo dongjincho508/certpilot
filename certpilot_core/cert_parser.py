@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from cryptography import x509
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.hazmat.primitives.serialization import pkcs12
 
@@ -33,6 +34,7 @@ class CertificateInfo:
     is_expired: bool
     is_not_yet_valid: bool
     subject_alt_name: List[str] = None
+    fingerprint_sha256: str = ""
 
     def __post_init__(self):
         if self.subject_alt_name is None:
@@ -71,18 +73,38 @@ def _to_info(cert: x509.Certificate, now: Optional[datetime] = None) -> Certific
         is_expired=not_after < now,
         is_not_yet_valid=not_before > now,
         subject_alt_name=sans,
+        fingerprint_sha256=cert.fingerprint(hashes.SHA256()).hex(),
     )
+
+
+def parse_pem_blocks(pem_text: str) -> List[Optional[CertificateInfo]]:
+    """PEM 문자열의 CERTIFICATE 블록마다 파싱 결과를 반환. 깨진 블록은 None.
+    인증서 외 블록(개인키 등)은 읽지도 반환하지도 않는다."""
+    out = []
+    for block in _PEM_BLOCK.findall(pem_text):
+        try:
+            out.append(_to_info(x509.load_pem_x509_certificate(block.encode())))
+        except ValueError:
+            out.append(None)
+    return out
 
 
 def parse_pem_text(pem_text: str) -> List[CertificateInfo]:
     """PEM 문자열(멀티파트 가능)에서 인증서를 파싱. 깨진 블록은 건너뛴다."""
-    certs = []
-    for block in _PEM_BLOCK.findall(pem_text):
-        try:
-            certs.append(_to_info(x509.load_pem_x509_certificate(block.encode())))
-        except ValueError:
-            continue
-    return certs
+    return [c for c in parse_pem_blocks(pem_text) if c is not None]
+
+
+def extract_pem_certs(text: str) -> str:
+    """텍스트에서 CERTIFICATE 블록만 이어 붙여 반환 (S-4 해시 대상 원문)."""
+    return "\n".join(_PEM_BLOCK.findall(text))
+
+
+def parse_der_certificate(der: bytes) -> Optional[CertificateInfo]:
+    """DER 인증서 1건 파싱 (TLS 핸드셰이크로 받은 인증서용)"""
+    try:
+        return _to_info(x509.load_der_x509_certificate(der))
+    except ValueError:
+        return None
 
 
 def parse_pem_certificates(cert_path: str) -> List[CertificateInfo]:
