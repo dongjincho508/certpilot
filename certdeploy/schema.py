@@ -13,6 +13,17 @@ def _options() -> dict:
     return {"type": "object", "additionalProperties": False, "properties": {k: {**v, "type": {"str": "string", "float": "number"}.get(v["type"], v["type"])} for k, v in props.items()}}
 
 
+def _api() -> dict:
+    step = {"type": "object", "required": ["name", "method", "url"], "properties": {
+        "name": _S, "method": {"enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]}, "url": _S, "headers": {"type": "object"},
+        "json": {}, "form": {"type": "object"}, "body": _S, "multipart": {"type": "object"}, "expect_status": {"type": "array", "items": _I},
+        "expect_body": _S, "expect_json": {"type": "object"}, "extract": {"type": "object"}, "timeout": {"type": "number"}}}
+    steps = {"type": "array", "minItems": 1, "items": step}
+    return {"type": "object", "required": ["steps"], "properties": {
+        "base_url": {"type": "string", "pattern": "^https?://"}, "verify_tls": _B, "ca_file": _PATH, "timeout": {"type": "number"}, "vars": {"type": "object"},
+        "pfx_password_env": _S, "pfx_alias": _S, "steps": steps, "rollback_steps": {"type": "array", "items": step}, "finally_steps": {"type": "array", "items": step}}}
+
+
 def _target() -> dict:
     transport = {"type": "object", "properties": {"kind": {"enum": ["local", "ssh"]}, "host": _S, "user": _S, "port": _I, "key_file": _PATH,
                                                   "known_hosts": _PATH, "sudo": _B, "timeout": _I}}
@@ -23,7 +34,7 @@ def _target() -> dict:
     files = {"type": "array", "items": {"type": "object", "required": ["path", "content"], "properties": {
         "path": _PATH, "content": {"enum": list(CONTENT_KINDS)}, "mode": _S, "password_env": _S, "password_file": _PATH, "alias": _S, "legacy_pkcs12": _B}}}
     return {"type": "object", "required": ["name", "type"], "properties": {
-        "name": {"type": "string", "pattern": r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"}, "type": {"enum": list(TYPES)},
+        "name": {"type": "string", "pattern": r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"}, "type": {"enum": list(TYPES) + ["http_api"]}, "api": _api(),
         "transport": transport, "cert_path": _PATH, "key_path": _PATH, "keystore_path": _PATH, "format": {"enum": ["pkcs12", "jks", "pem"]},
         "password_env": _S, "password_file": _PATH, "alias": _S, "legacy_pkcs12": _B, "files": files,
         "check_cmd": _S, "reload_cmd": _S, "pre_cmd": _S, "post_cmd": _S, "verify": verify, "health": health,
@@ -31,10 +42,10 @@ def _target() -> dict:
 
 
 def _acme() -> dict:
-    infoblox = {"type": "object", "required": ["host", "user_env", "password_env"], "properties": {
-        "host": _S, "wapi_version": _S, "view": _S, "user_env": _S, "password_env": _S, "ca_file": _PATH, "verify": _B, "ttl": _I, "scheme": {"enum": ["https", "http"]}}}
-    dns = {"type": "object", "additionalProperties": False, "properties": {
-        "mode": {"enum": ["infoblox", "manual"]}, "check_resolvers": {"type": "array", "items": _S}, "propagation_timeout": _I, "infoblox": infoblox}}
+    from .dnsprov import PROVIDER_REQUIRED
+    dns_props = {"mode": {"enum": list(PROVIDER_REQUIRED)}, "check_resolvers": {"type": "array", "items": _S}, "propagation_timeout": _I}
+    dns_props.update({m: {"type": "object", "required": list(req)} for m, req in PROVIDER_REQUIRED.items() if m != "manual"})
+    dns = {"type": "object", "additionalProperties": False, "properties": dns_props}
     return {"type": "object", "required": ["domains"], "additionalProperties": False, "properties": {
         "directory": {"type": "string", "pattern": "^https://"}, "email": _S, "domains": {"type": "array", "minItems": 1, "items": _S},
         "key_type": {"enum": ["rsa2048", "rsa3072", "rsa4096", "ec256", "ec384"]}, "renew_days": _I, "dns": dns}}

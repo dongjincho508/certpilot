@@ -334,3 +334,219 @@ class DnsServer:
     @property
     def resolver(self):
         return f"127.0.0.1:{self.port}"
+
+
+# ------------------------------------------------------------------ Cloudflare / PowerDNS / Webhook (HTTP)
+class _JsonHandler(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def _body(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        return json.loads(self.rfile.read(n)) if n else None
+
+    def _send(self, code, obj):
+        body = json.dumps(obj).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+class CloudflareHandler(_JsonHandler):
+    def _ok(self):
+        if self.headers.get("Authorization") != f"Bearer {self.server.token}":
+            self._send(403, {"success": False, "errors": [{"message": "bad token"}]})
+            return False
+        return True
+
+    def do_GET(self):
+        if not self._ok():
+            return
+        u = urllib.parse.urlparse(self.path)
+        q = dict(urllib.parse.parse_qsl(u.query))
+        self.server.log.append(("GET", u.path))
+        if u.path == "/client/v4/zones":
+            res = [{"id": "zone-" + n, "name": n} for n in self.server.zones if n == q.get("name")]
+            return self._send(200, {"success": True, "result": res})
+        m = re.fullmatch(r"/client/v4/zones/zone-([^/]+)/dns_records", u.path)
+        if m:
+            return self._send(200, {"success": True, "result": [{"id": rid, "name": n, "content": c} for rid, (n, c) in self.server.records.items()
+                                                                if n == q.get("name") and c == q.get("content")]})
+        self._send(404, {"success": False})
+
+    def do_POST(self):
+        if not self._ok():
+            return
+        body = self._body()
+        self.server.log.append(("POST", self.path, body))
+        rid = f"rec{len(self.server.records) + 1}"
+        self.server.records[rid] = (body["name"], body["content"])
+        self.server.zone.add(body["name"], body["content"])
+        self._send(200, {"success": True, "result": {"id": rid}})
+
+    def do_DELETE(self):
+        if not self._ok():
+            return
+        rid = self.path.rsplit("/", 1)[1]
+        n, c = self.server.records.pop(rid)
+        self.server.zone.remove(n, c)
+        self._send(200, {"success": True, "result": {"id": rid}})
+
+
+def start_cloudflare(zone, token="cf-token-123", zones=("hnu.kr",)):
+    return _serve(CloudflareHandler, zone=zone, token=token, zones=list(zones), records={}, log=[])
+
+
+class PowerDnsHandler(_JsonHandler):
+    def _ok(self):
+        if self.headers.get("X-API-Key") != self.server.key:
+            self._send(401, {"error": "Unauthorized"})
+            return False
+        return True
+
+    def do_GET(self):
+        if not self._ok():
+            return
+        rrsets = [{"name": n, "type": "TXT", "records": [{"content": c, "disabled": False} for c in v]} for n, v in self.server.rr.items() if v]
+        self._send(200, {"name": self.server.zonename, "rrsets": rrsets})
+
+    def do_PATCH(self):
+        if not self._ok():
+            return
+        for rr in self._body()["rrsets"]:
+            self.server.log.append((rr["changetype"], rr["name"], [r["content"] for r in rr.get("records", [])]))
+            old = list(self.server.rr.get(rr["name"], []))
+            new = [r["content"] for r in rr.get("records", [])] if rr["changetype"] == "REPLACE" else []
+            self.server.rr[rr["name"]] = new
+            plain = rr["name"].rstrip(".")
+            for c in old:
+                if c not in new:
+                    self.server.zone.remove(plain, c.strip('"'))
+            for c in new:
+                if c not in old:
+                    self.server.zone.add(plain, c.strip('"'))
+        self.send_response(204)
+        self.end_headers()
+
+
+def start_powerdns(zone, key="pdns-key", zonename="hnu.kr."):
+    return _serve(PowerDnsHandler, zone=zone, key=key, zonename=zonename, rr={}, log=[])
+
+
+class WebhookHandler(_JsonHandler):
+    def do_POST(self):
+        if self.headers.get("Authorization") != self.server.auth:
+            return self._send(401, {"error": "no"})
+        b = self._body()
+        self.server.log.append(b)
+        if self.server.fail:
+            return self._send(500, {"error": "boom"})
+        (self.server.zone.add if b["action"] == "present" else self.server.zone.remove)(b["fqdn"], b["value"])
+        self._send(200, {"ok": True})
+
+
+def start_webhook(zone, auth="Bearer hook-secret"):
+    return _serve(WebhookHandler, zone=zone, auth=auth, log=[], fail=False)
+
+
+# ------------------------------------------------------------------ RFC 2136 (TCP, TSIG 검증)
+class Rfc2136Server:
+    def __init__(self, zone, zonename="hnu.kr", key_name="acme-key.", secret_b64=None):
+        import hmac as _hmac
+        self._hmac = _hmac
+        self.zone, self.zonename, self.key_name, self.secret = zone, zonename, key_name, secret_b64
+        self.sock = socket.socket()
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(5)
+        self.sock.settimeout(0.2)
+        self.port = self.sock.getsockname()[1]
+        self.log = []
+        self._stop = False
+        self.t = threading.Thread(target=self._run, daemon=True)
+        self.t.start()
+
+    @property
+    def server(self):
+        return f"127.0.0.1:{self.port}"
+
+    def close(self):
+        self._stop = True
+        self.t.join(1)
+        self.sock.close()
+
+    def _run(self):
+        while not self._stop:
+            try:
+                c, _ = self.sock.accept()
+            except OSError:
+                continue
+            with c:
+                try:
+                    n = struct.unpack(">H", c.recv(2))[0]
+                    msg = b""
+                    while len(msg) < n:
+                        msg += c.recv(n - len(msg))
+                    rc = self._handle(msg)
+                    resp = struct.pack(">HHHHHH", struct.unpack(">H", msg[:2])[0], 0x8000 | (5 << 11) | (9 if rc >= 16 else rc), 0, 0, 0, 0)   # TSIG 오류(BADSIG 등)는 헤더에는 NOTAUTH
+                    c.sendall(struct.pack(">H", len(resp)) + resp)
+                except Exception:   # noqa: BLE001
+                    pass
+
+    @staticmethod
+    def _name(msg, off):
+        labels = []
+        while msg[off]:
+            labels.append(msg[off + 1:off + 1 + msg[off]].decode())
+            off += 1 + msg[off]
+        return ".".join(labels), off + 1
+
+    def _handle(self, msg):
+        qid, flags, zo, pr, up, ar = struct.unpack(">HHHHHH", msg[:12])
+        if (flags >> 11) & 0xF != 5:
+            return 4
+        off = 12
+        zname, off = self._name(msg, off)
+        off += 4
+        if zname.lower() != self.zonename:
+            return 10                                           # NOTZONE
+        recs = []
+        for _ in range(up):
+            n, off = self._name(msg, off)
+            t, cl, ttl, rdlen = struct.unpack(">HHIH", msg[off:off + 10])
+            off += 10
+            rd = msg[off:off + rdlen]
+            off += rdlen
+            recs.append((n, t, cl, rd))
+        if self.secret:
+            if ar != 1:
+                return 9                                        # NOTAUTH: 서명 없음
+            tsig_start = off
+            kn, off = self._name(msg, off)
+            t, cl, ttl, rdlen = struct.unpack(">HHIH", msg[off:off + 10])
+            off += 10
+            rd = msg[off:off + rdlen]
+            algo, p = self._name(rd, 0)
+            th, tl, fudge, maclen = struct.unpack(">HIHH", rd[p:p + 10])
+            mac = rd[p + 10:p + 10 + maclen]
+            if t != 250 or kn.lower() != self.key_name.rstrip(".").lower():
+                return 17
+            unsigned = bytearray(msg[:tsig_start])
+            unsigned[10:12] = struct.pack(">H", ar - 1)
+            from certdeploy.dnsquery import _encode_name
+            variables = (_encode_name(kn.lower()) + struct.pack(">HI", 255, 0) + _encode_name(algo.lower())
+                         + struct.pack(">HIHHH", th, tl, fudge, 0, 0))
+            expect = self._hmac.new(base64.b64decode(self.secret), bytes(unsigned) + variables, hashlib.sha256).digest()
+            if not self._hmac.compare_digest(expect, mac):
+                return 16                                       # BADSIG
+        for n, t, cl, rd in recs:
+            if t != 16:
+                continue
+            text, p = b"", 0
+            while p < len(rd):
+                text += rd[p + 1:p + 1 + rd[p]]
+                p += 1 + rd[p]
+            self.log.append(("add" if cl == 1 else "delete", n, text.decode()))
+            (self.zone.add if cl == 1 else self.zone.remove)(n, text.decode())
+        return 0

@@ -1,0 +1,81 @@
+# 웹방화벽(WAF)·로드밸런서·어플라이언스 배포 예시 — type: http_api (제품 관리 API 를 설정으로 기술)
+# ※ 아래 경로·필드명·응답 형식은 "구조를 보여 주는 가상 예시"다. 실제 제품(WAPPLES, WEBFRONT, FortiWeb, F5 등)의 관리 API 문서와
+#    장비로 확인해 url/필드를 바꿔야 한다. API 가 없는 장비는 아래 SSH(generic) 방식이나 GUI 수동 교체를 쓴다.
+#    docs/ops/compatibility.md 참고.
+state_dir: /var/lib/certdeploy
+
+certificate:
+  cert_file: /var/lib/certdeploy/managed/wildcard.crt
+  key_file: /var/lib/certdeploy/managed/wildcard.key
+
+targets:
+  # --- (A) REST API 로 올리는 WAF: 로그인 → 업로드 → 적용 → TLS 로 서빙 확인, 실패하면 이전 인증서로 롤백
+  - name: waf-main
+    type: http_api
+    canary: true
+    order: 1
+    api:
+      base_url: https://waf-mgmt.hnu.kr:8443
+      ca_file: /etc/pki/ca-trust/source/anchors/waf-mgmt-ca.pem    # 관리 화면이 사설 인증서면 그 CA(또는 verify_tls: false — 비권장)
+      vars: {cert_name: hnu-wildcard}
+      steps:
+        - name: login
+          method: POST
+          url: /api/login
+          json: {user: "{env:WAF_USER}", password: "{env:WAF_PASS}"}     # 계정은 환경변수(/etc/certdeploy/env)에서
+          expect_json: {"$.code": 0}                                      # HTTP 200 이어도 본문 코드가 실패일 수 있음
+          extract: {token: "$.data.token"}                                # 응답에서 토큰 추출 → 이후 {token}
+        - name: upload
+          method: POST
+          url: /api/ssl/cert
+          headers: {Authorization: "Bearer {token}"}
+          json: {name: "{cert_name}", cert: "{fullchain_pem}", key: "{key_pem}"}
+          expect_json: {"$.code": 0}
+        - name: apply
+          method: POST
+          url: /api/ssl/apply
+          headers: {Authorization: "Bearer {token}"}
+          json: {name: "{cert_name}"}
+      rollback_steps:                                                      # 실패 시 직전 성공 배포본({prev_*})으로 되돌림
+        - name: rollback-upload
+          method: POST
+          url: /api/ssl/cert
+          headers: {Authorization: "Bearer {token}"}
+          json: {name: "{cert_name}", cert: "{prev_fullchain_pem}", key: "{prev_key_pem}"}
+        - name: rollback-apply
+          method: POST
+          url: /api/ssl/apply
+          headers: {Authorization: "Bearer {token}"}
+          json: {name: "{cert_name}"}
+      finally_steps:                                                       # 성공·실패와 무관하게 항상(로그아웃)
+        - name: logout
+          method: POST
+          url: /api/logout
+          headers: {Authorization: "Bearer {token}"}
+    verify: {host: www.hnu.kr, port: 443, strict: true}                    # WAF 앞단(VIP)에서 실제로 새 인증서가 서빙되는지 확인
+
+  # --- (B) 파일 업로드(multipart)·PFX 를 요구하는 장비 예: multipart 와 {pfx_b64}/{pfx_password} 사용
+  # - name: waf-sub
+  #   type: http_api
+  #   api:
+  #     base_url: https://waf2.hnu.kr
+  #     pfx_password_env: WAF_PFX_PASSWORD       # {pfx_b64}, {pfx_password} 를 쓰려면 필요
+  #     steps:
+  #       - {name: login, method: POST, url: /login, form: {id: "{env:WAF_USER}", pw: "{env:WAF_PASS}"}, extract: {sid: "header:Set-Cookie"}}
+  #       - name: upload
+  #         method: POST
+  #         url: /certs/upload
+  #         headers: {Cookie: "{sid}"}
+  #         multipart: {fields: {name: hnu, password: "{pfx_password}"}, files: {file: {filename: hnu.pfx, content: "{pfx_b64}"}}}
+  #   verify: {host: www2.hnu.kr}
+
+  # --- (C) CLI(SSH)로 반영하는 장비 예(F5 BIG-IP tmsh 형태의 구조 예시 — 명령은 제품 문서로 확인): generic + 파일 + 명령
+  # - name: f5-lb
+  #   type: generic
+  #   transport: {kind: ssh, host: f5-mgmt.hnu.kr, user: deploy, key_file: /var/lib/certdeploy/.ssh/id_ed25519, known_hosts: /var/lib/certdeploy/.ssh/known_hosts}
+  #   files:
+  #     - {path: /var/tmp/hnu-wildcard.crt, content: fullchain}
+  #     - {path: /var/tmp/hnu-wildcard.key, content: key, mode: "0600"}
+  #   check_cmd: "none"
+  #   reload_cmd: "tmsh install sys crypto key hnu-wildcard from-local-file /var/tmp/hnu-wildcard.key && tmsh install sys crypto cert hnu-wildcard from-local-file /var/tmp/hnu-wildcard.crt && tmsh save sys config"
+  #   verify: {host: www.hnu.kr}

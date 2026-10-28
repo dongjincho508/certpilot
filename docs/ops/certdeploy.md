@@ -174,6 +174,7 @@ echo 'TOMCAT_KS_PASS=...' | sudo tee /etc/certdeploy/env >/dev/null && sudo chow
 | `rollback --target N` | 마지막 배포 이전 파일로 되돌리고 재로드 |
 | `issue [--staging] [--no-deploy]` / `renew` | lego 발급·갱신 후 배포(타이머가 `renew` 를 호출) |
 | `issue`/`renew`(설정에 `acme:`) | **내장 ACME(Let's Encrypt, DNS-01)**: 연동(infoblox) 자동 또는 수동(TXT 안내→재실행). [auto-issue.md](auto-issue.md) |
+| 배포 대상 `type: http_api` | **웹방화벽·어플라이언스**: 관리 API 요청 순서(로그인→업로드→적용)를 설정으로 기술, 확인·롤백 포함. [compatibility.md](compatibility.md) |
 | `acme-reset` | 진행 중인 내장 ACME 주문(대기 키·TXT 안내) 폐기 |
 | `csr --domains A,B [--key-type rsa2048\|rsa3072\|rsa4096\|ecdsa256\|ecdsa384] [--org ..] [--force]` | **수동 발급용** 개인키+CSR 생성. 키는 `state_dir/pending/<name>/key.pem`(0600), CSR 은 화면 출력 |
 | `import --file F... [--key-file K] [--pfx P --pfx-pass-env V] [--dry-run] [--deploy]` | CA 가 준 인증서(PEM/DER/p7b)·PFX 를 정리·검증·설치(+배포) |

@@ -15,7 +15,7 @@ from typing import Callable, List, Optional
 
 from certpilot_core import trace
 
-from . import remote
+from . import apideploy, remote
 from .bundle import Bundle, BundleError
 from .config import Config, Target
 from .handlers import KEY_KINDS, FileSpec
@@ -71,6 +71,10 @@ class Deployer:
         """대상 호스트명이 인증서 SAN 에 포함되는지, 키스토어 비밀번호 환경변수가 있는지 점검(문제 목록 반환)."""
         problems = []
         for t in self.cfg.targets:
+            if t.api:
+                names = {n for is_env, n in apideploy.referenced(t.api) if is_env}
+                names |= {t.api["pfx_password_env"]} if t.api.get("pfx_password_env") else set()
+                problems += [f"{t.name}: 환경변수 {n} 가 설정되지 않았습니다" for n in sorted(names) if not self.environ.get(n)]
             if t.verify and not self.bundle.covers(t.verify.sni or t.verify.host):
                 problems.append(f"{t.name}: 인증서 SAN 이 {t.verify.sni or t.verify.host} 를 포함하지 않습니다")
             for f in t.files:
@@ -91,6 +95,10 @@ class Deployer:
         for t in self.ordered(only):
             where = t.transport.get("host") or "로컬"
             lines.append(f"[{t.name}] {t.type}@{where}" + (" (canary)" if t.canary else ""))
+            if t.api:
+                lines += apideploy.plan_lines(t.api)
+                lines.append(f"    확인: {('%s:%d' % (t.verify.host, t.verify.port)) if t.verify else '없음(TLS 확인을 하지 않음)'}")
+                continue
             for f in t.files:
                 lines.append(f"    파일 {f.dest}  ← {f.content} ({f.mode})")
             lines.append(f"    점검: {t.check_cmd or '없음'}")
@@ -220,6 +228,8 @@ class Deployer:
                 self.state.save()
                 self.notifier.fire(t.name, f"인증서 배포 중단: {t.name}", msg, "warning")
                 return TargetResult(t.name, "failed", msg, before)
+        if t.api:
+            return self._deploy_api(t, before)
         ts = self.clock().strftime("%Y%m%d%H%M%S")
         installed: List[remote.Installed] = []
         transport: Optional[Transport] = None
@@ -247,6 +257,82 @@ class Deployer:
         self.notifier.resolve(t.name)
         msg = "배포·확인 완료" if t.verify else "배포 완료(TLS 확인은 설정 안 됨)"
         return TargetResult(t.name, "deployed", msg + self._post_hook(t, "deployed"), before)
+
+    def _deploy_api(self, t: Target, before) -> TargetResult:
+        """웹방화벽·어플라이언스: 설정한 HTTP 단계 실행 → TLS 일련번호 확인 → 실패 시 이전 배포본으로 rollback_steps."""
+        api, new = t.api, self.bundle.serial
+        runner = apideploy.ApiRunner(api, t.name, self.environ, self.sleep)
+        prev = apideploy.load_prev(self.state.dir, t.name)
+        reason = None
+        try:
+            runner.vars.update(api.get("vars") or {})
+            runner.vars.update(runner.bundle_vars(self.bundle))
+            runner.vars["name"] = t.name
+            runner.run(api["steps"])
+            self._verify_new(t)
+            self._health_and_soak(t)
+        except (apideploy.ApiError, DeployFailure) as e:
+            reason = str(e)
+        rolled, problem = False, ""
+        if reason is not None:
+            trace.event("deploy", "failure", "error", target=t.name, reason=reason, api=True)
+            if api.get("rollback_steps") and prev is not None:
+                try:
+                    runner.vars.update(runner.bundle_vars(prev, "prev_"))
+                    runner.run(api["rollback_steps"])
+                    rolled = True
+                except (apideploy.ApiError, DeployFailure) as e:
+                    problem = f" / 롤백도 실패({e}) — 수동 조치 필요"
+            elif api.get("rollback_steps"):
+                problem = " / 이전 배포본 기록이 없어 롤백하지 못함(수동 조치 필요)"
+            else:
+                problem = " / rollback_steps 가 설정되지 않아 자동 롤백 없음(수동 확인 필요)"
+        for st in api.get("finally_steps") or []:          # 로그아웃 등: 실패해도 결과를 바꾸지 않는다
+            try:
+                runner.run_step(st)
+            except apideploy.ApiError as e:
+                trace.event("deploy", "finally_step", "warning", target=t.name, message=str(e))
+        if reason is None:
+            try:
+                apideploy.save_prev(self.state.dir, t.name, self.bundle)
+            except OSError as e:
+                log.warning("[%s] 이전 배포본 보관 실패(롤백 불가): %s", t.name, e)
+            self.state.set_target(t.name, serial=f"{new:x}", deployed_at=self.clock().isoformat(), status="ok", error="")
+            self.state.save()
+            self.notifier.resolve(t.name)
+            return TargetResult(t.name, "deployed", ("배포·확인 완료" if t.verify else "배포 완료(TLS 확인은 설정 안 됨)") + self._post_hook(t, "deployed"), before)
+        status = "rolled_back" if rolled else "failed"
+        msg = reason + (" → 이전 인증서로 롤백함" if rolled else "") + problem
+        self.state.set_target(t.name, status=status, error=msg, failed_at=self.clock().isoformat())
+        self.state.save()
+        self.notifier.fire(t.name, f"인증서 배포 실패: {t.name}", msg, "critical")
+        return TargetResult(t.name, status, msg + self._post_hook(t, status), before)
+
+    def _rollback_api(self, t: Target) -> TargetResult:
+        prev = apideploy.load_prev(self.state.dir, t.name, "previous")
+        if prev is None or not t.api.get("rollback_steps"):
+            return TargetResult(t.name, "failed", "되돌릴 이전 배포본 기록 또는 rollback_steps 가 없습니다")
+        runner = apideploy.ApiRunner(t.api, t.name, self.environ, self.sleep)
+        try:
+            runner.vars.update(t.api.get("vars") or {})
+            runner.vars.update(runner.bundle_vars(self.bundle, ""))
+            runner.vars.update(runner.bundle_vars(prev, "prev_"))
+            runner.vars["name"] = t.name
+            steps = t.api["steps"]                      # 로그인처럼 값을 추출(extract)하는 단계까지는 수동 롤백 때도 다시 실행한다
+            last = max((i for i, st in enumerate(steps) if st.get("extract")), default=-1)
+            runner.run(steps[:last + 1] + t.api["rollback_steps"])
+        except apideploy.ApiError as e:
+            return TargetResult(t.name, "failed", f"롤백 실패: {e}")
+        finally:
+            for st in t.api.get("finally_steps") or []:
+                try:
+                    runner.run_step(st)
+                except apideploy.ApiError:
+                    pass
+        apideploy.promote_previous(self.state.dir, t.name)
+        self.state.set_target(t.name, status="rolled_back", error="수동 롤백")
+        self.state.save()
+        return TargetResult(t.name, "rolled_back", "이전 인증서로 되돌림")
 
     def _health_and_soak(self, t: Target) -> None:
         """HTTP 헬스체크 → (설정 시) 소크: 일정 시간 동안 새 인증서와 헬스가 유지되는지 반복 확인."""
@@ -347,6 +433,8 @@ class Deployer:
         t = next((x for x in self.cfg.targets if x.name == name), None)
         if t is None:
             raise KeyError(name)
+        if t.api:
+            return self._rollback_api(t)
         backups = self.state.target(name).get("backups") or []
         if not backups:
             return TargetResult(name, "failed", "되돌릴 백업 기록이 없습니다")

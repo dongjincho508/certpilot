@@ -106,7 +106,7 @@ def test_compose_renders_and_fails_fast_without_secrets(tmp_path):
 
 def test_example_config_parses_and_matches_schema():
     jsonschema = pytest.importorskip("jsonschema")
-    for name in ("certdeploy.example.yml", "certdeploy.manual.example.yml", "certdeploy.acme.example.yml"):
+    for name in ("certdeploy.example.yml", "certdeploy.manual.example.yml", "certdeploy.acme.example.yml", "certdeploy.waf.example.yml"):
         jsonschema.validate(yaml.safe_load(read(os.path.join(ROOT, "certdeploy", name))), config_schema())
         parse_config(yaml.safe_load(read(os.path.join(ROOT, "certdeploy", name))))
     bad = {"state_dir": "relative", "targets": [{"name": "x y", "type": "iis"}]}

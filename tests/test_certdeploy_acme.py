@@ -265,3 +265,150 @@ def test_trace_records_acme_steps_without_secrets(env):
     for step in ("acme/register_account", "acme/new_order", "acme/dns_present", "acme/challenge", "acme/finalize", "acme/dns_cleanup"):
         assert step in out, step
     assert "s3cret-pw" not in out and "PRIVATE KEY" not in out
+
+
+# ------------------------------------------------------------------ 다양한 DNS 제공자 (같은 전 과정을 제공자별로 반복)
+import base64
+import sys
+import textwrap
+
+TSIG_SECRET = base64.b64encode(b"0123456789abcdef0123456789abcdef").decode()
+
+
+def provider_cfg(name, env_, tmp):
+    """(dns 설정, 환경변수, 종료 시 정리 함수, 검증 함수)"""
+    if name == "cloudflare":
+        s = fk.start_cloudflare(env_.zone)
+        return ({"mode": "cloudflare", "cloudflare": {"token_env": "CF_TOKEN", "api_base": f"http://127.0.0.1:{s.server_port}/client/v4"}},
+                {"CF_TOKEN": "cf-token-123"}, s.shutdown, lambda: (len(s.records) == 0 and any(m == "POST" for m, *_ in s.log)))
+    if name == "powerdns":
+        s = fk.start_powerdns(env_.zone)
+        return ({"mode": "powerdns", "powerdns": {"api_url": f"http://127.0.0.1:{s.server_port}", "api_key_env": "PDNS_KEY", "zone": "hnu.kr"}},
+                {"PDNS_KEY": "pdns-key"}, s.shutdown, lambda: (not any(s.rr.values()) and any(c == "REPLACE" for c, *_ in s.log)))
+    if name == "webhook":
+        s = fk.start_webhook(env_.zone)
+        return ({"mode": "webhook", "webhook": {"url_env": "HOOK_URL", "auth_header_env": "HOOK_AUTH"}},
+                {"HOOK_URL": f"http://127.0.0.1:{s.server_port}/dns", "HOOK_AUTH": "Authorization: Bearer hook-secret"}, s.shutdown,
+                lambda: [b["action"] for b in s.log].count("present") == 2 and [b["action"] for b in s.log].count("cleanup") == 2)
+    if name == "rfc2136":
+        s = fk.Rfc2136Server(env_.zone, key_name="acme-key.", secret_b64=TSIG_SECRET)
+        return ({"mode": "rfc2136", "rfc2136": {"server": s.server, "zone": "hnu.kr", "tsig_key_name": "acme-key.", "tsig_secret_env": "TSIG"}},
+                {"TSIG": TSIG_SECRET}, s.close, lambda: [a for a, *_ in s.log] == ["add", "add", "delete", "delete"])
+    if name == "exec":
+        zf = tmp / "dnsfile.jsonl"
+        script = tmp / "hook.py"
+        script.write_text(textwrap.dedent(f"""
+            import json, os, sys
+            action, fqdn, value = sys.argv[1:4]
+            assert os.environ["ACME_ACTION"] == action and os.environ["ACME_VALUE"] == value and "SECRET_NOT_PASSED" not in os.environ
+            open({str(zf)!r}, "a").write(json.dumps([action, fqdn, value]) + "\\n")
+            """))
+        orig_get = env_.zone.get
+
+        def get(name, _o=orig_get):                              # exec 스크립트가 쓴 파일로 만든 '영역'을 CA 가 조회
+            vals = []
+            if zf.exists():
+                for line in zf.read_text().splitlines():
+                    a, n, v = json.loads(line)
+                    if n.lower() == name.rstrip(".").lower():
+                        (vals.append if a == "present" else (lambda x: vals.remove(x) if x in vals else None))(v)
+            return vals
+        env_.zone.get = get
+        return ({"mode": "exec", "exec": {"cmd": f"{sys.executable} {script}", "env_pass": []}}, {"SECRET_NOT_PASSED": "x"}, lambda: None,
+                lambda: [json.loads(l)[0] for l in zf.read_text().splitlines()] == ["present", "present", "cleanup", "cleanup"])
+    raise AssertionError(name)
+
+
+@pytest.mark.parametrize("prov", ["cloudflare", "powerdns", "webhook", "rfc2136", "exec"])
+def test_issue_end_to_end_with_each_dns_provider(env, prov):
+    dns_cfg, envvars, stop, verify = provider_cfg(prov, env, env.tmp)
+    try:
+        cfgp, marks, web = base_cfg(env.tmp, env, "manual")
+        raw = yaml.safe_load(open(cfgp))
+        raw["acme"]["dns"] = {**dns_cfg, "check_resolvers": [env.dns.resolver], "propagation_timeout": 0}
+        open(cfgp, "w").write(yaml.safe_dump(raw))
+        r = cd(cfgp, "issue", env=envvars)
+        assert r.exit_code == 0, r.output
+        assert "발급 완료" in r.output and "배포 완료" in r.output and marks.read_text().split() == ["r"]
+        assert verify(), f"{prov}: TXT 등록·삭제 호출 내역이 기대와 다름"
+        assert env.zone.get("_acme-challenge.hnu.kr") == [] or prov == "exec"
+    finally:
+        stop()
+
+
+def test_rfc2136_rejects_bad_tsig_and_wrong_zone(env):
+    s = fk.Rfc2136Server(env.zone, key_name="acme-key.", secret_b64=TSIG_SECRET)
+    try:
+        bad = dnsprov.Rfc2136Provider(s.server, "hnu.kr", "acme-key.", base64.b64encode(b"wrong-secret-wrong-secret-12345678").decode())
+        with pytest.raises(dnsprov.DnsProviderError, match="NOTAUTH"):
+            bad.present("_acme-challenge.hnu.kr", "v")
+        nosig = dnsprov.Rfc2136Provider(s.server, "hnu.kr")
+        with pytest.raises(dnsprov.DnsProviderError, match="NOTAUTH"):
+            nosig.present("_acme-challenge.hnu.kr", "v")
+        wrongzone = dnsprov.Rfc2136Provider(s.server, "other.kr", "acme-key.", TSIG_SECRET)
+        with pytest.raises(dnsprov.DnsProviderError, match="NOTZONE"):
+            wrongzone.present("_acme-challenge.other.kr", "v")
+        with pytest.raises(dnsprov.DnsProviderError, match="실패"):
+            dnsprov.Rfc2136Provider("127.0.0.1:9", "hnu.kr").present("x.hnu.kr", "v")
+        assert env.zone.get("_acme-challenge.hnu.kr") == []
+    finally:
+        s.close()
+
+
+def test_cloudflare_and_powerdns_preserve_other_records_and_report_errors(env):
+    cf = fk.start_cloudflare(env.zone)
+    pd = fk.start_powerdns(env.zone)
+    try:
+        c = dnsprov.CloudflareProvider("cf-token-123", api_base=f"http://127.0.0.1:{cf.server_port}/client/v4")
+        c.present("_acme-challenge.hnu.kr", "a")
+        c.present("_acme-challenge.hnu.kr", "b")
+        c.cleanup("_acme-challenge.hnu.kr", "a")
+        assert env.zone.get("_acme-challenge.hnu.kr") == ["b"]
+        with pytest.raises(dnsprov.DnsProviderError, match="403"):
+            dnsprov.CloudflareProvider("wrong", api_base=f"http://127.0.0.1:{cf.server_port}/client/v4").present("_acme-challenge.hnu.kr", "z")
+        with pytest.raises(dnsprov.DnsProviderError, match="영역"):
+            c.present("_acme-challenge.unknown.kr", "z")
+        env.zone.txt.clear()
+        p = dnsprov.PowerDnsProvider(f"http://127.0.0.1:{pd.server_port}", "pdns-key", "hnu.kr")
+        p.present("_acme-challenge.hnu.kr", "a")
+        p.present("_acme-challenge.hnu.kr", "b")
+        p.present("_acme-challenge.hnu.kr", "b")                          # 중복 등록 없음
+        assert env.zone.get("_acme-challenge.hnu.kr") == ["a", "b"]
+        p.cleanup("_acme-challenge.hnu.kr", "a")
+        assert env.zone.get("_acme-challenge.hnu.kr") == ["b"]
+        with pytest.raises(dnsprov.DnsProviderError, match="401"):
+            dnsprov.PowerDnsProvider(f"http://127.0.0.1:{pd.server_port}", "bad", "hnu.kr").present("_acme-challenge.hnu.kr", "z")
+    finally:
+        cf.shutdown()
+        pd.shutdown()
+
+
+def test_exec_and_webhook_failures_are_reported(tmp_path, env):
+    bad = tmp_path / "bad.sh"
+    bad.write_text("#!/bin/sh\necho 'quota exceeded' >&2\nexit 3\n")
+    bad.chmod(0o755)
+    with pytest.raises(dnsprov.DnsProviderError, match="종료 코드 3.*quota exceeded"):
+        dnsprov.ExecProvider(str(bad)).present("_acme-challenge.hnu.kr", "v")
+    with pytest.raises(dnsprov.DnsProviderError, match="실행 실패"):
+        dnsprov.ExecProvider(str(tmp_path / "missing")).present("x", "v")
+    s = fk.start_webhook(env.zone)
+    try:
+        s.fail = True
+        with pytest.raises(dnsprov.DnsProviderError, match="500"):
+            dnsprov.WebhookProvider(f"http://127.0.0.1:{s.server_port}/d", "Authorization: Bearer hook-secret").present("x.hnu.kr", "v")
+        with pytest.raises(dnsprov.DnsProviderError, match="401"):
+            dnsprov.WebhookProvider(f"http://127.0.0.1:{s.server_port}/d", "Authorization: Bearer nope").present("x.hnu.kr", "v")
+    finally:
+        s.shutdown()
+
+
+@pytest.mark.parametrize("mode,block,missing", [
+    ("exec", {}, "dns.exec.cmd"), ("webhook", {}, "dns.webhook.url_env"), ("rfc2136", {"server": "h"}, "dns.rfc2136.zone"),
+    ("cloudflare", {}, "dns.cloudflare.token_env"), ("powerdns", {"api_url": "http://x"}, "dns.powerdns.api_key_env"),
+])
+def test_config_requires_provider_specific_keys(mode, block, missing):
+    base = {"targets": [{"name": "w", "type": "generic", "reload_cmd": "none", "files": [{"path": "/x", "content": "cert"}]}]}
+    with pytest.raises(ConfigError, match=missing):
+        parse_config({**base, "acme": {"domains": ["a.kr"], "dns": {"mode": mode, mode: block}}})
+    with pytest.raises(ConfigError, match="함께"):
+        parse_config({**base, "acme": {"domains": ["a.kr"], "dns": {"mode": "rfc2136", "rfc2136": {"server": "h", "zone": "z", "tsig_key_name": "k"}}}})

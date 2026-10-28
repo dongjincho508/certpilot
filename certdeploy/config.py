@@ -58,6 +58,7 @@ class Target:
     soak_seconds: int = 0             # 배포 후 이 시간 동안 새 인증서가 유지되는지 반복 확인
     soak_interval: int = 10
     hook_env: List[str] = field(default_factory=list)   # 훅에 전달할 환경변수 이름(그 밖의 비밀은 전달하지 않는다)
+    api: Optional[dict] = None        # type: http_api (웹방화벽·어플라이언스) 전용: HTTP 요청 단계 설정
 
 
 @dataclass
@@ -215,6 +216,20 @@ def _parse_target(raw, defaults, label_prefix, problems, seen) -> Optional[Targe
     if name in seen:
         problems.append(f"{label}: 이름이 중복됩니다")
     seen.add(name)
+    if raw.get("type") == "http_api":
+        from .apideploy import validate_api
+        api = validate_api(raw.get("api"), label, problems)
+        verify = None
+        if raw.get("verify"):
+            v = raw["verify"]
+            if not v.get("host"):
+                problems.append(f"{label}: verify.host 가 필요합니다")
+            else:
+                verify = Verify(v["host"], int(v.get("port", 443)), v.get("sni"), bool(v.get("strict", False)), v.get("ca_file"), bool(v.get("lenient_x509", False)))
+        if not api:
+            return None
+        return Target(name, "http_api", {"kind": "api"}, [], None, None, verify, int(raw.get("order", 100)), bool(raw.get("canary", False)),
+                      None, raw.get("pre_cmd"), raw.get("post_cmd"), 0, 10, [str(x) for x in (raw.get("hook_env") or [])], api)
     tr = raw.get("transport") or {"kind": "local"}
     kind = tr.get("kind")
     if kind == "ssh":
@@ -281,14 +296,17 @@ def _parse_acme(a, label, problems) -> Optional[dict]:
     mode = dns.get("mode", "manual")
     out["dns"] = {"mode": mode, "check_resolvers": [str(x) for x in (dns.get("check_resolvers") or [])],
                   "propagation_timeout": int(dns.get("propagation_timeout", 300))}
-    if mode == "infoblox":
-        i = dns.get("infoblox") or {}
-        for k in ("host", "user_env", "password_env"):
-            if not i.get(k):
-                problems.append(f"{label} acme.dns.infoblox.{k} 가 필요합니다")
-        out["dns"]["infoblox"] = i
+    from .dnsprov import PROVIDER_REQUIRED
+    if mode not in PROVIDER_REQUIRED:
+        problems.append(f"{label} acme.dns.mode 는 {', '.join(PROVIDER_REQUIRED)} 중 하나여야 합니다")
     elif mode != "manual":
-        problems.append(f"{label} acme.dns.mode 는 infoblox 또는 manual 이어야 합니다")
+        c = dns.get(mode) or {}
+        for k in PROVIDER_REQUIRED[mode]:
+            if not c.get(k):
+                problems.append(f"{label} acme.dns.{mode}.{k} 가 필요합니다")
+        if mode == "rfc2136" and bool(c.get("tsig_key_name")) != bool(c.get("tsig_secret_env")):
+            problems.append(f"{label} acme.dns.rfc2136 의 tsig_key_name 과 tsig_secret_env 는 함께 지정해야 합니다")
+        out["dns"][mode] = c
     return out
 
 

@@ -2,6 +2,8 @@
 
 `hnu.kr`, `hannam.ac.kr` 처럼 **DNS 를 직접 관리하는 도메인**의 인증서를 `certdeploy` 가 직접 발급·갱신하고 배포까지 이어 준다. lego 설치 없이 동작하는 내장 ACME 클라이언트(RFC 8555)다.
 
+> DNS 업체가 Infoblox 가 아니어도 된다 — `rfc2136`(표준 동적 갱신), `cloudflare`, `powerdns`, `webhook`, `exec`(스크립트), lego 엔진(100여 개 업체)을 설정으로 고른다. 표와 선택 가이드는 [호환성 가이드](compatibility.md).
+
 | DNS 방식 | 설정 | 동작 |
 |---|---|---|
 | **연동(자동)** | `dns.mode: infoblox` | Infoblox WAPI 로 `_acme-challenge` TXT 를 자동 등록 → 전파 확인 → 검증·발급 → TXT 자동 삭제 → 배포. 사람 개입 없음(갱신 타이머로 무인 운영) |
