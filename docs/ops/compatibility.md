@@ -57,6 +57,7 @@ aws route53 change-resource-record-sets --hosted-zone-id "$ROUTE53_ZONE_ID" --ch
 - 자리표시자: `{cert_pem}` `{chain_pem}` `{fullchain_pem}` `{key_pem}` `{pfx_b64}` `{pfx_password}` `{serial}` `{not_after}` `{name}`, 이전 배포본 `{prev_*}`(rollback_steps), 환경변수 `{env:NAME}`, `vars`, 앞 단계 `extract` 값
 - 본문: `json` / `form` / `body` / `multipart`(파일 업로드), 세션 쿠키는 단계 사이에 유지
 - 성공 판정: `expect_status`(기본 2xx), `expect_body`(정규식), `expect_json`(`{"$.code": 0}` — **HTTP 200 인데 본문이 실패인 장비 대응**)
+- 대기: 단계의 `wait: 초` — '적용' 뒤 장비가 반영될 시간을 두고 다음 단계·TLS 확인으로 넘어감(확인은 `options.verify_attempts/verify_interval` 로 재시도)
 - 추출: `extract: {변수: "$.a.b[0]" | "header:Set-Cookie" | "regex:패턴"}`
 - 안전장치: 요청 본문(개인키 포함)·계정은 로그·진단 번들에 남지 않음, `plan`/`preflight` 는 요청을 보내지 않음(관리 주소 도달성만), `rollback_steps` 가 없으면 `preflight` 가 경고, 직전 성공 배포본은 `state_dir/api-bundles/<대상>/` 에 0600 으로 보관, `rollback --target` 수동 롤백 지원(수동 롤백 때는 `extract` 하는 로그인 단계까지 다시 실행)
 - 관리 화면이 사설 인증서면 `ca_file` 로 신뢰할 CA 를 지정(`verify_tls: false` 는 비권장)
@@ -91,3 +92,9 @@ aws route53 change-resource-record-sets --hosted-zone-id "$ROUTE53_ZONE_ID" --ch
 - 내장 ACME 의 `_acme-challenge` **CNAME 위임**, **EAB**(외부 계정 바인딩) 미지원 — 필요하면 추가 개발
 - `http_api` 는 바이너리 본문(원시 octet-stream 업로드)과 클라이언트 인증서(mTLS) 인증은 아직 지원하지 않는다(PEM/PFX 를 JSON·폼·multipart 로 보내는 방식만)
 - 실제 업체·장비 검증은 시험 환경에서 별도로 필요
+
+## 6. 업로드와 '적용'이 따로 있는 장비(예: 모니터랩 웹방화벽) 주의점
+- `steps` 를 **업로드 → 적용** 순서로 쓰고, 적용 뒤 `wait` 와 `verify`(WAF 앞단 VIP 에서 서빙 일련번호 확인)로 반영을 확인한다. 적용이 실패하거나 새 인증서가 안 보이면 `rollback_steps`(이전 인증서 업로드 → 적용)가 실행된다
+- **'적용'이 인증서만 반영하는지, 대기 중인 다른 설정 변경까지 한꺼번에 반영하는지** 제품 문서로 확인한다. 후자라면 다른 담당자가 저장만 해 둔 변경이 인증서 배포 때 같이 운영에 적용될 수 있으므로, 배포 시간대에는 설정 변경을 잠그거나 먼저 정리한다
+- 적용 시 **서비스 순단·세션 끊김**이 있는지, 이중화(HA)면 한쪽 적용이 상대에게 동기화되는지(아니면 대상을 둘로 등록) 확인한다
+- 적용 단계가 GUI 에만 있고 API/CLI 가 없으면 자동화할 수 없다 → 수동 교체 + `check` 감시

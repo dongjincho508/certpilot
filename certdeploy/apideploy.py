@@ -4,6 +4,7 @@
 - 자리표시자: {cert_pem} {chain_pem} {fullchain_pem} {key_pem} {pfx_b64} {pfx_password} {serial} {not_after} {name},
   이전 배포본 {prev_*}(rollback_steps 에서), 환경변수 {env:이름}, 설정 vars, 앞 단계에서 추출한 값.
 - 본문: json(객체) | form(객체) | body(문자열) | multipart(fields, files). 세션 쿠키는 단계 사이에 유지된다.
+- 단계 옵션 wait(초): 성공 후 대기(예: '적용' 뒤 장비가 반영될 시간).
 - 성공 판정: expect_status(기본 2xx) + expect_body(정규식) + expect_json({"$.code": 0}). 추출: extract {변수: "$.a.b" | "header:이름" | "regex:패턴"}.
 - 실패하면 rollback_steps 를 이전 배포본으로 실행하고, finally_steps(예: 로그아웃)는 항상 실행한다.
 요청 본문(개인키 포함)은 트레이스·로그에 남기지 않는다.
@@ -27,7 +28,7 @@ from certpilot_core import trace
 METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
 BUILTIN = {"cert_pem", "chain_pem", "fullchain_pem", "key_pem", "pfx_b64", "pfx_password", "serial", "not_after", "name"}
 TOKEN = re.compile(r"\{(env:)?([A-Za-z_][A-Za-z0-9_]*)\}")
-STEP_KEYS = {"name", "method", "url", "headers", "json", "form", "body", "multipart", "expect_status", "expect_body", "expect_json", "extract", "timeout"}
+STEP_KEYS = {"name", "method", "url", "headers", "json", "form", "body", "multipart", "expect_status", "expect_body", "expect_json", "extract", "timeout", "wait"}
 SECRET_VARS = {"key_pem", "pfx_b64", "pfx_password"}
 
 
@@ -118,7 +119,7 @@ def _multipart(fields: dict, files: dict):
 
 class ApiRunner:
     def __init__(self, api: dict, name: str, environ=os.environ, sleep=time.sleep):
-        self.api, self.name, self.env = api, name, environ
+        self.api, self.name, self.env, self.sleep = api, name, environ, sleep
         self.timeout = float(api.get("timeout", 30))
         ctx = ssl.create_default_context(cafile=api.get("ca_file")) if api.get("ca_file") else ssl.create_default_context()
         if api.get("verify_tls") is False:
@@ -209,6 +210,8 @@ class ApiRunner:
             if val is None:
                 raise ApiError(f"[{step['name']}] 응답에서 {var} 를 추출하지 못했습니다({how})")
             self.vars[var] = str(val)
+        if step.get("wait"):                                   # 적용 후 장비가 반영될 시간(초)을 기다린 뒤 다음 단계/확인으로
+            self.sleep(float(step["wait"]))
 
     @staticmethod
     def _check(step, status, text) -> Optional[str]:

@@ -252,3 +252,21 @@ def test_cli_plan_and_schema_include_http_api(tmp_path):
     assert r.exit_code == 0 and "http_api" in r.output and "POST /c" in r.output
     from certdeploy.schema import config_schema
     assert "http_api" in json.dumps(config_schema())
+
+
+def test_step_wait_after_apply_is_honored(waf, tmp_path):
+    cert, key = make_pki(tmp_path, "w")[:2]
+    api = {"base_url": f"http://127.0.0.1:{waf.server_port}",
+           "steps": [{"name": "login", "method": "POST", "url": "/api/login", "json": {"user": "wafadmin", "password": "waf-pass-1"}, "extract": {"t": "$.data.token"}},
+                     {"name": "apply", "method": "POST", "url": "/api/ssl/apply", "headers": {"Authorization": "Bearer {t}", "Cookie": "sid=sess42"},
+                      "json": {"name": "x"}, "expect_status": [200, 500, 404, 401, 400, 403], "wait": 15}]}
+    waits = []
+    r = apideploy.ApiRunner(api, "t", sleep=waits.append)
+    r.vars.update(r.bundle_vars(load_bundle(str(cert), str(key))))
+    with pytest.raises(Exception):
+        r.run(api["steps"])                                           # 존재하지 않는 인증서 이름으로 적용 → 서버 오류
+    r2 = apideploy.ApiRunner({**api, "steps": api["steps"][:1] + [{**api["steps"][1], "url": "/api/logout"}]}, "t", sleep=waits.append)
+    r2.run(r2.api["steps"])
+    assert waits == [15.0]
+    with pytest.raises(ConfigError):
+        parse_config(tgt(steps=[{"name": "a", "method": "POST", "url": "/x", "waitt": 5}]))

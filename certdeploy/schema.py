@@ -17,7 +17,7 @@ def _api() -> dict:
     step = {"type": "object", "required": ["name", "method", "url"], "properties": {
         "name": _S, "method": {"enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]}, "url": _S, "headers": {"type": "object"},
         "json": {}, "form": {"type": "object"}, "body": _S, "multipart": {"type": "object"}, "expect_status": {"type": "array", "items": _I},
-        "expect_body": _S, "expect_json": {"type": "object"}, "extract": {"type": "object"}, "timeout": {"type": "number"}}}
+        "expect_body": _S, "expect_json": {"type": "object"}, "extract": {"type": "object"}, "timeout": {"type": "number"}, "wait": {"type": "number"}}}
     steps = {"type": "array", "minItems": 1, "items": step}
     return {"type": "object", "required": ["steps"], "properties": {
         "base_url": {"type": "string", "pattern": "^https?://"}, "verify_tls": _B, "ca_file": _PATH, "timeout": {"type": "number"}, "vars": {"type": "object"},
