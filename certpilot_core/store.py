@@ -11,7 +11,8 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS servers (
   id TEXT PRIMARY KEY, name TEXT UNIQUE NOT NULL, hostname TEXT NOT NULL,
   port INTEGER NOT NULL, account TEXT NOT NULL, paths TEXT NOT NULL, tls_ports TEXT NOT NULL,
-  warn_days INTEGER NOT NULL, grp TEXT, memo TEXT, created_at TEXT NOT NULL);
+  warn_days INTEGER NOT NULL, grp TEXT, memo TEXT, created_at TEXT NOT NULL,
+  os_type TEXT NOT NULL DEFAULT 'auto');
 CREATE TABLE IF NOT EXISTS scans (
   server_id TEXT PRIMARY KEY, scanned_at TEXT NOT NULL, status TEXT NOT NULL,
   result TEXT NOT NULL, file_hashes TEXT NOT NULL);
@@ -32,6 +33,14 @@ class Store(HostKeyStore):
         self._mem = sqlite3.connect(path, check_same_thread=False) if path == ":memory:" else None
         with self._conn() as c:
             c.executescript(SCHEMA)
+            self._migrate(c)
+
+    @staticmethod
+    def _migrate(c) -> None:
+        """이미 배포된 DB(영구 디스크)에 새 컬럼을 추가한다. 기존 서버는 OS '자동 감지'로 간주."""
+        cols = {r["name"] for r in c.execute("PRAGMA table_info(servers)")}
+        if "os_type" not in cols:
+            c.execute("ALTER TABLE servers ADD COLUMN os_type TEXT NOT NULL DEFAULT 'auto'")
 
     @contextmanager
     def _conn(self):
@@ -58,10 +67,12 @@ class Store(HostKeyStore):
 
     def add_server(self, s: dict) -> None:
         with self._conn() as c:
-            c.execute("INSERT INTO servers VALUES (?,?,?,?,?,?,?,?,?,?,?)", (
-                s["id"], s["name"], s["hostname"], s["port"], s["account"],
-                json.dumps(s["paths"]), json.dumps(s["tls_ports"]), s["warn_days"],
-                s.get("group"), s.get("memo"), s["created_at"]))
+            c.execute(
+                "INSERT INTO servers (id, name, hostname, port, account, paths, tls_ports, warn_days,"
+                " grp, memo, created_at, os_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", (
+                    s["id"], s["name"], s["hostname"], s["port"], s["account"],
+                    json.dumps(s["paths"]), json.dumps(s["tls_ports"]), s["warn_days"],
+                    s.get("group"), s.get("memo"), s["created_at"], s.get("os_type", "auto")))
 
     def get_server(self, server_id: str) -> Optional[dict]:
         with self._conn() as c:

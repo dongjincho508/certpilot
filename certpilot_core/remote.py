@@ -78,10 +78,17 @@ def _normalize(path: str) -> str:
 _PATH_BAD = re.compile(r"[;&|`$<>()\\\s\"'*?{}\[\]~!#]")
 
 
+def is_key_path(path: str) -> bool:
+    """개인키로 보이는 경로(.key, privkey*, private/ 디렉터리) — 어떤 경우에도 열지 않는다 (S-3)"""
+    parts = [x.lower() for x in path.split("/") if x]
+    base = parts[-1] if parts else ""
+    return "private" in parts or base.startswith("privkey") or base.endswith(".key")
+
+
 def is_safe_path(path: str) -> bool:
-    """등록·제안 가능한 경로인지(문법 검증): 절대 경로, '..' 없음, 셸 메타문자·공백 없음"""
+    """등록·제안 가능한 경로인지(문법 검증): 절대 경로, '..' 없음, 셸 메타문자·공백 없음, 개인키 경로 아님"""
     return isinstance(path, str) and path.startswith("/") and ".." not in path.split("/") \
-        and not _PATH_BAD.search(path)
+        and not _PATH_BAD.search(path) and not is_key_path(path)
 
 
 def path_allowed(path: str, whitelist: Sequence[str]) -> bool:
@@ -127,6 +134,8 @@ class CommandPolicy:
             elif a.startswith("/"):
                 if not path_allowed(a, self.whitelist):
                     raise PolicyViolation("화이트리스트 밖 경로")
+                if is_key_path(a):
+                    raise PolicyViolation("개인키 경로 접근 금지")
             elif cmd == "grep" and positional == 0:
                 positional += 1  # 패턴
             else:
@@ -139,7 +148,7 @@ class CommandPolicy:
         for a in args[1:]:
             if a in OPENSSL_X509_FLAGS:
                 continue
-            if a.startswith("/") and path_allowed(a, self.whitelist):
+            if a.startswith("/") and path_allowed(a, self.whitelist) and not is_key_path(a):
                 continue
             raise PolicyViolation(f"openssl 인자 거부: {a}")
 
