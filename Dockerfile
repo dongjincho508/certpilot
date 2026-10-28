@@ -6,8 +6,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# curl: 헬스체크. SSH 접속은 paramiko 가 처리하므로 openssh-client/sshpass 는 필요 없다.
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
+# curl: 헬스체크. openssh-client: 비밀 환경변수의 키를 ssh-agent 에 올리기 위한 ssh-agent/ssh-add (SSH 접속 자체는 paramiko).
+RUN apt-get update && apt-get install -y --no-install-recommends curl openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

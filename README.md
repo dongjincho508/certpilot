@@ -20,7 +20,7 @@ python scripts/dev_server.py 8080     # 샘플 데이터가 든 데모 (admin / 
 cp docker/.env.example .env           # CERTPILOT_ADMIN_USER / CERTPILOT_ADMIN_PASSWORD 설정
 docker compose up --build             # http://localhost:8080
 ```
-SSH 조회는 **ssh-agent 에 로드된 키**로 수행됩니다(컨테이너에서는 `SSH_AUTH_SOCK` 마운트). 조회 계정은 인증서 읽기 권한만 가진 전용 계정을 쓰세요.
+SSH 조회는 **ssh-agent 에 로드된 키**로 수행됩니다(컨테이너에서는 `SSH_AUTH_SOCK` 마운트 또는 비밀 환경변수 `CERTPILOT_SSH_PRIVATE_KEY` 를 시작 시 메모리 agent 에 로드). **Render 배포는 [docs/ops/render.md](docs/ops/render.md)**. 조회 계정은 인증서 읽기 권한만 가진 전용 계정을 쓰세요.
 
 CLI(로컬 파일 점검·감사 로그 검증):
 ```bash
@@ -50,7 +50,7 @@ docs/            PRD · 결정 기록 · ARCHITECTURE · TRACEABILITY · OPEN_IT
 | [결정 기록](docs/decisions.md) · [릴리스 상태](docs/release-approval.md) | |
 
 ## 환경 변수
-`CERTPILOT_ADMIN_USER`/`CERTPILOT_ADMIN_PASSWORD`(최초 관리자) · `CERTPILOT_DATA_DIR`(기본 `./data`, DB·감사 로그) · `CERTPILOT_SECURE_COOKIE`(HTTPS 에서 1) · `CERTPILOT_IDLE_MINUTES`(기본 30) · `PORT`
+`CERTPILOT_ADMIN_USER`/`CERTPILOT_ADMIN_PASSWORD`(최초 관리자) · `CERTPILOT_DATA_DIR`(기본 `./data`, DB·감사 로그) · `CERTPILOT_SECURE_COOKIE`(HTTPS 에서 1) · `CERTPILOT_IDLE_MINUTES`(기본 30) · `CERTPILOT_SSH_PRIVATE_KEY`(조회용 개인키, 시작 시 agent 로드 후 삭제) · `PORT`
 
 ## 라이선스
 MIT
