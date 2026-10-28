@@ -138,7 +138,7 @@ printf '{ "log-driver": "json-file", "log-opts": { "max-size": "20m", "max-file"
 
 ## 4. 소스 배치
 ```bash
-sudo dnf -y install git python3 python3-pip python3-pyyaml openssl
+sudo dnf -y install git python3 python3-pip python3-pyyaml openssl bind-utils
 ```
 ```bash
 sudo mkdir -p /opt/cert-monitor && sudo chown certadmin: /opt/cert-monitor && git clone https://github.com/dongjincho508/certpilot.git /opt/cert-monitor/src
@@ -325,11 +325,12 @@ sudo install -d -m 750 -o deploy -g apache /etc/ssl/univ
 echo 'deploy ALL=(root) NOPASSWD: /usr/bin/systemctl reload httpd, /usr/sbin/apachectl configtest' | sudo tee /etc/sudoers.d/certdeploy && sudo chmod 440 /etc/sudoers.d/certdeploy && sudo visudo -c
 ```
 ```bash
-sudo semanage fcontext -a -t cert_t '/etc/ssl/univ(/.*)?' && sudo restorecon -Rv /etc/ssl/univ
+sudo dnf -y install policycoreutils-python-utils && sudo semanage fcontext -a -t cert_t '/etc/ssl/univ(/.*)?' && sudo restorecon -Rv /etc/ssl/univ
 ```
 Apache 설정은 먼저 **수동으로** `SSLCertificateFile /etc/ssl/univ/fullchain.pem`, `SSLCertificateKeyFile /etc/ssl/univ/privkey.pem` 을 가리키게 바꾸고(처음 한 번 현재 인증서를 그 경로에 복사) `apachectl configtest` 통과를 확인한다.
 **Ubuntu/Debian 대상**: 서비스 이름이 `apache2` 이므로 sudoers·`reload_cmd` 의 `httpd` 를 `apache2` 로 바꾼다.
 **Tomcat / WebtoB·JEUS / Node.js**: 키스토어 경로·형식·재로드(재기동) 명령은 **제품 문서와 현재 설정으로 확인**해 `targets` 에 반영한다(`reload_cmd` 는 sudoers 에 해당 명령만 허용).
+**웹방화벽(모니터랩)**: API/CLI 가 확인되기 전에는 **옵션 C(사람이 교체)** 로 시작한다 — 설정은 `certdeploy.waf-manual.example.yml`, 시험은 T-21. API 문서가 오면 옵션 A(`http_api`, T-18)로 전환. 선택 가이드·확인 질문은 [호환성 가이드](compatibility.md).
 **IIS(Windows)**: 관리 서버에서 만든 PFX 를 옮겨 [deploy-iis.ps1](../../certdeploy/deploy-iis.ps1)(초안·미검증)로 바인딩을 교체한다. 자동화는 SSH 가 가능한 구성이 필요하므로 별도 협의.
 
 ## 9. 인증서 준비(수동)와 첫 배포
@@ -402,12 +403,12 @@ export BACKUP_PW='<12자 이상 비밀번호>' && $CD backup --out /home/certadm
 ```bash
 mkdir -p /opt/cert-monitor/backup && cd /opt/cert-monitor/src/monitoring && docker compose stop prometheus && docker run --rm -v cert-monitor_prometheus-data:/data:ro -v /opt/cert-monitor/backup:/backup:z alpine tar czf /backup/prometheus-$(date +%F).tgz -C /data . && docker compose start prometheus
 ```
-`.env`·`alertmanager/secrets/` 는 암호화한 별도 저장소에 보관. lego 자동 발급을 쓸 때만 갱신 타이머 설치:
+`.env`·`alertmanager/secrets/` 는 암호화한 별도 저장소에 보관(certdeploy 백업에는 관리자 화면 설정 `settings.json` 도 포함됨). **자동 발급(내장 ACME 또는 lego)을 쓸 때** 갱신 타이머를 설치한다(매일 `renew` 실행 — 만료 `renew_days` 이내일 때만 실제 발급·배포):
 ```bash
 sudo cp /opt/cert-monitor/src/certdeploy/systemd/certdeploy-renew.* /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now certdeploy-renew.timer
 ```
-수동 인증서 운영은 타이머가 필요 없다. 만료 임박은 감시 스택 알림(60/30/14/7일)이 알려 주고, 갱신 때 9단계를 반복한다(유효기간이 단축되므로 장기적으로는 [자동 발급](auto-issue.md)으로 전환).
-**업그레이드**: `cd /opt/cert-monitor/src && git pull` → 감시는 `docker compose pull && docker compose up -d`, certdeploy 는 `sudo /opt/certdeploy/venv/bin/pip install --upgrade /opt/cert-monitor/src`.
+수동 DNS 방식(`dns.mode: manual`)은 갱신 시점에 타이머가 TXT 안내 메일을 보내고 **종료 코드 4(대기, 오류 아님)** 로 끝나 서비스가 `failed` 로 표시될 수 있다 — TXT 를 등록하면 다음 실행에서 자동으로 이어진다. 상용 인증서를 수동으로 가져오는 방식(`csr`→`import`)만 쓰면 타이머가 필요 없다. 만료 임박은 감시 스택 알림(60/30/14/7일)이 알려 주고, 갱신 때 9단계를 반복한다(유효기간이 단축되므로 장기적으로는 [자동 발급](auto-issue.md)으로 전환).
+**업그레이드**: `cd /opt/cert-monitor/src && git pull` → 감시는 `docker compose pull && docker compose up -d`, certdeploy 는 `sudo /opt/certdeploy/venv/bin/pip install --upgrade /opt/cert-monitor/src` 후 관리자 화면 재시작 `sudo systemctl restart certdeploy-admin`.
 
 ## 11. 시험·버그 수집
 시험은 [테스트 시나리오](test-scenarios.md) T-01~T-22 순서로 수행하고 결과표를 채운다. 문제가 생기면:
