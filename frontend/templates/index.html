@@ -155,6 +155,8 @@
             <div class="col-md-4"><label class="form-label" for="f-port">SSH 포트</label><input class="form-control" id="f-port" type="number" min="1" max="65535" value="22" required></div>
             <div class="col-md-4"><label class="form-label" for="f-account">조회 계정</label><input class="form-control" id="f-account" required><div class="form-text">전용 읽기 전용 계정</div></div>
             <div class="col-md-4"><label class="form-label" for="f-warn">경고 기준 (일)</label><input class="form-control" id="f-warn" type="number" min="1" max="365" value="30"></div>
+            <div class="col-12"><label class="form-label" for="f-os">OS / 서버 종류</label><select class="form-select" id="f-os"><option value="auto">자동 감지 (권장)</option></select>
+                <div class="form-text" id="f-os-hint">선택한 OS 계열의 표준 인증서 경로를 자동으로 조회합니다. 자동 감지는 접속 후 /etc/os-release 로 판단합니다.</div></div>
             <div class="col-md-6"><label class="form-label" for="f-tls">TLS 포트 (쉼표)</label><input class="form-control" id="f-tls" placeholder="443, 8443"><div class="form-text">실행 중 서비스 인증서를 직접 조회</div></div>
             <div class="col-md-6"><label class="form-label" for="f-group">그룹</label><input class="form-control" id="f-group"></div>
             <div class="col-12">
