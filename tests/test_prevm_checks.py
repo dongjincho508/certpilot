@@ -3,11 +3,9 @@ import json
 import os
 import random
 import re
-import shlex
 import shutil
 import subprocess
 import time
-from datetime import datetime, timedelta, timezone
 
 import pytest
 import yaml
@@ -256,11 +254,11 @@ def test_scan_all_50_servers_is_fast(tmp_path, sandbox):
 
 def test_scenario_doc_covers_all_tests_and_commands():
     text = read(os.path.join(ROOT, "docs", "ops", "test-scenarios.md"))
-    for n in range(1, 14):
+    for n in range(1, 20):
         assert f"### T-{n:02d} " in text, f"T-{n:02d} 시나리오 누락"
         assert f"| T-{n:02d} |" in text                                          # 결과 기록표
     used = set(re.findall(r"^\$CD ([a-z][a-z-]+)", text, re.M))
-    assert {"validate", "preflight", "csr", "import", "deploy", "status", "check", "verify-audit", "backup", "restore", "trace", "plan"} <= used
+    assert {"validate", "preflight", "csr", "import", "deploy", "status", "check", "verify-audit", "backup", "restore", "trace", "plan", "acme-reset", "rollback", "diagnose"} <= used
     assert not (used - set(cd_main.commands))
 
 

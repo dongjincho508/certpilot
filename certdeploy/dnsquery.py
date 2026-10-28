@@ -1,5 +1,4 @@
 """최소 DNS TXT 조회(UDP, 잘림 시 TCP). 외부 의존성 없이 '챌린지 TXT 가 공개 DNS 에 보이는지' 확인하는 용도."""
-import os
 import random
 import socket
 import struct

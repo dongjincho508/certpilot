@@ -6,7 +6,7 @@ import os
 import socket
 import struct
 import time
-from typing import List, Optional, Tuple
+from typing import Optional
 
 from .dnsquery import DnsError, _encode_name
 

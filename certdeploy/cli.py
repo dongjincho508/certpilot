@@ -208,7 +208,7 @@ def status(obj, fmt):
                 try:
                     live_serial = tls_serial(t.verify.host, t.verify.port, t.verify.sni)
                     live = "latest" if live_serial == b.serial else "stale"
-                except VerifyError as e:
+                except VerifyError:
                     live = "unreachable"
                 bad += live != "latest"
             rows.append({"cert": cs.name, "target": t.name, "recorded_status": s.get("status", "none"),

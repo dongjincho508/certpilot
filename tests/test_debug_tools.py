@@ -9,13 +9,12 @@ import pytest
 import yaml
 from click.testing import CliRunner
 
-from certdeploy import manual as mn
 from certdeploy.cli import main
 from certpilot_api.app import create_app
 from certpilot_core import diag, trace
 from certpilot_core.remote import FailureCause, RemoteError, SandboxExecutor
 from conftest import make_cert, pem as cpem
-from pki_helpers import make_pki, sign_csr
+from pki_helpers import make_pki
 
 PW = "Str0ng!Passw0rd"
 PRIV = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkq\n-----END PRIVATE KEY-----"

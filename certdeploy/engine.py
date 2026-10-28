@@ -18,7 +18,7 @@ from certpilot_core import trace
 from . import apideploy, remote
 from .bundle import Bundle, BundleError
 from .config import Config, Target
-from .handlers import KEY_KINDS, FileSpec
+from .handlers import FileSpec
 from .notify import NullNotifier
 from .state import State
 from .transport import LocalTransport, SSHTransport, Transport, TransportError

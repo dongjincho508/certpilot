@@ -10,14 +10,12 @@ import base64
 import hashlib
 import json
 import os
-import re
 import tempfile
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -27,7 +25,7 @@ from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 from certpilot_core import netutil, trace
 
 from . import dnsquery
-from .manual import ManualError, build_bundle, generate_csr, install_bundle
+from .manual import build_bundle, generate_csr, install_bundle
 
 LE_PRODUCTION = "https://acme-v02.api.letsencrypt.org/directory"
 LE_STAGING = "https://acme-staging-v02.api.letsencrypt.org/directory"

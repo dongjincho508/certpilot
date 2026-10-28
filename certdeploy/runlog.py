@@ -7,7 +7,7 @@ import tempfile
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from certpilot_core import netutil, trace
 

@@ -6,7 +6,7 @@
 | 방식 | 내용 | 비고 |
 |---|---|---|
 | A. 안전장치 | RapidSSL(DigiCert) 갱신 구매 후 수동 교체 | 가장 확실. 최대 유효기간 200일(2027-03 이후 발급분은 100일, 규정 변경 — 확인 필요) |
-| B. 자동화 | Let's Encrypt + lego(DNS-01, Infoblox) + 배포 훅 | [갱신 자동화](acme-automation.md). 스테이징 검증 후 전환 |
+| B. 자동화 | Let's Encrypt **내장 ACME**(DNS-01: Infoblox 연동 또는 수동 TXT) + `certdeploy` 배포 | [자동 발급 가이드](auto-issue.md)(구 설계: [갱신 자동화](acme-automation.md)). 스테이징 검증 후 전환. 준비·결정 항목은 [준비 체크리스트](pre-vm-checklist.md) |
 
 ## 0. 일정
 | 시점 | 할 일 | 완료 |
