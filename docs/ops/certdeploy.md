@@ -177,6 +177,7 @@ echo 'TOMCAT_KS_PASS=...' | sudo tee /etc/certdeploy/env >/dev/null && sudo chow
 | 배포 대상 `type: http_api` | **웹방화벽·어플라이언스**: 관리 API 요청 순서(로그인→업로드→적용)를 설정으로 기술, 확인·롤백 포함. [compatibility.md](compatibility.md) |
 | `confirm --target N` | 수동 교체 대상(`type: manual`)의 교체 완료를 기록하고 교체용 파일(개인키 사본) 삭제 |
 | `notify-test` | 설정된 알림 채널(메일·Alertmanager·웹훅)로 시험 알림 발송 |
+| 관리자 화면 | 메일 입력·시험 메일, **인증서별 개인키 보호 사용/사용 안 함 선택**(즉시 변환), 인증서·대상 현황. 설치: [설치 매뉴얼 7-5](vm-install-and-test.md). 화면 값은 `<state_dir>/settings.json`(0600)에 저장되어 CLI·타이머에 자동 적용(YAML 보다 우선) |
 | `key-encrypt` / `key-decrypt` | 저장된 개인키를 암호로 보호/평문으로 전환(설정 `certificate.key_encryption` 과 함께). 옵션 설명: [pre-vm-checklist D9](pre-vm-checklist.md) |
 | `acme-reset` | 진행 중인 내장 ACME 주문(대기 키·TXT 안내) 폐기 |
 | `csr --domains A,B [--key-type rsa2048\|rsa3072\|rsa4096\|ecdsa256\|ecdsa384] [--org ..] [--force]` | **수동 발급용** 개인키+CSR 생성. 키는 `state_dir/pending/<name>/key.pem`(0600), CSR 은 화면 출력 |

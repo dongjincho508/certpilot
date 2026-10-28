@@ -86,7 +86,7 @@ class SmtpNotifier(NullNotifier):
             with self.factory(c.host, c.port, timeout=20) as s:
                 if c.starttls:
                     s.starttls(context=ssl.create_default_context())
-                pw = _read_secret(c.password_env, c.password_file, self.environ)
+                pw = c.password or _read_secret(c.password_env, c.password_file, self.environ)
                 if c.username and pw:
                     s.login(c.username, pw)
                 s.send_message(msg)
@@ -101,6 +101,45 @@ class SmtpNotifier(NullNotifier):
         if ok and not self.cfg.on_success:
             return
         self._send(("완료 " if ok else "실패 ") + title, text)
+
+
+class MailTestError(Exception):
+    """시험 메일 실패 원인(사람이 고칠 수 있게 분류한 한국어 메시지). 비밀번호는 포함하지 않는다."""
+
+
+def send_test_mail(cfg, environ=os.environ, smtp_factory: Callable = smtplib.SMTP) -> None:
+    """설정(SmtpCfg)대로 시험 메일 1통을 보낸다. 실패하면 원인을 분류해 MailTestError 로 알린다."""
+    msg = EmailMessage()
+    msg["From"], msg["To"], msg["Subject"] = cfg.sender, ", ".join(cfg.to), "[certdeploy] 메일 알림 시험"
+    msg.set_content("certdeploy 메일 알림 시험입니다. 이 메일이 도착했다면 설정이 올바른 것이며, 무시하셔도 됩니다.\n")
+    try:
+        with smtp_factory(cfg.host, cfg.port, timeout=20) as s:
+            if cfg.starttls:
+                s.starttls(context=ssl.create_default_context())
+            pw = cfg.password or _read_secret(cfg.password_env, cfg.password_file, environ)
+            if cfg.username and pw:
+                s.login(cfg.username, pw)
+            s.send_message(msg)
+    except smtplib.SMTPAuthenticationError:
+        raise MailTestError("로그인 실패: 계정 또는 비밀번호를 확인하세요") from None
+    except smtplib.SMTPRecipientsRefused:
+        raise MailTestError("수신 주소가 거부되었습니다(릴레이 허용·수신 도메인 확인)") from None
+    except smtplib.SMTPSenderRefused:
+        raise MailTestError("발신 주소가 거부되었습니다(릴레이에서 허용된 발신 주소 확인)") from None
+    except ssl.SSLError as e:
+        raise MailTestError(f"TLS 오류: STARTTLS 사용 여부·포트(587/465/25)·서버 인증서를 확인하세요({type(e).__name__})") from None
+    except smtplib.SMTPNotSupportedError:
+        raise MailTestError("서버가 STARTTLS 또는 로그인을 지원하지 않습니다(STARTTLS·계정 설정 확인)") from None
+    except smtplib.SMTPServerDisconnected:
+        raise MailTestError("서버가 연결을 끊었습니다(포트·STARTTLS 설정이 맞는지 확인)") from None
+    except smtplib.SMTPException as e:
+        raise MailTestError(f"SMTP 오류: {type(e).__name__}") from None
+    except TimeoutError:
+        raise MailTestError("시간 초과: 서버 주소·포트·방화벽을 확인하세요") from None
+    except ConnectionRefusedError:
+        raise MailTestError("연결 거부: 서버 주소·포트를 확인하세요") from None
+    except OSError as e:
+        raise MailTestError(f"접속 실패: {type(e).__name__}(주소 해석·방화벽 확인)") from None
 
 
 class WebhookNotifier(NullNotifier):

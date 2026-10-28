@@ -1,0 +1,24 @@
+# /etc/systemd/system/certdeploy-admin.service — 관리자 화면(발급·배포 설정 웹). nginx(8443) 뒤에서 127.0.0.1:8081 로만 열린다.
+[Unit]
+Description=certdeploy 관리자 화면 (CertPilot 웹: 발급·배포 설정)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=certdeploy
+Group=certdeploy
+# CERTPILOT_ADMIN_USER/PASSWORD(최초 관리자), CERTDEPLOY_CONFIG, CERTPILOT_DATA_DIR, CERTPILOT_SECURE_COOKIE=1 (KEY=VALUE, 권한 600)
+EnvironmentFile=/etc/certdeploy/admin.env
+# 단일 워커·다중 스레드: SQLite 와 해시 체인 감사 로그의 동시 쓰기 안전성을 위해 프로세스는 1개
+ExecStart=/opt/certdeploy/venv/bin/gunicorn --workers 1 --threads 8 --timeout 120 --bind 127.0.0.1:8081 certpilot_api.app:create_app()
+Restart=on-failure
+RestartSec=5
+# 하드닝: 필요한 경로만 쓰기 허용(설정 화면 파일·개인키 변환은 /var/lib/certdeploy 안에서만)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/certdeploy /var/lib/certdeploy-admin
+
+[Install]
+WantedBy=multi-user.target

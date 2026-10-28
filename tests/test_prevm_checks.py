@@ -50,7 +50,7 @@ def test_doc_certdeploy_commands_exist_in_cli():
     """문서의 `certdeploy [-c 파일] [--옵션] <명령>` 줄이 실제 CLI 하위 명령과 일치하는지(명령 위치에 있을 때만 검사)."""
     sub = set(cd_main.commands)
     pat = re.compile(r"^\s*(?:\$ )?(?:sudo(?:\s+-u\s+\w+)?\s+)?(?:\S*/)?certdeploy(?:\s+(?:-c|--cert)\s+\S+|\s+--(?:debug|verbose)|\s+-v)*\s+([a-z][a-z-]+)\b")
-    cd_var = re.compile(r"^\s*\$CD(?:\s+--debug)?\s+([a-z][a-z-]+)\b")        # 시험 시나리오의 $CD <명령>
+    cd_var = re.compile(r"^\s*\$CD(?:\s+--debug)?(?:\s+--cert\s+\S+)?\s+([a-z][a-z-]+)\b")        # 시험 시나리오의 $CD <명령>
     seen = set()
     for _, block in bash_blocks():
         for line in block.splitlines():
@@ -76,7 +76,7 @@ def test_systemd_units_verify(tmp_path):
     if not shutil.which("systemd-analyze"):
         pytest.skip("systemd-analyze 없음")
     d = os.path.join(ROOT, "certdeploy", "systemd")
-    r = subprocess.run(["systemd-analyze", "verify", f"{d}/certdeploy-renew.service", f"{d}/certdeploy-renew.timer"], capture_output=True, text=True)
+    r = subprocess.run(["systemd-analyze", "verify", f"{d}/certdeploy-renew.service", f"{d}/certdeploy-renew.timer", f"{d}/certdeploy-admin.service"], capture_output=True, text=True)
     problems = [l for l in r.stderr.splitlines() if l and "is not executable" not in l and "No such file" not in l]   # 설치 전이라 바이너리가 없는 것은 정상
     assert not problems, problems
 
@@ -254,10 +254,10 @@ def test_scan_all_50_servers_is_fast(tmp_path, sandbox):
 
 def test_scenario_doc_covers_all_tests_and_commands():
     text = read(os.path.join(ROOT, "docs", "ops", "test-scenarios.md"))
-    for n in range(1, 22):
+    for n in range(1, 23):
         assert f"### T-{n:02d} " in text, f"T-{n:02d} 시나리오 누락"
         assert f"| T-{n:02d} |" in text                                          # 결과 기록표
-    used = set(re.findall(r"^\$CD ([a-z][a-z-]+)", text, re.M))
+    used = set(re.findall(r"^\$CD (?:--cert \S+ )?([a-z][a-z-]+)", text, re.M))
     assert {"validate", "preflight", "csr", "import", "deploy", "status", "check", "verify-audit", "backup", "restore", "trace", "plan", "acme-reset", "rollback", "diagnose", "notify-test", "key-encrypt", "confirm"} <= used
     assert not (used - set(cd_main.commands))
 
@@ -269,7 +269,7 @@ def test_install_manual_commands_and_files_exist():
             continue
         import glob
         assert glob.glob(os.path.join(ROOT, rel)), f"매뉴얼이 가리키는 파일 없음: {rel}"
-    used = set(re.findall(r"(?:^|&& )\$CD ([a-z][a-z-]+)", text, re.M))
+    used = set(re.findall(r"(?:^|&& )\$CD (?:--cert \S+ )?([a-z][a-z-]+)", text, re.M))
     assert {"validate", "preflight", "csr", "import", "plan", "deploy", "check", "diagnose", "backup"} <= used
     assert not (used - set(cd_main.commands))
     for img in re.findall(r"prom/(?:prometheus|alertmanager):v[\d.]+", text):

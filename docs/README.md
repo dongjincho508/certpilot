@@ -1,6 +1,6 @@
 # 문서 안내
 
-이 저장소는 **인증서 감시(Prometheus·ssl_exporter·Alertmanager·Grafana) + 인증서 발급·자동 배포(`certdeploy`)** 를 Rocky Linux 관리 서버 1대에서 운영하기 위한 코드와 문서다. CertPilot 웹 앱(보류)의 문서는 맨 아래.
+이 저장소는 **인증서 감시(Prometheus·ssl_exporter·Alertmanager·Grafana) + 인증서 발급·자동 배포(`certdeploy`)** 를 Rocky Linux 관리 서버 1대에서 운영하기 위한 코드와 문서다. CertPilot 웹 앱은 Render 구성은 쓰지 않고, 같은 코드를 관리 서버의 **관리자 화면(발급·배포 설정)** 으로 설치해 쓴다. 웹 앱 자체 문서는 맨 아래.
 
 ## 지금 상태 (2026-10-28)
 - 코드·자동 테스트 완료, **실제 VM·실제 장비 검증 전** → 무엇을 검증했고 무엇이 남았는지는 [검증 보고서](ops/verification-report.md)
@@ -14,6 +14,7 @@
 | ③ 시험 | [테스트 시나리오](ops/test-scenarios.md) | T-01~T-19 절차·기대 결과·증거·결과 기록표 |
 | ④ 발급 | [자동 발급 가이드](ops/auto-issue.md) · [certdeploy](ops/certdeploy.md) | Let's Encrypt(DNS 연동/수동) 발급, 수동 와일드카드 가져오기, 명령 요약 |
 | ⑤ 호환성 | [호환성 가이드](ops/compatibility.md) | DNS 제공자 선택, 웹방화벽·어플라이언스(HTTP API) 배포, 확장 방법 |
+| ⑤-1 설정 화면 | [설치 매뉴얼 7-5](ops/vm-install-and-test.md) | 관리자 화면에서 메일 입력·인증서별 개인키 보호 선택 |
 | ⑥ 장애 | [디버깅 가이드](ops/debugging.md) | trace/diagnose, 버그 수집·전달 형식 |
 | ⑦ 교체 | [인증서 교체 체크리스트](ops/cert-rotation-checklist.md) | 11/12 만료 대응(기존 방식) 일정·절차 |
 
@@ -30,7 +31,7 @@
 ## 설정 예시 파일 (`certdeploy/`)
 | 파일 | 용도 |
 |---|---|
-| `certdeploy.manual.example.yml` | 상용 인증서(와일드카드)를 **수동으로 가져와** 자동 배포 |
+| `certdeploy.manual.example.yml` | 상용 인증서(와일드카드)를 **수동으로 가져와** 자동 배포(`hnu`/`hannam` 도메인별 분리) |
 | `certdeploy.acme.example.yml` | Let's Encrypt **자동 발급**(`hnu.kr`=Infoblox 연동, `hannam.ac.kr`=수동 TXT) + 배포 |
 | `certdeploy.waf.example.yml` | 웹방화벽 옵션 A(HTTP API)·B(SSH CLI, F5 형) 구조 예시(가상 필드) |
 | `certdeploy.waf-manual.example.yml` | 웹방화벽 옵션 C — **사람이 교체**(교체용 파일 준비·메일 안내·독촉·서빙 확인) |

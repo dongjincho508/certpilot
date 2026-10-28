@@ -18,7 +18,7 @@ def trace_path(state_dir: str) -> str:
 
 def _cert_section(cs) -> dict:
     sec = {"name": cs.name, "state_dir": cs.state_dir, "cert_file": cs.cert_file, "key_file": cs.key_file}
-    pw = os.environ.get(cs.key_password_env) if cs.key_password_env else None
+    pw = (os.environ.get(cs.key_password_env) if cs.key_password_env else None) or cs.key_passphrase
     try:
         b = load_bundle(cs.cert_file, cs.key_file, pw)
         sec["certificate"] = {"ok": True, "serial": f"{b.serial:x}", "not_after": b.not_after.isoformat(),

@@ -56,9 +56,9 @@ def _hdr(cs, many):
 
 def _key_read_pw(cs):
     """저장된 개인키를 읽을 때 쓸 암호(환경변수가 있으면). 암호화 옵션이 켜져 있는데 없으면 안내와 함께 중단."""
-    pw = os.environ.get(cs.key_password_env) if cs.key_password_env else None
+    pw = (os.environ.get(cs.key_password_env) if cs.key_password_env else None) or cs.key_passphrase
     if cs.key_encryption == "passphrase" and not pw:
-        raise click.ClickException(f"개인키 암호화가 켜져 있습니다 — 환경변수 {cs.key_password_env} 를 설정하세요(/etc/certdeploy/env)")
+        raise click.ClickException(f"개인키 암호화가 켜져 있습니다 — 환경변수 {cs.key_password_env} 를 설정하세요(/etc/certdeploy/env) 또는 관리자 화면에서 암호를 입력하세요")
     return pw
 
 
@@ -135,13 +135,15 @@ def validate(obj):
         b = _bundle(cs)
         d = _deployer(cs, b)
         enc = open(cs.key_file, "rb").read(400).find(b"ENCRYPTED") >= 0
-        click.echo(f"개인키 저장: {'암호화됨(' + cs.key_password_env + ')' if enc else '평문(권한 600으로 보호)'}  설정 key_encryption={cs.key_encryption}")
+        click.echo(f"개인키 저장: {'암호화됨' if enc else '평문(권한 600으로 보호)'}  설정 key_encryption={cs.key_encryption}")
         if enc != (cs.key_encryption == 'passphrase'):
             click.echo(f"문제: 설정(key_encryption={cs.key_encryption})과 실제 키 파일 상태가 다릅니다 — certdeploy key-{'encrypt' if cs.key_encryption == 'passphrase' else 'decrypt'} 로 맞추세요")
             code = 1
         click.echo(f"인증서 OK: 일련번호 {b.serial:x}, 만료 {b.not_after:%Y-%m-%d}(남은 {b.days_left():.0f}일), SAN {', '.join(b.names)}")
         for w in b.warnings:
             click.echo(f"주의: {w}")
+        if cfg.applied:
+            click.echo("관리자 화면(settings.json) 적용: " + " · ".join(cfg.applied))
         problems = key_permission_problems(cs.key_file) + d.validate_targets()
         for p in problems:
             click.echo(f"문제: {p}")
@@ -626,27 +628,19 @@ def key_decrypt(obj):
 
 
 def _convert_key(obj, encrypt: bool):
-    from .manual import decrypt_key_pem, encrypt_key_pem, _write_private
+    from .manual import convert_key_file
     cfg, cs = _one_set(obj)
-    pw = os.environ.get(cs.key_password_env or "")
+    pw = (os.environ.get(cs.key_password_env) if cs.key_password_env else None) or cs.key_passphrase
     if not pw:
-        raise click.ClickException(f"암호가 든 환경변수 {cs.key_password_env or '(certificate.key_password_env 미설정)'} 가 필요합니다")
+        raise click.ClickException(f"암호가 필요합니다: 환경변수 {cs.key_password_env or '(certificate.key_password_env 미설정)'} 또는 관리자 화면의 개인키 보호 암호")
     try:
-        data = open(cs.key_file, "rb").read()
-    except OSError as e:
-        raise click.ClickException(f"개인키 파일을 읽을 수 없습니다: {e.strerror}")
-    already = b"ENCRYPTED" in data
-    if encrypt == already:
-        click.echo(f"이미 {'암호화' if already else '평문'} 상태입니다 — 변경하지 않았습니다")
-        return
-    try:
-        out = encrypt_key_pem(data, pw) if encrypt else decrypt_key_pem(data, pw)
+        changed, bak = convert_key_file(cs.key_file, pw, encrypt)
     except ManualError as e:
         click.echo(f"변환 실패: {e}", err=True)
         sys.exit(2)
-    bak = f"{cs.key_file}.bak-{datetime.now(timezone.utc):%Y%m%d%H%M%S}"
-    _write_private(bak, data, 0o600)                       # 변환 전 원본(600) — 새 키로 정상 동작을 확인한 뒤 안전하게 삭제(shred)
-    _write_private(cs.key_file, out, 0o600)
+    if not changed:
+        click.echo(f"이미 {'암호화' if encrypt else '평문'} 상태입니다 — 변경하지 않았습니다")
+        return
     click.echo(f"개인키를 {'암호화' if encrypt else '평문으로 변환'}했습니다: {cs.key_file}\n변환 전 파일: {bak} (확인 후 삭제하세요)\n"
                f"설정에 key_encryption: {'passphrase' if encrypt else 'none'} 를 지정하고 `certdeploy validate` 로 확인하세요")
 

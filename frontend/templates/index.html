@@ -40,6 +40,7 @@
                     <li class="nav-item"><a class="nav-link active" href="#" data-view="dashboard"><i class="bi bi-speedometer2 me-1"></i>현황</a></li>
                     <li class="nav-item admin-only"><a class="nav-link" href="#" data-view="audit"><i class="bi bi-journal-text me-1"></i>감사 로그</a></li>
                     <li class="nav-item admin-only"><a class="nav-link" href="#" data-view="users"><i class="bi bi-people me-1"></i>사용자</a></li>
+                    <li class="nav-item admin-only"><a class="nav-link" href="#" data-view="cd"><i class="bi bi-gear me-1"></i>발급·배포 설정</a></li>
                     <li class="nav-item admin-only"><a class="nav-link" href="#" data-view="debug"><i class="bi bi-bug me-1"></i>진단</a></li>
                 </ul>
                 <div class="d-flex align-items-center gap-2">
@@ -116,6 +117,36 @@
             <div class="card shadow-sm"><div class="table-responsive">
                 <table class="table table-hover table-sm align-middle mb-0"><thead ><tr><th>시간 (UTC)</th><th>이벤트</th><th>수행자</th><th>대상</th></tr></thead>
                 <tbody id="audit-body"></tbody></table></div></div>
+        </section>
+
+        <!-- 발급·배포 설정 (certdeploy) -->
+        <section id="view-cd" hidden>
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                <h1 class="h3 mb-0">발급·배포 설정</h1>
+                <button class="btn btn-outline-primary" id="btn-cd-refresh"><i class="bi bi-arrow-clockwise me-1"></i>새로고침</button>
+            </div>
+            <div id="cd-banner" class="alert alert-warning small" hidden></div>
+            <div id="cd-body">
+                <div class="card shadow-sm mb-3"><div class="card-header fw-semibold"><i class="bi bi-award me-1"></i>인증서 현황 · 개인키 보호</div>
+                    <div class="card-body"><div class="small text-body-secondary mb-3">인증서별로 <strong>개인키 보호(암호 사용/사용 안 함)</strong>를 선택합니다. 사용을 선택하면 서버에 저장된 개인키 파일을 암호로 잠그고, 배포할 때만 메모리에서 풉니다(웹서버에 배포되는 키는 평문). 암호는 <strong>별도로 안전하게 보관</strong>하세요 — 잃으면 키를 복구할 수 없습니다.</div>
+                        <div id="cd-certs" class="vstack gap-3"></div></div></div>
+                <div class="card shadow-sm mb-3"><div class="card-header fw-semibold"><i class="bi bi-envelope me-1"></i>메일 알림 <span id="cd-mail-source" class="badge text-bg-secondary ms-2"></span></div>
+                    <form class="card-body" id="cd-mail-form" autocomplete="off"><div class="row g-3">
+                        <div class="col-12"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" id="m-enabled" checked><label class="form-check-label" for="m-enabled">메일 알림 사용</label></div></div>
+                        <div class="col-md-6"><label class="form-label" for="m-host">SMTP 서버</label><input class="form-control" id="m-host" placeholder="smtp.hnu.kr"></div>
+                        <div class="col-md-3"><label class="form-label" for="m-port">포트</label><input class="form-control" id="m-port" type="number" min="1" max="65535" value="587"></div>
+                        <div class="col-md-3 d-flex align-items-end"><div class="form-check"><input class="form-check-input" type="checkbox" id="m-starttls" checked><label class="form-check-label" for="m-starttls">STARTTLS 사용</label></div></div>
+                        <div class="col-md-6"><label class="form-label" for="m-from">발신 주소</label><input class="form-control" id="m-from" type="email" placeholder="cert-deploy@hnu.kr"></div>
+                        <div class="col-md-6"><label class="form-label" for="m-to">수신 주소 (쉼표 또는 줄바꿈 구분)</label><input class="form-control" id="m-to" placeholder="cert-admin@hnu.kr, ops@hnu.kr"></div>
+                        <div class="col-md-6"><label class="form-label" for="m-user">SMTP 계정 (인증 없는 내부 릴레이면 비움)</label><input class="form-control" id="m-user" autocomplete="off"></div>
+                        <div class="col-md-6"><label class="form-label" for="m-pass">SMTP 비밀번호</label><input class="form-control" id="m-pass" type="password" autocomplete="new-password"><div class="form-text" id="m-pass-hint">비워 두면 저장된 값을 유지합니다. 화면에는 표시되지 않습니다.</div></div>
+                        <div class="col-12"><div class="form-check"><input class="form-check-input" type="checkbox" id="m-success" checked><label class="form-check-label" for="m-success">성공 요약 메일도 보내기 (끄면 실패·조치 필요 알림만)</label></div></div>
+                        <div class="col-12 d-flex flex-wrap gap-2 align-items-center">
+                            <button class="btn btn-primary" id="btn-mail-save" type="submit"><i class="bi bi-save me-1"></i>저장</button>
+                            <button class="btn btn-outline-secondary" id="btn-mail-test" type="button"><i class="bi bi-send me-1"></i>시험 메일 보내기</button>
+                            <span id="cd-mail-result" class="small" aria-live="polite"></span></div>
+                    </div></form></div>
+            </div>
         </section>
 
         <!-- 사용자 -->

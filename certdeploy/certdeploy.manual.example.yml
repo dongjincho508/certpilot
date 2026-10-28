@@ -1,26 +1,17 @@
-# 수동 구매 인증서(와일드카드 등) + 자동 배포용 설정 — DNS(Infoblox)·lego 연동 없음
+# 수동 구매 인증서(와일드카드 등) + 자동 배포용 설정 — DNS(Infoblox)·lego 연동 없음. **도메인별로 인증서를 나눈 구성**
 # 복사:  sudo cp certdeploy/certdeploy.manual.example.yml /etc/certdeploy/certdeploy.yml
-# 흐름:  certdeploy csr → CA 제출 → certdeploy import --deploy   (docs/ops/certdeploy.md 5-1, docs/ops/vm-install-and-test.md)
-# 비밀번호·토큰은 이 파일에 쓰지 않는다(키스토어 비밀번호는 /etc/certdeploy/env 의 환경변수 이름으로만 참조).
+# 흐름:  certdeploy --cert hnu csr → CA 제출 → certdeploy --cert hnu import --deploy   (docs/ops/certdeploy.md 5-1, docs/ops/vm-install-and-test.md)
+# 비밀번호·토큰은 이 파일에 쓰지 않는다. 메일·개인키 보호 암호는 관리자 화면(발급·배포 설정)에서 입력하거나 /etc/certdeploy/env 의 환경변수로 둔다.
 
 state_dir: /var/lib/certdeploy
 audit_log: /var/lib/certdeploy/audit            # 변조 탐지 해시 체인 감사 로그(검증: certdeploy verify-audit)
-
-# import 가 인증서(서버+중간 CA)와 개인키를 설치하는 위치 = 배포 원본
-certificate:
-  cert_file: /var/lib/certdeploy/managed/wildcard.crt
-  key_file: /var/lib/certdeploy/managed/wildcard.key
-  # 개인키 저장 방식(선택): 기본은 평문(권한 600). 암호로 보호하려면 아래 두 줄을 켜고 `certdeploy key-encrypt` 로 변환
-  #   (재부팅·타이머 실행 때마다 /etc/certdeploy/env 의 암호가 필요하며, 배포 때만 메모리에서 복호화한다)
-  # key_encryption: passphrase
-  # key_password_env: CERTDEPLOY_KEY_PASSPHRASE
 
 # 관리 서버(같은 VM)의 감시 스택으로 결과 전달
 notify:
   alertmanager_url: http://127.0.0.1:9093
   pushgateway_url: http://127.0.0.1:9091
-  # 메일(우선 채널): 실패·수동 교체 필요는 항상, 성공 요약은 on_success. 비밀번호는 /etc/certdeploy/env 의 SMTP_PASSWORD
-  smtp: {host: smtp.univ.example, port: 587, starttls: true, from: cert-deploy@univ.example, to: [cert-admin@univ.example], username: cert-deploy, password_env: SMTP_PASSWORD, on_success: true}
+  # 메일(우선 채널): **관리자 화면 > 발급·배포 설정 > 메일 알림**에서 입력하면 아래보다 우선한다(화면 없이 쓰려면 이 줄을 켠다)
+  # smtp: {host: smtp.hnu.kr, port: 587, starttls: true, from: cert-deploy@hnu.kr, to: [cert-admin@hnu.kr], username: cert-deploy, password_env: SMTP_PASSWORD, on_success: true}
   # webhook: {url_env: CERTDEPLOY_WEBHOOK_URL, format: teams}      # Teams 는 이후 추가
 
 defaults:
@@ -31,23 +22,45 @@ options:
   verify_interval: 5
   keep_backups: 3
 
-# 처음에는 시험용 1대(canary)만 두고 preflight → deploy → 확인 후 대상을 늘린다.
-targets:
-  - name: web-canary
-    type: apache
-    canary: true
-    order: 1
-    transport: {host: www1.univ.example}
-    cert_path: /etc/ssl/univ/fullchain.pem
-    key_path: /etc/ssl/univ/privkey.pem
-    reload_cmd: sudo -n systemctl reload httpd
-    verify: {host: www1.univ.example, port: 443, strict: true}
+# 도메인(인증서)별로 키·배포 대상·개인키 보호 설정이 분리된다. 처음에는 시험용 1대(canary)만 두고 preflight → deploy → 확인 후 대상을 늘린다.
+certificates:
+  - name: hnu
+    certificate:
+      cert_file: /var/lib/certdeploy/hnu/managed/wildcard.crt
+      key_file: /var/lib/certdeploy/hnu/managed/wildcard.key
+      # 개인키 보호(암호 사용/사용 안 함)는 관리자 화면에서 인증서별로 선택한다. 화면 없이 쓰려면:
+      # key_encryption: passphrase
+      # key_password_env: CERTDEPLOY_KEY_PASSPHRASE_HNU
+    targets:
+      - name: hnu-web-canary
+        type: apache
+        canary: true
+        order: 1
+        transport: {host: www1.hnu.kr}
+        cert_path: /etc/ssl/hnu/fullchain.pem
+        key_path: /etc/ssl/hnu/privkey.pem
+        reload_cmd: sudo -n systemctl reload httpd
+        verify: {host: www1.hnu.kr, port: 443, strict: true}
+      # - name: hnu-sugang-tomcat
+      #   type: tomcat
+      #   format: pkcs12
+      #   keystore_path: /opt/tomcat/conf/ssl/keystore.p12
+      #   password_env: TOMCAT_KS_PASS
+      #   transport: {host: sugang.hnu.kr}
+      #   reload_cmd: sudo -n systemctl restart tomcat
+      #   verify: {host: sugang.hnu.kr, port: 8443}
 
-  # - name: sugang-tomcat
-  #   type: tomcat
-  #   format: pkcs12
-  #   keystore_path: /opt/tomcat/conf/ssl/keystore.p12
-  #   password_env: TOMCAT_KS_PASS
-  #   transport: {host: sugang.univ.example}
-  #   reload_cmd: sudo -n systemctl restart tomcat
-  #   verify: {host: sugang.univ.example, port: 8443}
+  - name: hannam
+    certificate:
+      cert_file: /var/lib/certdeploy/hannam/managed/wildcard.crt
+      key_file: /var/lib/certdeploy/hannam/managed/wildcard.key
+    targets:
+      - name: hannam-web-canary
+        type: apache
+        canary: true
+        order: 1
+        transport: {host: www.hannam.ac.kr}
+        cert_path: /etc/ssl/hannam/fullchain.pem
+        key_path: /etc/ssl/hannam/privkey.pem
+        reload_cmd: sudo -n systemctl reload httpd
+        verify: {host: www.hannam.ac.kr, port: 443, strict: true}

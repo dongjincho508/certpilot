@@ -1,6 +1,6 @@
 # 관리 서버 설치·테스트 매뉴얼 (Rocky Linux 10.x, 명령어 상세)
 
-**관리 서버 1대**(Rocky Linux 10.x)에 *감시 스택*(Prometheus·ssl_exporter·Alertmanager·Grafana·Pushgateway)과 *발급·배포 도구*(`certdeploy`)를 함께 구성한다. 인증서는 상용 CA 와일드카드를 **수동으로 추가**(`csr`→`import`)하고 배포는 자동화한다(DNS 연동 불필요). lego+Infoblox 자동 발급은 선택(7-3).
+**관리 서버 1대**(Rocky Linux 10.x)에 *감시 스택*(Prometheus·ssl_exporter·Alertmanager·Grafana·Pushgateway)과 *발급·배포 도구*(`certdeploy`)를 함께 구성한다. 인증서는 **도메인별로 나눠**(`hnu`, `hannam`) 관리하고, 발급은 상용 CA 와일드카드를 **수동으로 추가**(`csr`→`import`)하거나 Let's Encrypt **자동 발급**(7-3, DNS 연동/수동 TXT) 중에서 고르며, 배포는 자동화한다. 메일 알림과 인증서별 개인키 보호(암호 사용/사용 안 함)는 **관리자 화면**(7-5)에서 입력·선택한다.
 각 명령은 위에서 아래로 순서대로 실행한다. 시험 절차는 [테스트 시나리오](test-scenarios.md), 문제 수집은 [디버깅 가이드](debugging.md).
 
 > ⚠️ **현재 RapidSSL 와일드카드는 2026-11-12 08:59(KST) 만료**다. 이 시스템의 시험 완료를 기다리지 말고, 만료 전 교체는 기존 절차([교체 체크리스트](cert-rotation-checklist.md))로 진행한다. 교체본으로 8~9단계를 처음 실사용해도 된다(실패하면 자동 롤백).
@@ -10,8 +10,9 @@
 
 ## 구성
 ```
- 관리자 PC ──HTTPS 443──▶ [관리 서버 Rocky 10]
+ 관리자 PC ──HTTPS 443/8443──▶ [관리 서버 Rocky 10]
                            ├ nginx(443) ─▶ Grafana(127.0.0.1:3000)
+                           ├ nginx(8443) ─▶ 관리자 화면(127.0.0.1:8081: 메일·개인키 보호 설정, 계정 certdeploy)
                            ├ Docker: Prometheus(9090) · Alertmanager(9093) · Pushgateway(9091) · ssl_exporter · Grafana  (모두 127.0.0.1 바인딩)
                            └ certdeploy(계정 certdeploy, 개인키 보관) ──SSH 22──▶ 대상 서버들(deploy 계정)
  감시: 관리 서버 ──TLS 접속──▶ 대상 서버들의 443/8443 …
@@ -19,7 +20,7 @@
 개인키는 관리 서버의 `certdeploy` 계정만 접근한다. 관리자 계정(`certadmin`)은 개인키를 읽을 수 없게 둔다(권한 700/600).
 
 ## 예상 화면 (설치 후 이렇게 보인다)
-> 아래는 **시험 환경에서 만든 예상 화면**이다. CertPilot 웹 앱 화면은 관리 서버에 설치되지 않으며(보류·미사용), 관리 서버에서 보는 화면은 **① Grafana 대시보드 ② 터미널 `certdeploy` 출력 ③ 알림(메일/Teams)** 이다.
+> 아래는 **시험 환경에서 만든 예상 화면**이다. 관리 서버에서 보는 화면은 **① Grafana 대시보드 ② 터미널 `certdeploy` 출력 ③ 알림(메일) ④ 관리자 화면(발급·배포 설정)** 이다. (Render 에 올린 CertPilot 앱은 사용하지 않는다 — ④ 는 같은 코드를 관리 서버에 설치한 설정 화면이다.)
 
 **① Grafana 「인증서 현황」** — 시험용 TLS 서버 5대와 가상 certdeploy 지표를 *실제* Prometheus·ssl_exporter 로 수집해 대시보드 JSON 의 쿼리를 그대로 실행한 결과(Grafana 자체는 이 환경에서 실행하지 못해 레이아웃을 재현했으므로 실제 모양과 다소 다를 수 있음). 상단 카드(감시 대상·조회 실패·30일 이내 만료·만료됨), 만료 임박 순 표, 같은 인증서를 쓰는 서버 수, 와일드카드 사용 현황, certdeploy 배포 상태·마지막 성공 이후 경과·연속 발급 실패.
 ![Grafana 인증서 현황(예상)](images/grafana-expected.png)
@@ -27,12 +28,15 @@
 **② 터미널 `certdeploy`** — 실제 certdeploy 를 시험 환경(로컬 대상 3개, 가짜 CA)에서 실행한 출력. 세 번째 대상의 재로드 실패 → 자동 롤백 → 원인 제거 후 재배포(이미 배포된 대상은 건너뜀) → `check`.
 ![certdeploy 터미널 출력(예상)](images/terminal-expected.png)
 
-**③ 알림** — 배포 실패·DNS TXT 등록 필요·만료 임박 알림이 메일/Teams 로 전달되고, 해소되면 복구 알림이 온다(T-02, T-19 에서 확인).
+**③ 알림** — 배포 실패·DNS TXT 등록 필요·수동 교체 필요·만료 임박 알림이 메일(우선)로 전달되고, 해소되면 복구 알림이 온다(T-02, T-19 에서 확인).
+
+**④ 관리자 화면 「발급·배포 설정」** — 인증서(도메인)별 현황(일련번호·만료·대상별 마지막 실행)과 **개인키 보호 사용/사용 안 함 선택**(적용하면 키 파일이 바로 변환됨), **메일 알림 입력·저장·시험 메일**. 아래는 시험 서버(가짜 SMTP)에서 실제로 동작시킨 화면이다.
+![관리자 화면(예상)](images/admin-screen.png)
 
 ## 0. 준비물 (설치 전)
 - [ ] VM: 4 vCPU / 8 GB / 디스크 100 GB 이상(`/var` 40 GB 이상). **CPU 는 x86-64-v3 지원**(VM 설정에서 호스트 CPU 통과) — 아니면 Rocky 10 이 설치·부팅되지 않는다
 - [ ] 고정 IP, 호스트명(예: `mgmt.univ.example`), 내부 DNS 등록
-- [ ] 방화벽 요청(관리 서버 기준) — 나가는: 대상 서버 TLS 포트(443, 8443 …)와 SSH 22, SMTP 25/587, NTP, DNS, (설치 중) `download.docker.com`·`registry-1.docker.io`·`github.com`·Rocky 미러 / 들어오는: 관리자 PC → 22, 443
+- [ ] 방화벽 요청(관리 서버 기준) — 나가는: 대상 서버 TLS 포트(443, 8443 …)와 SSH 22, SMTP 25/587, NTP, DNS, (설치 중) `download.docker.com`·`registry-1.docker.io`·`github.com`·Rocky 미러 / 들어오는: 관리자 PC → 22, 443, **8443(관리자 화면)**
 - [ ] 대상 서버 목록(호스트·포트·OS·웹서버 종류), 각 서버에 `deploy` 계정을 만들 수 있는지
 - [ ] SMTP 릴레이(주소·포트·인증), 알림 수신 주소, (선택) Teams 웹훅 URL
 - [ ] 상용 인증서 주문 계정(RapidSSL 등) 접근 권한
@@ -134,7 +138,7 @@ printf '{ "log-driver": "json-file", "log-opts": { "max-size": "20m", "max-file"
 
 ## 4. 소스 배치
 ```bash
-sudo dnf -y install git python3 python3-pip python3-pyyaml openssl
+sudo dnf -y install git python3 python3-pip python3-pyyaml openssl bind-utils
 ```
 ```bash
 sudo mkdir -p /opt/cert-monitor && sudo chown certadmin: /opt/cert-monitor && git clone https://github.com/dongjincho508/certpilot.git /opt/cert-monitor/src
@@ -230,11 +234,11 @@ sudo cp /opt/cert-monitor/src/certdeploy/certdeploy.manual.example.yml /etc/cert
 ```bash
 echo 'TOMCAT_KS_PASS=<비밀번호>' | sudo tee /etc/certdeploy/env >/dev/null && sudo chown certdeploy:certdeploy /etc/certdeploy/env && sudo chmod 600 /etc/certdeploy/env
 ```
-**알림은 메일 우선**: 설정의 `notify.smtp`(예시 파일에 포함)에 SMTP 서버·수신자를 채우고 비밀번호는 `/etc/certdeploy/env` 에 `SMTP_PASSWORD=…` 로 둔다. Alertmanager(감시 알림)의 메일 설정은 5단계. 설정 후 시험 메일을 보낸다(아래 `$CD` 정의 뒤):
+**알림은 메일 우선 — 입력은 관리자 화면에서**: SMTP 서버·수신자·계정·비밀번호는 **7-5 의 관리자 화면 > 발급·배포 설정 > 메일 알림**에서 입력·저장하고 [시험 메일 보내기]로 확인한다(화면 값이 설정 파일보다 우선하며 `/var/lib/certdeploy/settings.json` 에 권한 600 으로 저장됨). 화면 없이 쓰려면 설정의 `notify.smtp` 와 `/etc/certdeploy/env` 의 `SMTP_PASSWORD` 를 쓴다. Alertmanager(감시 알림)의 메일 설정은 5단계. CLI 로도 시험할 수 있다(아래 `$CD` 정의 뒤):
 ```bash
 $CD notify-test
 ```
-**개인키 저장 방식(선택)**: 기본은 평문(권한 600). 암호로 보호하려면 설정에 `key_encryption: passphrase`, `key_password_env: CERTDEPLOY_KEY_PASSPHRASE` 를 켜고 암호를 `/etc/certdeploy/env` 에 둔 뒤 `$CD key-encrypt` 로 변환한다(설명·장단점: [준비 체크리스트 D9](pre-vm-checklist.md), 시험 T-20). 어느 쪽이든 대상 서버에 배포되는 키는 평문이다.
+**개인키 저장 방식(선택, 인증서별)**: 기본은 평문(권한 600). **관리자 화면의 「개인키 보호」에서 인증서마다 사용/사용 안 함을 고르고 [적용]**하면 키 파일이 바로 변환된다(평문 사본은 검증 후 삭제). 화면 없이 쓰려면 설정에 `key_encryption: passphrase`, `key_password_env` 를 켜고 `$CD --cert hnu key-encrypt`(설명·장단점: [준비 체크리스트 D9](pre-vm-checklist.md), 시험 T-20·T-22). 어느 쪽이든 대상 서버에 배포되는 키는 평문이다.
 
 편의 변수(이후 명령에서 사용 — 새 터미널마다 다시 지정):
 ```bash
@@ -271,6 +275,43 @@ sudo -u certdeploy sh -c 'ssh-keyscan -t ed25519 www1.univ.example >> /var/lib/c
 sudo -u certdeploy ssh-keygen -lf /var/lib/certdeploy/.ssh/known_hosts
 ```
 
+### 7-5. 관리자 화면(발급·배포 설정) 설치
+메일 입력과 인증서별 개인키 보호 선택을 웹 화면에서 하기 위한 설정 화면이다(CertPilot 웹 코드를 관리 서버에 설치 — Render 의 것과 별개). **7-4 까지 끝난 뒤** 진행한다. 로그인·권한(관리자)·감사 로그는 CertPilot 기능을 그대로 쓰고, 화면은 `certdeploy` 설정 파일 위치(`CERTDEPLOY_CONFIG`)를 통해 같은 서버의 인증서·상태를 읽는다.
+```bash
+sudo install -d -m 700 -o certdeploy -g certdeploy /var/lib/certdeploy-admin
+```
+환경변수 파일(최초 관리자 계정은 **12자 이상 강한 비밀번호**, 첫 기동 때만 사용되며 이후 화면에서 변경):
+```bash
+sudo install -m 600 -o certdeploy -g certdeploy /dev/null /etc/certdeploy/admin.env && sudoedit /etc/certdeploy/admin.env
+```
+파일 내용(값은 실제로 채운다):
+```
+CERTPILOT_ADMIN_USER=certadmin2
+CERTPILOT_ADMIN_PASSWORD=<12자 이상 강한 비밀번호>
+CERTDEPLOY_CONFIG=/etc/certdeploy/certdeploy.yml
+CERTPILOT_DATA_DIR=/var/lib/certdeploy-admin
+CERTPILOT_SECURE_COOKIE=1
+```
+서비스 설치·기동:
+```bash
+sudo cp /opt/cert-monitor/src/certdeploy/systemd/certdeploy-admin.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now certdeploy-admin
+```
+```bash
+systemctl is-active certdeploy-admin && curl -s http://127.0.0.1:8081/health
+```
+HTTPS 역프록시(8443):
+```bash
+sudo cp /opt/cert-monitor/src/monitoring/nginx/certdeploy-admin.conf.example /etc/nginx/conf.d/certdeploy-admin.conf && sudoedit /etc/nginx/conf.d/certdeploy-admin.conf
+```
+```bash
+sudo nginx -t && sudo systemctl reload nginx && sudo firewall-cmd --permanent --add-port=8443/tcp && sudo firewall-cmd --reload
+```
+브라우저로 `https://mgmt.univ.example:8443` → 위 관리자 계정으로 로그인 → 상단 **「발급·배포 설정」**:
+1. **메일 알림**: SMTP 서버·포트·STARTTLS·발신/수신 주소(쉼표 구분)·계정·비밀번호 입력 → [시험 메일 보내기]로 도착 확인 → [저장]. 실패하면 원인(연결 거부·로그인 실패·TLS 오류 등)이 화면에 표시된다
+2. **개인키 보호**: 인증서(`hnu`, `hannam`)마다 「사용(암호로 보호)」/「사용 안 함」 선택 → 사용이면 암호(12자 이상) 입력 → [적용]. **암호는 별도로 안전하게 보관**(2인 이상, 봉인) — 잃으면 키를 복구할 수 없다
+3. 화면 값은 `/var/lib/certdeploy/settings.json`(0600)에 저장되어 `certdeploy` CLI·타이머가 자동 적용한다. 확인: `$CD validate`(출력에 "관리자 화면(settings.json) 적용" 표시)
+> **보안**: 8443 은 관리자 PC 대역만 방화벽에서 허용한다. 서버에 저장되는 SMTP 비밀번호·개인키 암호는 `settings.json`(권한 600, certdeploy 계정 전용)에 있으므로, 서버 접근 권한과 백업 보관을 개인키와 같은 수준으로 관리한다. 화면 응답·감사 로그·진단 번들에는 비밀번호·암호가 나오지 않는다.
+
 ## 8. 대상 서버 준비 (서버마다, 대상 서버에서 실행)
 `deploy` 계정은 **인증서 전용 디렉터리만 쓰고, 재로드 명령만 sudo** 로 실행한다(전체 root 권한 `sudo: true` 는 비권장).
 **Apache / Nginx (Rocky 계열 대상)**
@@ -284,11 +325,12 @@ sudo install -d -m 750 -o deploy -g apache /etc/ssl/univ
 echo 'deploy ALL=(root) NOPASSWD: /usr/bin/systemctl reload httpd, /usr/sbin/apachectl configtest' | sudo tee /etc/sudoers.d/certdeploy && sudo chmod 440 /etc/sudoers.d/certdeploy && sudo visudo -c
 ```
 ```bash
-sudo semanage fcontext -a -t cert_t '/etc/ssl/univ(/.*)?' && sudo restorecon -Rv /etc/ssl/univ
+sudo dnf -y install policycoreutils-python-utils && sudo semanage fcontext -a -t cert_t '/etc/ssl/univ(/.*)?' && sudo restorecon -Rv /etc/ssl/univ
 ```
 Apache 설정은 먼저 **수동으로** `SSLCertificateFile /etc/ssl/univ/fullchain.pem`, `SSLCertificateKeyFile /etc/ssl/univ/privkey.pem` 을 가리키게 바꾸고(처음 한 번 현재 인증서를 그 경로에 복사) `apachectl configtest` 통과를 확인한다.
 **Ubuntu/Debian 대상**: 서비스 이름이 `apache2` 이므로 sudoers·`reload_cmd` 의 `httpd` 를 `apache2` 로 바꾼다.
 **Tomcat / WebtoB·JEUS / Node.js**: 키스토어 경로·형식·재로드(재기동) 명령은 **제품 문서와 현재 설정으로 확인**해 `targets` 에 반영한다(`reload_cmd` 는 sudoers 에 해당 명령만 허용).
+**웹방화벽(모니터랩)**: API/CLI 가 확인되기 전에는 **옵션 C(사람이 교체)** 로 시작한다 — 설정은 `certdeploy.waf-manual.example.yml`, 시험은 T-21. API 문서가 오면 옵션 A(`http_api`, T-18)로 전환. 선택 가이드·확인 질문은 [호환성 가이드](compatibility.md).
 **IIS(Windows)**: 관리 서버에서 만든 PFX 를 옮겨 [deploy-iis.ps1](../../certdeploy/deploy-iis.ps1)(초안·미검증)로 바인딩을 교체한다. 자동화는 SSH 가 가능한 구성이 필요하므로 별도 협의.
 
 ## 9. 인증서 준비(수동)와 첫 배포
@@ -301,28 +343,28 @@ $CD preflight
 `preflight` 는 접속·쓰기 권한·명령·sudo·여유 공간·현재 TLS 를 **변경 없이** 점검한다. 전부 통과해야 한다.
 **CSR 생성 → CA 제출**
 ```bash
-$CD csr --domains '*.univ.example,univ.example' --country KR --org '대학명'
+$CD --cert hnu csr --domains '*.hnu.kr,hnu.kr' --country KR --org '대학명'
 ```
 출력된 CSR 을 RapidSSL 주문 화면에 붙여 넣는다(개인키는 `/var/lib/certdeploy/pending/…/key.pem`, 0600 — 외부로 보내지 않는다).
 **CA 가 준 파일 검증·설치**(`/tmp` 에 올린 뒤)
 ```bash
-$CD import --file /tmp/server.cer --file /tmp/intermediates.p7b --dry-run
+$CD --cert hnu import --file /tmp/server.cer --file /tmp/intermediates.p7b --dry-run
 ```
 이상 없으면 설치만, 또는 설치+배포:
 ```bash
-$CD import --file /tmp/server.cer --file /tmp/intermediates.p7b
+$CD --cert hnu import --file /tmp/server.cer --file /tmp/intermediates.p7b
 ```
 ```bash
-$CD plan
+$CD --cert hnu plan
 ```
 ```bash
-$CD deploy --target web-canary
+$CD --cert hnu deploy --target hnu-web-canary
 ```
 ```bash
 $CD check
 ```
 서빙 확인(외부 독립 확인): `echo | openssl s_client -connect www1.univ.example:443 -servername www1.univ.example 2>/dev/null | openssl x509 -noout -serial -enddate -subject`
-canary 확인 후 나머지 대상을 `targets` 에 추가하고 `$CD preflight` → `$CD deploy`. 지표 연동 점검:
+canary 확인 후 나머지 대상을 `targets` 에 추가하고 `$CD --cert hnu preflight` → `$CD --cert hnu deploy`. **인증서가 도메인별로 나뉘어 있으므로 `--cert hnu` / `--cert hannam` 으로 하나씩** 진행한다(`hannam` 도 같은 순서). 지표 연동 점검:
 ```bash
 $CD diagnose --prometheus http://127.0.0.1:9090 --alertmanager http://127.0.0.1:9093 --pushgateway http://127.0.0.1:9091
 ```
@@ -361,15 +403,15 @@ export BACKUP_PW='<12자 이상 비밀번호>' && $CD backup --out /home/certadm
 ```bash
 mkdir -p /opt/cert-monitor/backup && cd /opt/cert-monitor/src/monitoring && docker compose stop prometheus && docker run --rm -v cert-monitor_prometheus-data:/data:ro -v /opt/cert-monitor/backup:/backup:z alpine tar czf /backup/prometheus-$(date +%F).tgz -C /data . && docker compose start prometheus
 ```
-`.env`·`alertmanager/secrets/` 는 암호화한 별도 저장소에 보관. lego 자동 발급을 쓸 때만 갱신 타이머 설치:
+`.env`·`alertmanager/secrets/` 는 암호화한 별도 저장소에 보관(certdeploy 백업에는 관리자 화면 설정 `settings.json` 도 포함됨). **자동 발급(내장 ACME 또는 lego)을 쓸 때** 갱신 타이머를 설치한다(매일 `renew` 실행 — 만료 `renew_days` 이내일 때만 실제 발급·배포):
 ```bash
 sudo cp /opt/cert-monitor/src/certdeploy/systemd/certdeploy-renew.* /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now certdeploy-renew.timer
 ```
-수동 인증서 운영은 타이머가 필요 없다. 만료 임박은 감시 스택 알림(60/30/14/7일)이 알려 주고, 갱신 때 9단계를 반복한다(유효기간이 단축되므로 장기적으로는 [자동 발급](auto-issue.md)으로 전환).
-**업그레이드**: `cd /opt/cert-monitor/src && git pull` → 감시는 `docker compose pull && docker compose up -d`, certdeploy 는 `sudo /opt/certdeploy/venv/bin/pip install --upgrade /opt/cert-monitor/src`.
+수동 DNS 방식(`dns.mode: manual`)은 갱신 시점에 타이머가 TXT 안내 메일을 보내고 **종료 코드 4(대기, 오류 아님)** 로 끝나 서비스가 `failed` 로 표시될 수 있다 — TXT 를 등록하면 다음 실행에서 자동으로 이어진다. 상용 인증서를 수동으로 가져오는 방식(`csr`→`import`)만 쓰면 타이머가 필요 없다. 만료 임박은 감시 스택 알림(60/30/14/7일)이 알려 주고, 갱신 때 9단계를 반복한다(유효기간이 단축되므로 장기적으로는 [자동 발급](auto-issue.md)으로 전환).
+**업그레이드**: `cd /opt/cert-monitor/src && git pull` → 감시는 `docker compose pull && docker compose up -d`, certdeploy 는 `sudo /opt/certdeploy/venv/bin/pip install --upgrade /opt/cert-monitor/src` 후 관리자 화면 재시작 `sudo systemctl restart certdeploy-admin`.
 
 ## 11. 시험·버그 수집
-시험은 [테스트 시나리오](test-scenarios.md) T-01~T-13 순서로 수행하고 결과표를 채운다. 문제가 생기면:
+시험은 [테스트 시나리오](test-scenarios.md) T-01~T-22 순서로 수행하고 결과표를 채운다. 문제가 생기면:
 ```bash
 $CD diagnose --out /tmp/diag.json
 ```
@@ -391,8 +433,9 @@ $CD diagnose --out /tmp/diag.json
 ## 13. 완료 기준 체크리스트
 - [ ] `getenforce` Enforcing · `chronyc tracking` 정상 · 방화벽은 SSH·HTTPS 만 허용
 - [ ] 5개 컨테이너 실행, 재부팅 후 자동 복구, nginx HTTPS 로 Grafana 접속
+- [ ] 관리자 화면(8443) 로그인, 메일 시험 도착, 인증서별 개인키 보호 선택 적용(7-5)
 - [ ] 등록 대상 전부 Prometheus `up`, 대시보드에 인증서 표시, 테스트 알림 수신
-- [ ] T-01~T-13 합격 · 결과표 보관
+- [ ] T-01~T-22 합격 · 결과표 보관
 - [ ] VMware: EVC/CPU 호환성 확인, VMware Tools 시간 동기화 끔, 스냅샷 없음(작업 시에만), VM 콘솔·스냅샷·백업 접근 인원 최소화, 디스크 암호화 방식(LUKS 또는 vSphere 암호화) 결정·암호 봉인 보관
 - [ ] 개인키 권한 600, `certdeploy` 계정 외 접근 불가, 백업본 암호화 보관·복원 시험 완료
 - [ ] 알림 수신자·야간/휴일 담당 확정, 갱신 달력 등록(수동 방식: 현재 약 200일, **2027-03-15 부터 100일, 2029-03-15 부터 47일** → 자동 발급 전환 계획)
