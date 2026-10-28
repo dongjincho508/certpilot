@@ -16,7 +16,8 @@
 1. Render 대시보드 → New → Blueprint → 이 저장소 선택 (`render.yaml` 자동 인식)
 2. 비밀 값 입력
    - `CERTPILOT_ADMIN_PASSWORD`: 12자 이상, 대/소문자·숫자·특수문자 중 3종 이상, 계정명 미포함
-   - `CERTPILOT_SSH_PRIVATE_KEY`: `certpilot_scan` 파일 내용 전체(줄바꿈 포함)
+   - `CERTPILOT_SSH_PRIVATE_KEY_B64` (권장): `base64 -w0 certpilot_scan` 의 출력(한 줄). macOS 는 `base64 -i certpilot_scan | tr -d '\n'`
+   - 또는 `CERTPILOT_SSH_PRIVATE_KEY`: 키 파일 내용 전체. 줄바꿈이 깨져도(공백·`\n`·CRLF) 자동 복원하지만 B64 가 가장 안전하다
 3. 배포 후 `https://<서비스>.onrender.com` 접속 → `admin` 로그인 → 서버 등록 → 조회
 
 ## 3. 동작 방식
@@ -37,7 +38,8 @@
 
 | 증상 | 원인 |
 |---|---|
-| 모든 서버 "인증 실패" | 키 미설정·형식 오류(로그에 "ssh-agent 에 로드하지 못했습니다"), 공개키 미등록 |
+| 모든 서버 "인증 실패" | 키 미설정·형식 오류, 공개키 미등록 (아래 "SSH 키 오류" 로그 참고) |
+| 로그 `SSH 키 오류: ...` | 사유가 그대로 적힌다: `형식이 아닙니다`(공개키/잘못된 값), `passphrase`(암호 걸린 키 → `ssh-keygen -p -N "" -f 키` 로 암호 제거 또는 새 키 생성), `해석할 수 없습니다`(일부 누락·손상 → B64 로 재입력), `개인키가 아닌`(인증서·공개키를 넣음) |
 | "연결 시간 초과" | 대상 방화벽에서 Render 출구 IP 미허용, 사설망 |
 | 재배포 후 서버 목록·감사 로그 소실 | 영구 디스크 없음(무료 플랜) |
 | 로그인 직후 로그아웃 | HTTP 로 접속(Secure 쿠키). HTTPS 주소로 접속 |

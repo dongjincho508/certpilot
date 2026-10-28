@@ -50,7 +50,7 @@ docs/            PRD · 결정 기록 · ARCHITECTURE · TRACEABILITY · OPEN_IT
 | [결정 기록](docs/decisions.md) · [릴리스 상태](docs/release-approval.md) | |
 
 ## 환경 변수
-`CERTPILOT_ADMIN_USER`/`CERTPILOT_ADMIN_PASSWORD`(최초 관리자) · `CERTPILOT_DATA_DIR`(기본 `./data`, DB·감사 로그) · `CERTPILOT_SECURE_COOKIE`(HTTPS 에서 1) · `CERTPILOT_IDLE_MINUTES`(기본 30) · `CERTPILOT_ADMIN_RESET_PASSWORD`(1 이면 관리자 비밀번호를 환경변수 값으로 복구, 복구 후 제거) · `CERTPILOT_SSH_PRIVATE_KEY`(조회용 개인키, 시작 시 agent 로드 후 삭제) · `PORT`
+`CERTPILOT_ADMIN_USER`/`CERTPILOT_ADMIN_PASSWORD`(최초 관리자) · `CERTPILOT_DATA_DIR`(기본 `./data`, DB·감사 로그) · `CERTPILOT_SECURE_COOKIE`(HTTPS 에서 1) · `CERTPILOT_IDLE_MINUTES`(기본 30) · `CERTPILOT_ADMIN_RESET_PASSWORD`(1 이면 관리자 비밀번호를 환경변수 값으로 복구, 복구 후 제거) · `CERTPILOT_SSH_PRIVATE_KEY_B64`/`CERTPILOT_SSH_PRIVATE_KEY`(조회용 개인키, 시작 시 agent 로드 후 삭제) · `PORT`
 
 ## 라이선스
 MIT
