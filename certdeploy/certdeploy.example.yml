@@ -1,0 +1,127 @@
+# certdeploy 설정 예시 → /etc/certdeploy/certdeploy.yml 로 복사해 수정 (권한 640, 소유자 certdeploy)
+# 비밀번호·토큰은 이 파일에 쓰지 않는다: 키스토어 비밀번호는 환경변수 이름(password_env)으로만 참조한다.
+
+state_dir: /var/lib/certdeploy         # 배포 기록·잠금 파일 (권한 700)
+
+# ---- 인증서 발급(lego). 없으면 이미 발급된 파일(certificate.cert_file/key_file)만 배포한다.
+lego:
+  binary: lego
+  email: cert-admin@univ.example
+  dns_provider: infoblox               # 지원 목록·환경변수 확인: lego dnshelp -c infoblox
+  domains: ["univ.example", "*.univ.example"]
+  path: /var/lib/lego                  # 계정·인증서 저장소(개인키 포함, 권한 700)
+  env_file: /etc/lego/lego.env         # DNS 업체 계정 등 (KEY=VALUE, 권한 600)
+  renew_days: 30                       # 만료 30일 이내일 때만 실제 갱신
+  # server: https://acme-staging-v02.api.letsencrypt.org/directory   # 시험용(스테이징). 운영은 생략
+  # dns_resolvers: ["10.0.0.53:53"]    # 위임 영역을 직접 질의할 권한 DNS
+
+# lego 를 쓰지 않고 직접 배치한 파일을 배포하려면 아래를 사용(lego 설정이 있으면 자동 계산됨)
+# certificate:
+#   cert_file: /var/lib/lego/certificates/_.univ.example.crt   # 서버 인증서 + 중간 CA(fullchain)
+#   key_file:  /var/lib/lego/certificates/_.univ.example.key
+#   key_password_env: ""
+
+notify:
+  alertmanager_url: http://127.0.0.1:9093    # 배포 실패 시 CertDeployFailed 알림(성공하면 자동 해소)
+  # 메일(SMTP): 실패는 항상, 성공 요약은 on_success 가 true 일 때만. 비밀번호는 환경변수/파일로.
+  # smtp: {host: smtp.univ.example, port: 587, starttls: true, from: cert-deploy@univ.example,
+  #        to: [cert-admin@univ.example], username: cert-deploy, password_env: SMTP_PASSWORD, on_success: true}
+  # 웹훅(Slack·Mattermost: slack, Teams Workflows: teams, 그 밖: generic). URL 의 토큰은 환경변수/파일에만 둔다.
+  # webhook: {url_env: CERTDEPLOY_WEBHOOK_URL, format: slack, on_success: false}
+  # 실행 결과 지표 → 감시 스택의 Pushgateway(방화벽으로 이 서버만 허용) 또는 node_exporter textfile
+  # pushgateway_url: http://monitor.univ.example:9091
+  # metrics_file: /var/lib/node_exporter/textfile/certdeploy.prom
+
+# 변조 탐지 해시 체인 감사 로그(누가·언제·무엇을 배포했는지). 검증: certdeploy verify-audit
+# audit_log: /var/log/certdeploy
+
+# 모든 대상에 공통으로 적용(대상에서 같은 키를 쓰면 그 값이 우선, transport/verify 는 키 단위로 병합)
+# defaults:
+#   transport: {kind: ssh, user: deploy, key_file: /var/lib/certdeploy/.ssh/id_ed25519,
+#               known_hosts: /var/lib/certdeploy/.ssh/known_hosts}
+#   verify: {strict: true}          # 신뢰 저장소로 체인·호스트명까지 검증(중간 CA 누락 탐지). 사설 CA 는 ca_file 지정
+
+options:
+  verify_attempts: 6        # 재로드 후 새 인증서가 보일 때까지 재시도 횟수
+  verify_interval: 5        # 재시도 간격(초)
+  keep_backups: 3           # 파일별 백업 보관 개수
+  min_days: 1
+
+# ---- 배포 대상. canary 와 order 순서로 한 대씩 진행하고, 실패하면 이후 대상은 실행하지 않는다.
+targets:
+  # Apache: 기본 점검(configtest)과 재로드(systemctl reload httpd/apache2)가 내장되어 있다.
+  - name: web-canary
+    type: apache
+    canary: true
+    order: 1
+    transport: {kind: ssh, host: www1.univ.example, user: deploy, key_file: /var/lib/certdeploy/.ssh/id_ed25519,
+                known_hosts: /var/lib/certdeploy/.ssh/known_hosts}
+    cert_path: /etc/ssl/univ/fullchain.pem     # SSLCertificateFile (서버+중간 CA)
+    key_path: /etc/ssl/univ/privkey.pem        # SSLCertificateKeyFile
+    verify: {host: www1.univ.example, port: 443, strict: true}    # strict: 일련번호뿐 아니라 체인·호스트명도 검증
+    health: {url: https://www1.univ.example/health, expect: 200}   # 배포 후 HTTP 헬스체크(선택)
+    soak_seconds: 300               # canary: 5분간 새 인증서·헬스가 유지되는지 반복 확인한 뒤 다음 대상으로
+    # pre_cmd: /opt/certdeploy/hooks/lb-drain.sh      # 배포 전(예: 로드밸런서에서 제외). 실패하면 변경 없이 중단
+    # post_cmd: /opt/certdeploy/hooks/lb-restore.sh   # 성공·롤백 후(환경변수 CERTDEPLOY_STATUS 로 결과 전달)
+    # hook_env: [LB_API_TOKEN]    # 훅은 최소 환경만 받는다. 훅에 필요한 변수 이름만 명시적으로 허용
+
+  - name: web-main
+    type: apache
+    order: 2
+    transport: {kind: ssh, host: www2.univ.example, user: deploy, key_file: /var/lib/certdeploy/.ssh/id_ed25519,
+                known_hosts: /var/lib/certdeploy/.ssh/known_hosts}
+    cert_path: /etc/ssl/univ/fullchain.pem
+    key_path: /etc/ssl/univ/privkey.pem
+    reload_cmd: sudo -n systemctl reload httpd       # 최소 권한: sudoers 에 이 명령만 허용(문서 참고)
+    verify: {host: www2.univ.example, port: 443}
+
+  # nginx
+  # - name: proxy1
+  #   type: nginx
+  #   transport: {kind: ssh, host: proxy1.univ.example, user: deploy, ...}
+  #   cert_path: /etc/nginx/ssl/fullchain.pem
+  #   key_path: /etc/nginx/ssl/privkey.pem
+  #   verify: {host: proxy1.univ.example}
+
+  # Tomcat: PKCS#12 키스토어 교체 (비밀번호는 환경변수 TOMCAT_KS_PASS — /etc/certdeploy/env 에 둔다)
+  - name: sugang-tomcat
+    type: tomcat
+    format: pkcs12                 # pkcs12 | jks | pem
+    keystore_path: /opt/tomcat/conf/ssl/keystore.p12
+    password_env: TOMCAT_KS_PASS
+    alias: tomcat
+    # legacy_pkcs12: true          # 구형 JVM(Java 8 초기)이 못 읽을 때만
+    transport: {kind: ssh, host: sugang.univ.example, user: deploy, key_file: /var/lib/certdeploy/.ssh/id_ed25519,
+                known_hosts: /var/lib/certdeploy/.ssh/known_hosts}
+    reload_cmd: sudo -n systemctl restart tomcat     # Tomcat 버전별 재로드 방식은 제품 문서로 확인(없으면 재시작)
+    verify: {host: sugang.univ.example, port: 8443}
+
+  # WebtoB / JEUS 등 제품 고유 구성: generic 유형으로 파일 목록과 명령을 직접 지정한다.
+  # (경로·형식·재기동 명령은 제품 문서와 현재 설정을 확인해 채운다 — 아래는 형태만 보여 주는 예시)
+  # - name: jeus-sso
+  #   type: generic
+  #   transport: {kind: ssh, host: sso.univ.example, user: deploy, key_file: ..., known_hosts: ...}
+  #   files:
+  #     - {path: /opt/jeus/domains/sso/config/security/keystore.jks, content: jks, password_env: JEUS_KS_PASS, alias: sso}
+  #   check_cmd: "true"                          # 점검 명령이 없으면 none
+  #   reload_cmd: sudo -n /opt/jeus/bin/restart-sso.sh   # TODO: 실제 재기동 명령
+  #   verify: {host: sso.univ.example, port: 443}
+
+  # 같은 서버(발급 서버 자신)에 배포: transport 생략 또는 {kind: local}
+  # - name: self-nginx
+  #   type: nginx
+  #   cert_path: /etc/ssl/univ/fullchain.pem
+  #   key_path: /etc/ssl/univ/privkey.pem
+
+# ---- 여러 인증서를 각각 관리하려면 최상위 certificate/lego/targets 대신 certificates 목록을 쓴다.
+# certificates:
+#   - name: wildcard
+#     lego: {email: cert-admin@univ.example, dns_provider: infoblox, domains: ["univ.example", "*.univ.example"], path: /var/lib/lego/wildcard}
+#     targets: [...]
+#   - name: portal
+#     lego: {email: cert-admin@univ.example, http_webroot: /var/www/html, domains: ["portal.univ.example"], path: /var/lib/lego/portal, key_type: ec256}
+#     targets: [...]
+# 인증서별 상태는 state_dir/<name>/ 에 분리 저장되며, --cert <name> 으로 하나만 실행할 수 있다.
+
+# ---- DNS 연동 없이 수동 구매 인증서를 쓸 때: 위 lego 블록을 지우고 certificate/targets 만 두면 된다.
+#      발급: certdeploy csr → CA 제출 → certdeploy import --deploy  (docs/ops/certdeploy.md 5-1)

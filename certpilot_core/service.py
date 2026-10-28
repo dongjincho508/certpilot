@@ -13,6 +13,7 @@ from .remote import CAUSE_INFO, ParamikoExecutor, RemoteExecutor, is_safe_path
 from .osprofiles import AUTO, VALID_OS_TYPES
 from .scanner import Scanner, Target
 from .store import Store
+from . import trace
 
 MAX_PARALLEL = 20  # Q-PERF: 동시 조회 상한 (초과분은 풀 큐에서 대기, 거부하지 않음)
 
@@ -118,8 +119,10 @@ class CertPilotService:
         target = Target(server_id=s["id"], name=s["name"], hostname=s["hostname"], port=s["port"],
                         account=s["account"], paths=s["paths"], tls_ports=s["tls_ports"],
                         warn_days=s["warn_days"], os_type=s.get("os_type", AUTO))
-        res = self.scanner.scan(target, prev["file_hashes"] if prev else None)
-        out = res.to_dict()
+        with trace.run("scan"), trace.span("scan", "scan_server", server=s["name"], host=f"{s['hostname']}:{s['port']}") as ctx:
+            res = self.scanner.scan(target, prev["file_hashes"] if prev else None)
+            out = res.to_dict()
+            ctx.update(result=out["status"], cause=out["cause"], certs=len(out["certificates"]), raw_error=res.cause_detail)
         self.store.save_scan(server_id, out["scanned_at"], out["status"], out, res.file_hashes)
         # 원문 오류(cause_detail)는 감사 로그에만 기록한다 (S-8)
         self.audit.write({
@@ -143,7 +146,12 @@ class CertPilotService:
     def probe_server(self, data: dict, actor: str) -> dict:
         """서버를 저장하지 않고 연결 가능 여부와 조회 가능한 경로를 확인한다(등록 전 점검)."""
         target = validate_connection(data)
-        out, raw = self.scanner.check_connection(target)
+        with trace.run("probe"), trace.span("probe", "check_connection", host=f"{target.hostname}:{target.port}",
+                                            account=target.account, os_type=target.os_type) as ctx:
+            out, raw = self.scanner.check_connection(target)
+            ctx.update(connected=out["connected"], cause=out["cause"], raw_error=raw, os=(out.get("os") or {}).get("detected"),
+                       standard_paths=len(out["standard_paths"]), suggested=len(out["suggested_paths"]),
+                       tls=[(t["port"], t["ok"]) for t in out["tls"]])
         self.audit.write({"event_type": "server_probe", "description": f"{target.hostname}:{target.port}",
                           "details": {"actor": actor, "connected": out["connected"], "cause": out["cause"],
                                       "raw_error": raw}})

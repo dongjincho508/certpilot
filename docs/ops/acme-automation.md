@@ -1,6 +1,6 @@
 # 인증서 발급·갱신 자동화 설계 (Let's Encrypt + lego + Infoblox DNS-01)
 
-> **상태: 설계 초안.** 실제 발급·배포는 이 저장소에서 시험하지 못했다. 스테이징 CA 로 먼저 검증한 뒤 운영에 적용한다.
+> **상태: certdeploy 로 구현됨**(자동 테스트 통과). 단 실제 lego·Infoblox·각 서비스 서버에서의 시험은 하지 못했다 — [검증 현황](certdeploy.md). 스테이징 CA 로 먼저 검증한 뒤 운영에 적용한다.
 > 감시는 [monitoring/](../../monitoring/README.md) 가 맡고, 이 문서는 발급·배포 쪽 설계다.
 
 ## 1. 왜 이 구성인가
@@ -12,9 +12,9 @@
 ## 2. 구조
 ```
 [발급 서버(Linux, 전용 계정)] ── DNS-01 ──▶ Infoblox(위임 하위 영역) ◀── Let's Encrypt 검증
-   lego (renew, systemd 타이머)
-        │ 갱신 성공 시 deploy.sh(renew-hook)
-        ▼  서버별: 배치 → 재로드 → TLS 일련번호 확인 → 실패 시 중단
+   certdeploy renew (lego 호출, systemd 타이머)
+        │ certdeploy: 검증 → 서버별 백업·교체 → 점검 → 재로드 → TLS 일련번호 확인 → 실패 시 롤백·알림
+        ▼
    Apache · Tomcat · WebtoB/JEUS · IIS · Node.js        ◀─ monitoring 스택이 결과를 독립 검증
 ```
 
@@ -29,19 +29,16 @@
 
 확인할 것: 이 도메인의 권한 DNS 가 Infoblox 인지, 상위 기관이 위임한 구조인지, Infoblox 버전과 WAPI 사용 허용 정책.
 
-## 4. lego 설정
-스크립트: [`renewal/lego-renew.sh`](../../monitoring/renewal/lego-renew.sh), 타이머: [`lego-renew.timer`](../../monitoring/renewal/lego-renew.timer)
-- 환경변수는 `/etc/lego/lego.env`(600). **Infoblox 환경변수 이름은 버전마다 다를 수 있으므로 설치한 lego 로 확인:** `lego dnshelp -c infoblox`
-- 반드시 **스테이징 먼저**: `LEGO_SERVER=https://acme-staging-v02.api.letsencrypt.org/directory ./lego-renew.sh run`
-- 운영 전환: 스테이징 성공 후 `LEGO_SERVER` 를 비우고(운영 서버) 새 `LEGO_PATH` 로 첫 발급
-- 갱신은 만료 30일 이내에서만 실제 수행(`--days 30`). 타이머는 하루 2회 호출
-- 발급 결과 보관: `/var/lib/lego/certificates/`(개인키 포함) — 소유자 lego, 권한 700, **백업 시 암호화**
+## 4. 구현: certdeploy
+발급(lego 호출)과 배포를 하나로 묶은 도구 **[certdeploy](certdeploy.md)** 로 구현했다(`certdeploy/` 패키지, 자동 테스트 포함).
+- lego 환경변수·스테이징 시험·타이머 설정은 certdeploy 설정(`lego:` 항목)과 [certdeploy 가이드](certdeploy.md) 4절 절차를 따른다.
+- **Infoblox 환경변수 이름은 버전마다 다를 수 있으므로 설치한 lego 로 확인:** `lego dnshelp -c infoblox`
+- 반드시 **스테이징 먼저**(`certdeploy issue --staging --no-deploy`), 그다음 canary 한 대 → 전체 순서
 
-## 5. 배포 훅과 서비스별 주의
-스크립트: [`renewal/deploy.sh`](../../monitoring/renewal/deploy.sh)(초안), IIS: [`deploy-iis.ps1`](../../monitoring/renewal/deploy-iis.ps1)
-- 한 대씩 배포 → 재로드 → **배포 후 TLS 로 일련번호 확인** → 실패하면 이후 서버로 넘어가지 않고 중단
-- 배포 전용 SSH 계정은 대상 서버에서 필요한 동작만 허용(sudo 규칙 또는 제한 명령)
-- Apache/Node.js 핸들러는 동작 예시를 넣었고, **Tomcat·WebtoB·JEUS 는 TODO** — 제품 버전별 인증서 형식·재로드 방식은 벤더 문서로 확인해 채운다
+## 5. 배포와 서비스별 주의
+배포 엔진은 점검 → 재로드 → **TLS 로 새 인증서 확인** → 실패 시 자동 롤백 순서로 한 대씩 진행한다.
+- Apache/nginx/Node.js(PEM), Tomcat(PKCS#12·JKS·PEM)은 내장 유형, **WebtoB·JEUS 는 `generic` 유형으로 파일 목록과 명령을 직접 지정** — 제품 버전별 인증서 형식·재기동 방식은 벤더 문서로 확인해 설정에 채운다
+- IIS 는 자동 배포 대상이 아니다(`certdeploy/deploy-iis.ps1` 초안)
 - 오래된 클라이언트(구형 Java, Android 7.1 이하 등)가 접속하는 서비스는 Let's Encrypt 루트 신뢰 여부를 사전 점검
 
 ## 6. 개인키 취급 원칙
@@ -53,8 +50,8 @@
 [교체 체크리스트](cert-rotation-checklist.md)의 일정대로 진행한다. 11월 5일까지 스테이징·1~2대 실배포 검증이 끝나지 않으면 방식 A(수동 갱신)로 확정하고, 자동화는 이후 일정에서 완성한다.
 
 ## 8. 완료 기준
-- [ ] 스테이징 발급·갱신(`renew --days 9999` 로 강제 갱신 시험) 성공
-- [ ] Apache 시범 서버에서 배포 훅 → 재로드 → 일련번호 확인까지 자동 수행
-- [ ] 각 서비스(Tomcat, WebtoB/JEUS, IIS, Node.js) 핸들러 완성·시험
+- [ ] 스테이징 발급 성공(`certdeploy issue --staging --no-deploy`)
+- [ ] Apache canary 에서 배포 → 재로드 → 일련번호 확인까지 자동 수행, 의도적 실패 시 롤백 확인
+- [ ] 각 서비스(Tomcat, WebtoB/JEUS, Node.js)의 `reload_cmd`·파일 형식을 제품 문서로 확인해 설정·시험
 - [ ] 갱신 실패 시 알림(타이머 실패 + 감시 스택의 갱신 지연 경보)이 담당자에게 도착
 - [ ] 개인키·계정 정보 보관 위치와 권한 점검, 복구 절차 문서화

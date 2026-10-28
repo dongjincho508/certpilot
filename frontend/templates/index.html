@@ -40,6 +40,7 @@
                     <li class="nav-item"><a class="nav-link active" href="#" data-view="dashboard"><i class="bi bi-speedometer2 me-1"></i>현황</a></li>
                     <li class="nav-item admin-only"><a class="nav-link" href="#" data-view="audit"><i class="bi bi-journal-text me-1"></i>감사 로그</a></li>
                     <li class="nav-item admin-only"><a class="nav-link" href="#" data-view="users"><i class="bi bi-people me-1"></i>사용자</a></li>
+                    <li class="nav-item admin-only"><a class="nav-link" href="#" data-view="debug"><i class="bi bi-bug me-1"></i>진단</a></li>
                 </ul>
                 <div class="d-flex align-items-center gap-2">
                     <button class="btn btn-outline-secondary btn-sm" id="theme-toggle" type="button" aria-label="테마 전환" title="라이트/다크 전환"><i class="bi bi-moon-stars"></i></button>
@@ -86,6 +87,23 @@
                     </table>
                 </div>
             </div>
+        </section>
+
+        <!-- 진단 -->
+        <section id="view-debug" hidden>
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                <h1 class="h3 mb-0">진단</h1>
+                <div class="d-flex align-items-center gap-2">
+                    <button class="btn btn-outline-primary" id="btn-dbg-refresh"><i class="bi bi-arrow-clockwise me-1"></i>새로고침</button>
+                    <button class="btn btn-outline-secondary" id="btn-dbg-bundle"><i class="bi bi-download me-1"></i>진단 번들(JSON)</button></div>
+            </div>
+            <div class="card shadow-sm mb-3"><div class="card-header fw-semibold">환경 점검</div><ul class="list-group list-group-flush" id="dbg-checks"></ul></div>
+            <div class="card shadow-sm">
+                <div class="card-header d-flex flex-wrap gap-3 align-items-center"><span class="fw-semibold">단계별 이벤트</span>
+                    <div class="form-check mb-0"><input class="form-check-input" type="checkbox" id="dbg-errors"><label class="form-check-label small" for="dbg-errors">경고·오류만</label></div>
+                    <input class="form-control form-control-sm w-auto" id="dbg-run" placeholder="작업 ID(run) 필터" aria-label="작업 ID 필터"></div>
+                <div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>시각</th><th>작업</th><th>단계</th><th class="text-end">소요</th><th>내용 (비밀값은 마스킹)</th></tr></thead>
+                <tbody id="dbg-body"></tbody></table></div></div>
         </section>
 
         <!-- 감사 로그 -->

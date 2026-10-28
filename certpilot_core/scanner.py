@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Sequence
 
 from . import status as st
+from . import trace
 from .cert_parser import (CertificateInfo, extract_pem_certs, parse_der_certificate,
                           parse_pem_blocks)
 from .remote import (CAUSE_INFO, RETRYABLE, FailureCause, PolicyExecutor, PolicyViolation,
@@ -219,6 +220,7 @@ class Scanner:
         try:
             ex = self._connect(target, self._whitelist(target, extra))
             out["connected"] = True
+            trace.event("probe", "ssh_connected", server_version=ex.server_version)
             profile, out["os"] = self._resolve_profile(ex, target)
             out["os"]["candidates"] = list(profile.candidates)
             ver = parse_openssh_version(ex.server_version)
@@ -228,11 +230,13 @@ class Scanner:
                 scanned = []
                 for cand in list(profile.candidates) + extra:
                     files = self._expand(ex, cand, depth=0)
+                    trace.event("probe", "path_scanned", "debug", path=cand, files=len(files))
                     if files:
                         scanned += files
                         out["standard_paths"].append({"path": cand, "files": len(files), "sample": files[:3]})
                 out["suggested_paths"] = self._suggest(ex, scanned, extra, profile)
         except RemoteError as e:
+            trace.event("probe", "ssh_failed", "warning", cause=e.cause.value, detail=e.detail)
             out["cause"], out["cause_label"], out["action"] = e.cause.value, CAUSE_INFO[e.cause][0], CAUSE_INFO[e.cause][1]
             out["hostkey_blocked"] = e.cause == FailureCause.HOSTKEY
             raw = e.detail
@@ -260,6 +264,7 @@ class Scanner:
             except RemoteError as e:
                 if e.cause not in RETRYABLE or attempt >= self.retries:
                     raise
+                trace.event("scan", "connect_retry", "warning", attempt=attempt + 1, cause=e.cause.value, detail=e.detail)
                 self.sleep(self.backoff * (2 ** attempt))
                 attempt += 1
 

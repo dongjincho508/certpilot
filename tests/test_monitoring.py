@@ -79,7 +79,8 @@ def test_exporter_modules_cover_configured_labels():
 
 
 def test_alert_rules_have_severity_and_korean_annotations():
-    rules = [r for g in load("prometheus/rules/cert-expiry.yml")["groups"] for r in g["rules"]]
+    rules = [r for f in (MON / "prometheus/rules").glob("*.yml") for g in yaml.safe_load(f.read_text(encoding="utf-8"))["groups"]
+             for r in g["rules"]]
     names = [r["alert"] for r in rules]
     assert len(names) == len(set(names))
     for r in rules:
@@ -136,9 +137,10 @@ def test_dashboard_promql_parses():
         promql.parse(sub(expr))  # 문법 오류면 예외
 
 
-def test_alert_rule_promql_parses():
+@pytest.mark.parametrize("rule_file", sorted(p.name for p in (MON / "prometheus/rules").glob("*.yml")))
+def test_alert_rule_promql_parses(rule_file):
     promql = pytest.importorskip("promql_parser")
-    for g in load("prometheus/rules/cert-expiry.yml")["groups"]:
+    for g in load(f"prometheus/rules/{rule_file}")["groups"]:
         for r in g["rules"]:
             promql.parse(" ".join(str(r["expr"]).split()))
 
@@ -174,12 +176,36 @@ def test_promtool_check_config_and_rules(staged):
     assert "SUCCESS" in r.stdout
 
 
-def test_promtool_rule_unit_tests():
+@pytest.mark.parametrize("test_file", sorted(p.name for p in (MON / "prometheus/tests").glob("*.test.yml")))
+def test_promtool_rule_unit_tests(test_file):
     pt = tool("promtool")
     if not pt:
         pytest.skip("promtool 없음")
-    r = run([pt, "test", "rules", str(MON / "prometheus/tests/cert-expiry.test.yml")])
+    r = run([pt, "test", "rules", str(MON / "prometheus/tests" / test_file)])
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_every_rule_file_has_a_unit_test_file():
+    rules = {p.stem for p in (MON / "prometheus/rules").glob("*.yml")}
+    tested = {p.name.split(".test.yml")[0].replace("-slow", "") for p in (MON / "prometheus/tests").glob("*.test.yml")}
+    assert rules <= tested, f"단위 테스트가 없는 규칙 파일: {rules - tested}"
+
+
+def test_pushgateway_wired_for_certdeploy_metrics():
+    compose, prom = load("docker-compose.yml"), load("prometheus/prometheus.yml")
+    pg = compose["services"]["pushgateway"]
+    assert ":latest" not in pg["image"] and "--persistence.file=/data/pushgateway.db" in pg["command"]
+    assert "pushgateway-data" in compose["volumes"]
+    job = next(j for j in prom["scrape_configs"] if j["job_name"] == "pushgateway")
+    assert job["honor_labels"] is True and job["static_configs"][0]["targets"] == ["pushgateway:9091"]
+    names = [r["alert"] for g in load("prometheus/rules/certdeploy.yml")["groups"] for r in g["rules"]]
+    assert {"CertDeployTargetFailed", "CertDeployStale", "CertDeployNotRunning", "CertDeployIssueFailing"} <= set(names)
+
+
+def test_dashboard_has_certdeploy_panels():
+    d = json.loads((MON / "grafana/dashboards/cert-overview.json").read_text(encoding="utf-8"))
+    titles = [p["title"] for p in d["panels"]]
+    assert any("certdeploy" in t for t in titles) and len([t for t in titles if "certdeploy" in t]) >= 3
 
 
 def test_amtool_check_config(staged):
@@ -303,19 +329,10 @@ def test_inventory_snapshot_unknown_serial_and_unreachable(prom, tmp_path, capsy
     assert inv.main(["--url", "http://127.0.0.1:9", "list"]) == 3
 
 
-# ------------------------------------------------------------------ 갱신 스크립트 초안(문법만)
-@pytest.mark.parametrize("name", ["lego-renew.sh", "deploy.sh"])
-def test_renewal_shell_scripts_have_valid_syntax(name):
-    r = run(["bash", "-n", str(MON / "renewal" / name)])
-    assert r.returncode == 0, r.stderr
-
-
-def test_deploy_hook_does_not_let_ssh_consume_loop_input():
-    text = (MON / "renewal/deploy.sh").read_text(encoding="utf-8")
-    assert "ssh -n" in text and "<&3" in text and "3< " in text   # 대상 목록이 첫 줄에서 끊기는 고전적 버그 방지
-
-
-def test_renewal_example_targets_format():
-    for line in (MON / "renewal/targets.conf.example").read_text(encoding="utf-8").splitlines():
-        if line.strip() and not line.startswith("#"):
-            assert len(line.split("|")) >= 4
+def test_bind_mounts_have_selinux_label_for_rocky():
+    """Rocky/RHEL(SELinux enforcing)에서 컨테이너가 바인드 마운트 파일을 읽으려면 z 라벨이 필요하다."""
+    c = load("docker-compose.yml")
+    for name, svc in c["services"].items():
+        for v in svc.get("volumes", []):
+            if str(v).startswith("./"):
+                assert str(v).endswith(":ro,z"), f"{name}: {v}"

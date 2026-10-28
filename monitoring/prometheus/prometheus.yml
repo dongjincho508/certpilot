@@ -36,6 +36,11 @@ scrape_configs:
   - job_name: ssl-exporter-self
     static_configs:
       - targets: ["ssl-exporter:9219"]
+  # certdeploy 실행 결과(Pushgateway 경유). honor_labels: 푸시한 job/cert 레이블을 그대로 유지
+  - job_name: pushgateway
+    honor_labels: true
+    static_configs:
+      - targets: ["pushgateway:9091"]
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]

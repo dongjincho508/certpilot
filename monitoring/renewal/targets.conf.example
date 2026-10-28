@@ -1,3 +1,0 @@
-# 이름|방식|SSH 대상|원격 경로 접두(.crt/.key 가 붙음)|확인용 host:port
-web-main|apache|deploy@www.univ.example|/etc/ssl/univ/wildcard|www.univ.example:443
-# sugang|tomcat|deploy@sugang.univ.example|/opt/tomcat/conf/ssl/wildcard|sugang.univ.example:8443

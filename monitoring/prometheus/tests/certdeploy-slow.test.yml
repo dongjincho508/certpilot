@@ -1,0 +1,70 @@
+# promtool test rules — certdeploy 지표 기반 알림(시간 단위 척도). 평가 간격을 1시간으로 두어 며칠 단위 시나리오를 빠르게 검증한다.
+rule_files:
+  - ../rules/certdeploy.yml
+evaluation_interval: 1h
+
+tests:
+  - name: 정체 - 마지막 성공이 3일/7일 넘으면 단계별 발동
+    interval: 1h
+    input_series:
+      # 시각 0 = 마지막 성공. 아래 시리즈는 상수(마지막 성공 시각 0)이므로 경과 = 평가 시각
+      - series: 'certdeploy_last_success_timestamp_seconds{cert="wildcard"}'
+        values: '0+0x400'
+      - series: 'certdeploy_last_success_timestamp_seconds{cert="portal"}'
+        values: '604800+0x400'           # 7일 시점에 성공한 것으로 간주(= 이후 경과는 더 짧음)
+    alert_rule_test:
+      - eval_time: 48h                   # 2일: 아직 아님
+        alertname: CertDeployStale
+        exp_alerts: []
+      - eval_time: 80h                   # 3일 8시간(+for 30m 충족)
+        alertname: CertDeployStale
+        exp_alerts:
+          - exp_labels: {severity: warning, cert: wildcard}
+            exp_annotations:
+              summary: "certdeploy 성공 실행이 3일 넘게 없음: wildcard"
+              description: "wildcard 의 마지막 정상 실행 이후 3d 8h 0m 0s 지났습니다. 타이머·서버·실패 원인을 확인하세요."
+      - eval_time: 80h
+        alertname: CertDeployStaleCritical
+        exp_alerts: []
+      - eval_time: 170h                  # 7일 2시간
+        alertname: CertDeployStaleCritical
+        exp_alerts:
+          - exp_labels: {severity: critical, cert: wildcard}
+            exp_annotations:
+              summary: "certdeploy 성공 실행이 7일 넘게 없음: wildcard"
+              description: "wildcard 의 마지막 정상 실행 이후 7d 2h 0m 0s 지났습니다. 인증서 갱신이 중단되었을 수 있습니다."
+
+  - name: 실행 중단(데드맨)과 연속 발급 실패
+    interval: 1h
+    input_series:
+      - series: 'certdeploy_last_run_timestamp_seconds{cert="wildcard"}'
+        values: '0+0x100'
+      - series: 'certdeploy_issue_failures{cert="wildcard"}'
+        values: '0 1 2 2 2 0+0x95'
+      - series: 'up{job="pushgateway",instance="pushgateway:9091"}'
+        values: '1 1 0+0x97'
+    alert_rule_test:
+      - eval_time: 60h                   # 2.5일간 실행 기록 없음
+        alertname: CertDeployNotRunning
+        exp_alerts:
+          - exp_labels: {severity: warning, cert: wildcard}
+            exp_annotations:
+              summary: "certdeploy 가 이틀 넘게 실행되지 않음: wildcard"
+              description: "마지막 실행 이후 2d 12h 0m 0s 지났습니다. systemd 타이머(certdeploy-renew.timer)와 발급 서버 상태를 확인하세요."
+      - eval_time: 4h                    # 연속 실패 2 이상이 5분 넘게 지속
+        alertname: CertDeployIssueFailing
+        exp_alerts:
+          - exp_labels: {severity: warning, cert: wildcard}
+            exp_annotations:
+              summary: "인증서 발급·갱신이 연속 실패 중: wildcard"
+              description: "wildcard 인증서 발급/갱신이 연속 2회 실패했습니다(DNS-01 연동·속도 제한·네트워크 확인)."
+      - eval_time: 10h                   # 성공해 0 으로 복귀
+        alertname: CertDeployIssueFailing
+        exp_alerts: []
+      - eval_time: 5h
+        alertname: CertDeployPushgatewayDown
+        exp_alerts:
+          - exp_labels: {severity: warning, job: pushgateway, instance: "pushgateway:9091"}
+            exp_annotations:
+              summary: "Pushgateway 중단"
+              description: "Pushgateway 가 응답하지 않아 certdeploy 결과를 수집할 수 없습니다."

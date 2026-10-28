@@ -3,10 +3,11 @@ name = "certpilot"
 version = "0.2.0"
 description = "Linux 서버 SSL/TLS 인증서 조회·만료 모니터링"
 requires-python = ">=3.11"
-dependencies = ["flask>=2.3", "paramiko>=3.4", "cryptography>=42", "click>=8.1", "werkzeug>=2.2", "gunicorn>=21"]
+dependencies = ["flask>=2.3", "paramiko>=3.4", "cryptography>=42", "click>=8.1", "werkzeug>=2.2", "gunicorn>=21", "pyyaml>=6"]
 
 [project.scripts]
 certpilot = "certpilot_cli.cli:main"
+certdeploy = "certdeploy.cli:main"
 
 [tool.setuptools]
-packages = ["certpilot_core", "certpilot_cli", "certpilot_api"]
+packages = ["certpilot_core", "certpilot_cli", "certpilot_api", "certdeploy"]

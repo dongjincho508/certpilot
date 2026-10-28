@@ -1,0 +1,27 @@
+# promtool test rules — certdeploy 지표 기반 알림
+rule_files:
+  - ../rules/certdeploy.yml
+evaluation_interval: 1m
+
+tests:
+  - name: 대상 실패는 5분 지속 시 발동, 성공 대상은 무관
+    interval: 1m
+    input_series:
+      - series: 'certdeploy_target_ok{cert="wildcard",target="web-1"}'
+        values: '1+0x30'
+      - series: 'certdeploy_target_ok{cert="wildcard",target="web-2"}'
+        values: '0+0x30'
+      - series: 'certdeploy_target_ok{cert="wildcard",target="blip"}'
+        values: '0 0 1+0x28'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: CertDeployTargetFailed
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: CertDeployTargetFailed
+        exp_alerts:
+          - exp_labels: {severity: critical, cert: wildcard, target: web-2}
+            exp_annotations:
+              summary: "인증서 배포 실패 상태: wildcard/web-2"
+              description: "certdeploy 마지막 실행에서 wildcard 인증서의 web-2 배포가 실패(또는 롤백)했습니다. `certdeploy report` 와 서버 로그를 확인하세요."
+
