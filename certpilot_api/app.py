@@ -23,6 +23,35 @@ def _err(code: str, message: str, status: int):
     return jsonify({"error": {"code": code, "message": message}}), status
 
 
+def _bootstrap_admin(cfg, store, auth, audit) -> None:
+    """최초 관리자 생성. 이미 있으면 건드리지 않고, CERTPILOT_ADMIN_RESET_PASSWORD=1 일 때만 환경변수
+    비밀번호로 복구(재설정·잠금 해제)한다. 실패해도 서버는 뜨고 원인만 stderr 에 남긴다(비밀번호 값 미기록)."""
+    import sys
+    user, password = cfg["ADMIN_USER"], cfg["ADMIN_PASSWORD"]
+    if not user or not password:
+        print("경고: CERTPILOT_ADMIN_USER / CERTPILOT_ADMIN_PASSWORD 가 설정되지 않았습니다.",
+              file=sys.stderr, flush=True)
+        return
+    try:
+        existing = store.get_user(user)
+        if existing is None:
+            auth.create_user(user, password, ADMIN)
+            print(f"알림: 최초 관리자 '{user}' 를 생성했습니다.", file=sys.stderr, flush=True)
+        elif cfg["ADMIN_RESET"]:
+            auth.reset_password(user, password)
+            audit.write({"event_type": "admin_password_reset", "description": user,
+                         "details": {"actor": "env", "security": True}})
+            print(f"알림: 관리자 '{user}' 의 비밀번호를 환경변수 값으로 재설정했습니다. "
+                  "복구 후 CERTPILOT_ADMIN_RESET_PASSWORD 를 제거하세요.", file=sys.stderr, flush=True)
+        else:
+            print(f"알림: 관리자 '{user}' 는 이미 존재합니다(환경변수 비밀번호는 무시됨). "
+                  "비밀번호를 잊었다면 CERTPILOT_ADMIN_RESET_PASSWORD=1 로 재배포하세요.",
+                  file=sys.stderr, flush=True)
+    except AuthError as e:
+        print(f"오류: 관리자 생성/재설정 실패 — {e.message} (CERTPILOT_ADMIN_USER/PASSWORD 를 확인하세요)",
+              file=sys.stderr, flush=True)
+
+
 def create_app(config: Optional[dict] = None, executor_factory: Optional[Callable] = None,
                probe=None, clock: Callable = utcnow, sleep: Optional[Callable] = None) -> Flask:
     cfg = {
@@ -30,6 +59,7 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
         "AUDIT_DIR": os.environ.get("CERTPILOT_AUDIT_DIR"),
         "ADMIN_USER": os.environ.get("CERTPILOT_ADMIN_USER"),
         "ADMIN_PASSWORD": os.environ.get("CERTPILOT_ADMIN_PASSWORD"),
+        "ADMIN_RESET": os.environ.get("CERTPILOT_ADMIN_RESET_PASSWORD") == "1",
         "SECURE_COOKIE": os.environ.get("CERTPILOT_SECURE_COOKIE", "1") == "1",
         "IDLE_MINUTES": int(os.environ.get("CERTPILOT_IDLE_MINUTES", "30")),
         **(config or {}),
@@ -52,13 +82,7 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
     auth = AuthService(store, clock=clock, idle_minutes=cfg["IDLE_MINUTES"],
                        **{k: cfg[k] for k in ("max_failures", "lock_minutes", "max_sessions") if k in cfg})
 
-    if cfg["ADMIN_USER"] and cfg["ADMIN_PASSWORD"] and not store.get_user(cfg["ADMIN_USER"]):
-        try:
-            auth.create_user(cfg["ADMIN_USER"], cfg["ADMIN_PASSWORD"], ADMIN)
-        except AuthError as e:  # 서버가 죽지 않도록 하고, 원인은 로그에 명확히 남긴다 (비밀번호 값은 기록하지 않음)
-            import sys
-            print(f"오류: 최초 관리자 생성 실패 — {e.message} (CERTPILOT_ADMIN_USER/PASSWORD 를 확인하세요)",
-                  file=sys.stderr, flush=True)
+    _bootstrap_admin(cfg, store, auth, audit)
 
     app = Flask(__name__, static_folder=None)
     app.extensions["certpilot"] = {"store": store, "audit": audit, "service": service, "auth": auth}

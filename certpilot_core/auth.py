@@ -110,3 +110,13 @@ class AuthService:
         self.store.update_user(username, password_hash=generate_password_hash(new))
         for sess in self.store.user_sessions(username):
             self.store.delete_session(sess["token_hash"])
+
+    def reset_password(self, username: str, new: str) -> None:
+        """운영자 복구용: 현재 비밀번호 확인 없이 재설정(정책 검증 적용), 잠금 해제, 기존 세션 폐기"""
+        if not self.store.get_user(username):
+            raise AuthError("not_found", "사용자를 찾을 수 없습니다.")
+        validate_password(username, new, self.min_length)
+        self.store.update_user(username, password_hash=generate_password_hash(new),
+                               failed_count=0, locked_until=None)
+        for sess in self.store.user_sessions(username):
+            self.store.delete_session(sess["token_hash"])

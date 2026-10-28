@@ -26,7 +26,14 @@
 - 헬스체크 `/health`, HTTPS 는 Render 가 종단하므로 `CERTPILOT_SECURE_COOKIE=1`(쿠키 Secure) 이 켜져 있다.
 - 관리자 최초 생성은 `CERTPILOT_ADMIN_USER`/`PASSWORD` 로 1회(이미 있으면 건너뜀). 이후 사용자는 UI 에서 추가한다.
 
-## 4. 점검
+## 4. 로그인이 안 될 때 ("계정 또는 비밀번호가 올바르지 않습니다")
+
+최초 관리자는 **계정이 없을 때 한 번만** 환경변수로 만들어지고, 이후 환경변수 비밀번호를 바꿔도 반영되지 않는다.
+1. Render 로그에서 시작 메시지를 확인한다: `최초 관리자 ... 생성` / `이미 존재` / `관리자 생성/재설정 실패 — 사유`
+2. 비밀번호를 모르거나 환경변수와 다르면 **복구**: 환경변수에 `CERTPILOT_ADMIN_PASSWORD`(새 값, 정책 충족)와 `CERTPILOT_ADMIN_RESET_PASSWORD=1` 을 넣고 재배포 → 로그인 확인 → **`CERTPILOT_ADMIN_RESET_PASSWORD` 삭제** 후 재배포(남겨두면 재시작마다 덮어쓴다). 복구는 감사 로그(`admin_password_reset`)에 남고 잠금도 풀린다.
+3. 계정명은 `CERTPILOT_ADMIN_USER` 값(기본 `admin`)과 정확히 같아야 한다. 5회 실패 시 15분 잠금(메시지가 "잠겼습니다"로 바뀜).
+
+## 5. 점검
 
 | 증상 | 원인 |
 |---|---|
@@ -36,5 +43,5 @@
 | 로그인 직후 로그아웃 | HTTP 로 접속(Secure 쿠키). HTTPS 주소로 접속 |
 | 전체 조회가 오래 걸려 실패 | 서버가 많으면 서버 수 ÷ 20 × 서버당 시간. 대규모는 비동기 작업 큐 이월 항목 I-3 |
 
-## 5. Vercel 과 함께 쓸 때
+## 6. Vercel 과 함께 쓸 때
 UI 만 Vercel 에 둘 수도 있으나 필수는 아니다. 그 경우 `vercel.json` 의 rewrites 로 `/auth`, `/servers`, `/scan`, `/users`, `/audit-logs`, `/export.csv` 를 Render 주소로 넘겨 **같은 출처**로 보이게 해야 `SameSite=Strict` 쿠키가 동작한다.
