@@ -319,3 +319,12 @@ def test_renewal_example_targets_format():
     for line in (MON / "renewal/targets.conf.example").read_text(encoding="utf-8").splitlines():
         if line.strip() and not line.startswith("#"):
             assert len(line.split("|")) >= 4
+
+
+def test_bind_mounts_have_selinux_label_for_rocky():
+    """Rocky/RHEL(SELinux enforcing)에서 컨테이너가 바인드 마운트 파일을 읽으려면 z 라벨이 필요하다."""
+    c = load("docker-compose.yml")
+    for name, svc in c["services"].items():
+        for v in svc.get("volumes", []):
+            if str(v).startswith("./"):
+                assert str(v).endswith(":ro,z"), f"{name}: {v}"

@@ -19,6 +19,7 @@
 | ❌ 발급·배포 | 하지 않는다. `renewal/` 의 lego 초안과 배포 훅을 사용 → [갱신 자동화](../docs/ops/acme-automation.md) |
 
 ## 설치 (교내 VM 1대, Docker 필요)
+> **Rocky Linux 10 기준 전 과정(OS 설치·SELinux·방화벽·HTTPS 역프록시·운영)은 [Rocky 10 구축 가이드](../docs/ops/rocky-linux-deploy.md)** 를 따른다. 아래는 요약.
 이 VM 은 **감시 대상 서버의 포트에 접속할 수 있는 망**에 있어야 한다(외부 클라우드에서는 사설망 서버를 볼 수 없다).
 ```bash
 cd monitoring
@@ -78,7 +79,7 @@ python scripts/cert_inventory.py check --snapshot before.csv -o result.csv     #
 | 실제 동작 | ✅ 실제 ssl_exporter + Prometheus + Alertmanager 를 로컬에서 띄워 만료/임박/갱신 지연/조회 실패 알림이 웹훅까지 전달되는 것 확인 |
 | 대시보드 쿼리 | ✅ 모든 패널의 PromQL 을 실제 Prometheus 에서 실행해 결과 확인 |
 | **Grafana 화면 렌더링** | ❌ 직접 확인하지 못함(실행 환경에서 Grafana 를 받을 수 없었음). 첫 접속 후 패널 표시를 확인해 주세요 |
-| **docker compose 기동** | ❌ 직접 실행하지 못함(Docker 데몬 없음). 이미지 태그는 ssl_exporter 2.4.3·Prometheus 3.5.0·Alertmanager 0.28.1 로 바이너리 동작을 확인했고 Grafana 11.6.0 은 미확인 |
+| **docker compose 기동** | ❌ 직접 실행하지 못함(Docker 데몬 없음). 이미지 태그 4종은 Docker Hub 에 **실재함을 확인**했고, ssl_exporter·Prometheus·Alertmanager 는 같은 버전 바이너리의 동작도 확인했다 |
 | 갱신 스크립트(`renewal/`) | ⚠ 초안. 문법 검사만 했고 실제 발급·배포는 시험하지 않았다 |
 
 실행: `pytest tests/test_monitoring.py` (promtool/amtool 이 PATH 에 있거나 `PROMTOOL`/`AMTOOL` 환경변수로 지정되면 도구 검증도 수행, 없으면 해당 항목은 건너뜀). CI 에서는 릴리스 바이너리를 내려받아 전체 검증한다.

@@ -1,6 +1,8 @@
 # 인증서 만료 감시 스택: ssl_exporter → Prometheus(규칙·이력 1년) → Alertmanager(메일·웹훅) + Grafana(대시보드)
 # 사용:  cp .env.example .env  (비밀번호 수정)  →  docker compose up -d
 # 이 스택은 감시 대상 서버에 TLS 로 접속할 수 있는 네트워크(교내망)의 VM 에서 실행해야 한다.
+# 바인드 마운트의 ':ro,z' 는 SELinux(Rocky/RHEL 계열 기본 enforcing) 라벨 설정이며, SELinux 가 없는 환경에서는 무시된다.
+# 주의: 이 compose 파일의 소스 경로(./...)는 프로젝트 폴더 안이어야 한다. /home, /etc 같은 시스템 경로에 z 를 붙이면 안 된다.
 name: cert-monitor
 
 services:
@@ -9,7 +11,7 @@ services:
     command:
       - --config.file=/etc/ssl_exporter/ssl_exporter.yml
     volumes:
-      - ./ssl_exporter/ssl_exporter.yml:/etc/ssl_exporter/ssl_exporter.yml:ro
+      - ./ssl_exporter/ssl_exporter.yml:/etc/ssl_exporter/ssl_exporter.yml:ro,z
     restart: unless-stopped
     networks: [mon]
 
@@ -21,9 +23,9 @@ services:
       - --storage.tsdb.retention.time=400d       # 인증서 교체·갱신 이력을 1년 이상 보관
       - --web.enable-lifecycle                   # curl -X POST localhost:9090/-/reload 로 설정 재적재
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./prometheus/rules:/etc/prometheus/rules:ro
-      - ./prometheus/targets:/etc/prometheus/targets:ro
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro,z
+      - ./prometheus/rules:/etc/prometheus/rules:ro,z
+      - ./prometheus/targets:/etc/prometheus/targets:ro,z
       - prometheus-data:/prometheus
     ports:
       - "127.0.0.1:9090:9090"                    # 외부 노출 안 함(필요하면 역프록시 + 인증)
@@ -38,9 +40,9 @@ services:
       - --storage.path=/alertmanager
       - --cluster.listen-address=                # 단일 인스턴스 운영
     volumes:
-      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
-      - ./alertmanager/templates:/etc/alertmanager/templates:ro
-      - ./alertmanager/secrets:/etc/alertmanager/secrets:ro   # secrets.example 를 복사해 값 입력
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro,z
+      - ./alertmanager/templates:/etc/alertmanager/templates:ro,z
+      - ./alertmanager/secrets:/etc/alertmanager/secrets:ro,z   # secrets.example 를 복사해 값 입력
       - alertmanager-data:/alertmanager
     ports:
       - "127.0.0.1:9093:9093"
@@ -60,8 +62,8 @@ services:
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/cert-overview.json
     volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro,z
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro,z
       - grafana-data:/var/lib/grafana
     ports:
       - "${GRAFANA_BIND:-127.0.0.1}:3000:3000"   # 교내 접속이 필요하면 GRAFANA_BIND=0.0.0.0 + HTTPS 역프록시 권장
