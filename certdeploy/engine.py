@@ -7,6 +7,7 @@
 """
 import logging
 import os
+import subprocess
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -19,7 +20,7 @@ from .handlers import KEY_KINDS, FileSpec
 from .notify import NullNotifier
 from .state import State
 from .transport import LocalTransport, SSHTransport, Transport, TransportError
-from .verify import VerifyError, tls_serial
+from .verify import VerifyError, http_health, tls_serial
 
 log = logging.getLogger("certdeploy")
 
@@ -47,12 +48,16 @@ class Deployer:
     def __init__(self, cfg: Config, bundle: Bundle, state: State,
                  transport_factory: Optional[Callable[[dict], Transport]] = None,
                  verifier: Callable[..., int] = tls_serial, notifier=None,
+                 health_checker: Callable[..., None] = http_health,
+                 hook_runner: Optional[Callable] = None,
                  sleep: Callable[[float], None] = time.sleep,
                  clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
                  environ=os.environ):
         self.cfg, self.bundle, self.state = cfg, bundle, state
         self.transport_factory = transport_factory or (lambda tr: make_transport(tr, cfg.options.command_timeout))
         self.verifier, self.notifier = verifier, notifier or NullNotifier()
+        self.health_checker = health_checker
+        self.hook_runner = hook_runner or self._run_hook
         self.sleep, self.clock, self.environ = sleep, clock, environ
 
     # ---------------------------------------------------------------- 계획
@@ -67,8 +72,15 @@ class Deployer:
             if t.verify and not self.bundle.covers(t.verify.sni or t.verify.host):
                 problems.append(f"{t.name}: 인증서 SAN 이 {t.verify.sni or t.verify.host} 를 포함하지 않습니다")
             for f in t.files:
-                if f.password_env and not self.environ.get(f.password_env):
-                    problems.append(f"{t.name}: 환경변수 {f.password_env} 가 설정되지 않았습니다")
+                if f.content in ("pkcs12", "jks"):
+                    try:
+                        ok = bool(self._password(f))
+                    except DeployFailure as e:
+                        problems.append(f"{t.name}: {e}")
+                        continue
+                    if not ok:
+                        what = f"환경변수 {f.password_env}" if f.password_env else f"파일 {f.password_file}"
+                        problems.append(f"{t.name}: 키스토어 비밀번호({what})를 얻을 수 없습니다")
         return problems
 
     def plan(self, only=None) -> List[str]:
@@ -84,6 +96,20 @@ class Deployer:
             lines.append(f"    확인: {('%s:%d' % (t.verify.host, t.verify.port)) if t.verify else '없음(TLS 확인을 하지 않음)'}")
         return lines
 
+    def _password(self, f: FileSpec) -> Optional[str]:
+        if f.password_env and self.environ.get(f.password_env):
+            return self.environ[f.password_env]
+        if f.password_file:
+            try:
+                st = os.stat(f.password_file)
+                if st.st_mode & 0o077:
+                    raise DeployFailure(f"비밀번호 파일 권한이 너무 넓습니다(600 필요): {f.password_file}")
+                with open(f.password_file, encoding="utf-8") as fh:
+                    return fh.read().strip()
+            except OSError:
+                return None
+        return None
+
     # ---------------------------------------------------------------- 내용 생성
     def _content(self, f: FileSpec) -> bytes:
         b = self.bundle
@@ -95,9 +121,9 @@ class Deployer:
             return b.chain_pem()
         if f.content == "key":
             return b.key_pem()
-        pw = self.environ.get(f.password_env or "")
+        pw = self._password(f)
         if not pw:
-            raise DeployFailure(f"환경변수 {f.password_env} 가 설정되지 않았습니다")
+            raise DeployFailure(f"키스토어 비밀번호를 얻을 수 없습니다({f.password_env or f.password_file})")
         try:
             return b.pkcs12(pw, f.alias, f.legacy_pkcs12) if f.content == "pkcs12" else b.jks(pw, f.alias)
         except BundleError as e:
@@ -125,10 +151,45 @@ class Deployer:
         if not t.verify:
             return None
         try:
-            return self.verifier(t.verify.host, t.verify.port, t.verify.sni)
+            return self._tls(t)
         except VerifyError as e:
             log.info("[%s] 현재 서빙 인증서를 확인하지 못함: %s", t.name, e)
             return None
+
+    def _tls(self, t: Target) -> int:
+        v = t.verify
+        if v.strict:
+            return self.verifier(v.host, v.port, v.sni, strict=True, cafile=v.ca_file, lenient=v.lenient_x509)
+        return self.verifier(v.host, v.port, v.sni)
+
+    def _hook_env(self, t: Target, status: str = "") -> dict:
+        """훅에는 최소 환경만 전달한다. 키스토어 비밀번호 등 certdeploy 의 비밀 환경변수가 새지 않도록
+        PATH/LANG 과 CERTDEPLOY_* 만 주고, 필요한 변수는 대상의 hook_env 에 이름을 적어 명시적으로 허용한다."""
+        env = {k: self.environ[k] for k in ("PATH", "LANG", "HOME") if k in self.environ}
+        env.update({k: self.environ[k] for k in t.hook_env if k in self.environ})
+        env.update({"CERTDEPLOY_TARGET": t.name, "CERTDEPLOY_SERIAL": f"{self.bundle.serial:x}",
+                    "CERTDEPLOY_STATUS": status, "CERTDEPLOY_HOST": t.transport.get("host", "")})
+        return env
+
+    @staticmethod
+    def _last(out) -> str:
+        lines = (out or "").strip().splitlines()
+        return lines[-1][:200] if lines else "원인 불명"
+
+    @staticmethod
+    def _run_hook(cmd: str, env: dict, timeout: int):
+        p = subprocess.run(["sh", "-c", cmd], env=env, capture_output=True, text=True, timeout=timeout)
+        return p.returncode, (p.stderr or p.stdout)
+
+    def _post_hook(self, t: Target, status: str) -> str:
+        """post_cmd 실행. 실패해도 배포 결과는 바꾸지 않고 경고 문구만 돌려준다."""
+        if not t.post_cmd:
+            return ""
+        try:
+            rc, out = self.hook_runner(t.post_cmd, self._hook_env(t, status), self.cfg.options.command_timeout)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return f" (post_cmd 실행 오류: {type(e).__name__})"
+        return "" if rc == 0 else f" (post_cmd 실패: {self._last(out)})"
 
     def _deploy_target(self, t: Target, force: bool, dry_run: bool) -> TargetResult:
         new = self.bundle.serial
@@ -141,6 +202,17 @@ class Deployer:
             return TargetResult(t.name, "skipped", "이미 배포 기록이 있음(TLS 확인 미설정 대상)", before)
         if dry_run:
             return TargetResult(t.name, "dry_run", "실행하지 않음(계획만)", before)
+        if t.pre_cmd:                                 # 예: 로드밸런서에서 이 서버 제외. 실패하면 아무것도 바꾸지 않는다
+            try:
+                rc, out = self.hook_runner(t.pre_cmd, self._hook_env(t, "pre"), self.cfg.options.command_timeout)
+            except (OSError, subprocess.TimeoutExpired) as e:
+                rc, out = 1, type(e).__name__
+            if rc != 0:
+                msg = f"pre_cmd 실패 — 변경 없이 중단: {self._last(out)}"
+                self.state.set_target(t.name, status="failed", error=msg, failed_at=self.clock().isoformat())
+                self.state.save()
+                self.notifier.fire(t.name, f"인증서 배포 중단: {t.name}", msg, "warning")
+                return TargetResult(t.name, "failed", msg, before)
         ts = self.clock().strftime("%Y%m%d%H%M%S")
         installed: List[remote.Installed] = []
         transport: Optional[Transport] = None
@@ -149,8 +221,11 @@ class Deployer:
             self._install_all(t, transport, ts, installed)
             self._check_and_reload(t, transport)
             self._verify_new(t)
+            self._health_and_soak(t)
         except (DeployFailure, remote.RemoteError, TransportError) as e:
-            return self._fail(t, transport, installed, before, str(e))
+            r = self._fail(t, transport, installed, before, str(e))
+            r.message += self._post_hook(t, r.status)
+            return r
         try:                                         # 백업 정리 실패는 배포 성공을 뒤집지 않는다
             for f in t.files:
                 remote.prune_backups(transport, f.dest, self.cfg.options.keep_backups)
@@ -162,7 +237,30 @@ class Deployer:
                               backups=[{"dest": i.dest, "backup": i.backup} for i in installed])
         self.state.save()
         self.notifier.resolve(t.name)
-        return TargetResult(t.name, "deployed", "배포·확인 완료" if t.verify else "배포 완료(TLS 확인은 설정 안 됨)", before)
+        msg = "배포·확인 완료" if t.verify else "배포 완료(TLS 확인은 설정 안 됨)"
+        return TargetResult(t.name, "deployed", msg + self._post_hook(t, "deployed"), before)
+
+    def _health_and_soak(self, t: Target) -> None:
+        """HTTP 헬스체크 → (설정 시) 소크: 일정 시간 동안 새 인증서와 헬스가 유지되는지 반복 확인."""
+        def once():
+            if t.health:
+                try:
+                    self.health_checker(t.health.url, t.health.expect, t.health.timeout, t.health.insecure)
+                except VerifyError as e:
+                    raise DeployFailure(f"헬스체크 실패: {e}")
+        once()
+        if not t.soak_seconds:
+            return
+        rounds = max(1, t.soak_seconds // max(1, t.soak_interval))
+        for _ in range(rounds):
+            self.sleep(t.soak_interval)
+            try:
+                got = self._tls(t)
+            except VerifyError as e:
+                raise DeployFailure(f"소크 중 TLS 확인 실패: {e}")
+            if got != self.bundle.serial:
+                raise DeployFailure(f"소크 중 서빙 인증서가 바뀜(일련번호 {got:x})")
+            once()
 
     def _install_all(self, t, transport, ts, installed):
         for f in t.files:
@@ -188,7 +286,7 @@ class Deployer:
         last = "응답 없음"
         for i in range(o.verify_attempts):
             try:
-                got = self.verifier(t.verify.host, t.verify.port, t.verify.sni)
+                got = self._tls(t)
                 if got == self.bundle.serial:
                     return
                 last = f"다른 인증서가 서빙됨(일련번호 {got:x})"

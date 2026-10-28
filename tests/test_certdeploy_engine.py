@@ -376,3 +376,166 @@ def test_corrupt_state_file_is_reported_cleanly(tmp_path):
                                                 "files": [{"path": str(tmp_path / "x.crt"), "content": "cert"}]}]}))
     r = CliRunner().invoke(main, ["-c", str(cfg), "plan"])
     assert r.exit_code == 1 and "상태 파일을 읽을 수 없습니다" in r.output and "Traceback" not in r.output
+
+
+# ------------------------------------------------------------------ 엄격 TLS 검증 / 헬스체크 / 훅 / 소크 / password_file
+import http.server  # noqa: E402
+
+
+def live_dir_with(tmp_path, name="old", **pki):
+    import shutil
+    cert, key, leaf, _ = make_pki(tmp_path, name=name, **pki)
+    live = tmp_path / "live"
+    live.mkdir(exist_ok=True)
+    shutil.copy(cert, live / "web1.crt")
+    shutil.copy(key, live / "web1.key")
+    os.chmod(live / "web1.key", 0o600)
+    return live, tmp_path / f"{name}.root.pem", leaf
+
+
+def live_target(env, live, port, **verify):
+    return env.target(files=[{"path": str(live / "web1.crt"), "content": "fullchain"},
+                             {"path": str(live / "web1.key"), "content": "key", "mode": "0600"}],
+                      verify={"host": "127.0.0.1", "port": port, "sni": "www.univ.example", **verify})
+
+
+def test_strict_tls_accepts_full_chain(env, tmp_path):
+    ca = {}
+    live, root, old_leaf = live_dir_with(tmp_path, shared_ca=ca)
+    env.cert, env.key, *_ = make_pki(tmp_path / "issued_dir", name="renewed", shared_ca=ca)     # 같은 CA 에서 갱신 발급
+    srv = LiveTls(str(live / "web1.crt"), str(live / "web1.key"))
+    assert tls_serial("127.0.0.1", srv.port, "www.univ.example", strict=True, cafile=str(root)) == old_leaf.serial_number
+    d = env.deployer([live_target(env, live, srv.port, strict=True, ca_file=str(root))], verifier=tls_serial)
+    assert d.deploy()[0].status == "deployed"
+
+
+def test_strict_tls_detects_missing_intermediate_and_rolls_back(env, tmp_path):
+    """중간 CA 가 빠진 인증서를 배포하면 일련번호는 맞아도 체인 검증에서 걸러져 롤백된다."""
+    ca = {}
+    live, root, _ = live_dir_with(tmp_path, shared_ca=ca)
+    # 배포할 새 인증서는 같은 CA 가 발급했지만 체인(중간 CA) 없이 배포되는 상황
+    env.cert, env.key, *_ = make_pki(tmp_path / "issued_dir", name="nochain", chain=False, shared_ca=ca)
+    srv = LiveTls(str(live / "web1.crt"), str(live / "web1.key"))
+    n = Recorder()
+    d = env.deployer([live_target(env, live, srv.port, strict=True, ca_file=str(root))], verifier=tls_serial, notifier=n)
+    r = d.deploy()[0]
+    assert r.status == "rolled_back" and "인증서 검증 실패" in r.message and "issuer" in r.message.lower()
+    assert n.fired
+
+
+def test_strict_tls_hostname_mismatch(tmp_path):
+    live, root, _ = live_dir_with(tmp_path)
+    srv = LiveTls(str(live / "web1.crt"), str(live / "web1.key"))
+    with pytest.raises(VerifyError, match="인증서 검증 실패"):
+        tls_serial("127.0.0.1", srv.port, "evil.other.org", strict=True, cafile=str(root))
+
+
+class Http(http.server.BaseHTTPRequestHandler):
+    code = 200
+
+    def do_GET(self):
+        self.send_response(Http.code)
+        self.end_headers()
+
+    def log_message(self, *a):
+        pass
+
+
+@pytest.fixture
+def http_srv():
+    srv = http.server.HTTPServer(("127.0.0.1", 0), Http)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    Http.code = 200
+    yield f"http://127.0.0.1:{srv.server_port}/health"
+    srv.shutdown()
+
+
+def test_http_health_check_gates_deployment(env, http_srv):
+    from certdeploy.verify import http_health
+    http_health(http_srv)
+    Http.code = 503
+    with pytest.raises(VerifyError, match="503"):
+        http_health(http_srv)
+    t = env.target(health={"url": http_srv, "expect": 200})
+    d = env.deployer([t])
+    d.health_checker = http_health
+    d.verifier = lambda *a, **k: d.bundle.serial
+    (env.web / "web1.crt").write_text("OLD")
+    (env.web / "web1.key").write_text("OLDK")
+    r = d.deploy(force=True)[0]
+    assert r.status == "rolled_back" and "헬스체크 실패" in r.message and "503" in r.message
+    assert (env.web / "web1.crt").read_text() == "OLD"
+    Http.code = 200
+    assert d.deploy(force=True)[0].status == "deployed"
+    with pytest.raises(VerifyError, match="접속 실패"):
+        http_health("http://127.0.0.1:9/x", timeout=1)
+
+
+def test_pre_cmd_failure_changes_nothing_and_post_cmd_gets_status(env):
+    calls = []
+
+    def hooks(cmd, e, timeout):
+        calls.append((cmd, e["CERTDEPLOY_STATUS"], e["CERTDEPLOY_TARGET"]))
+        return (1, "lb api down") if cmd == "drain" else (0, "")
+    d = env.deployer([env.target(pre_cmd="drain", post_cmd="undrain")])
+    d.hook_runner = hooks
+    r = d.deploy()[0]
+    assert r.status == "failed" and "pre_cmd 실패" in r.message and "lb api down" in r.message
+    assert os.listdir(env.web) == [] and calls == [("drain", "pre", "web1")]      # 서버를 건드리지 않음
+    d2 = env.deployer([env.target(pre_cmd="ok-pre", post_cmd="undrain")])
+    d2.hook_runner = hooks
+    assert d2.deploy()[0].status == "deployed"
+    assert ("undrain", "deployed", "web1") in calls
+
+
+def test_post_cmd_runs_after_rollback_and_its_failure_is_only_a_warning(env):
+    seen = []
+    d = env.deployer([env.target(check_cmd="false", post_cmd="undrain")])
+    d.hook_runner = lambda cmd, e, t: (seen.append(e["CERTDEPLOY_STATUS"]) or (2, "boom"))
+    r = d.deploy()[0]
+    assert r.status == "rolled_back" and "post_cmd 실패" in r.message and seen == ["rolled_back"]
+    d2 = env.deployer([env.target(post_cmd="x")])
+    d2.hook_runner = lambda cmd, e, t: (1, "fail")
+    r2 = d2.deploy()[0]
+    assert r2.status == "deployed" and "post_cmd 실패" in r2.message           # 배포 성공은 유지
+
+
+def test_soak_keeps_verifying_and_rolls_back_if_serial_changes(env):
+    sleeps = []
+    state = {"n": 0}
+    d = env.deployer([env.target(soak_seconds=30, soak_interval=10)], sleeps=sleeps)
+    served = file_verifier(env.web / "web1.crt")
+
+    def flaky(host, port, sni=None, **kw):
+        if (env.marks / "web1.log").exists() and (env.web / "web1.crt").exists():
+            state["n"] += 1
+            if state["n"] >= 4:                   # 소크 도중 다른 인증서로 바뀜(예: 롤백된 다른 노드)
+                return 999
+        return served(host, port, sni)
+    d.verifier = flaky
+    (env.web / "web1.crt").write_text("OLD")
+    (env.web / "web1.key").write_text("OLDK")
+    r = d.deploy()[0]
+    assert r.status == "rolled_back" and "소크" in r.message and sleeps[:2] == [10, 10]
+    ok = env.deployer([env.target(soak_seconds=30, soak_interval=10)], sleeps=(s2 := []))
+    ok.verifier = served
+    assert ok.deploy(force=True)[0].status == "deployed" and s2 == [10, 10, 10]
+
+
+def test_keystore_password_file_permissions(env, tmp_path):
+    t = {"name": "tc", "type": "tomcat", "format": "pkcs12", "keystore_path": str(env.web / "ks.p12"),
+         "password_file": str(tmp_path / "pw"), "reload_cmd": "true"}
+    pw = tmp_path / "pw"
+    pw.write_text("changeit\n")
+    os.chmod(pw, 0o644)
+    d = env.deployer([t], verifier=lambda *a, **k: 0)
+    assert any("권한이 너무 넓습니다" in p for p in d.validate_targets())
+    r = d.deploy()[0]
+    assert r.status in ("failed", "rolled_back") and "권한" in r.message
+    os.chmod(pw, 0o600)
+    assert d.validate_targets() == []
+    assert d.deploy(force=True)[0].status == "deployed"
+    from cryptography.hazmat.primitives.serialization import pkcs12
+    assert pkcs12.load_key_and_certificates((env.web / "ks.p12").read_bytes(), b"changeit")[1].serial_number == d.bundle.serial
+    pw.unlink()
+    assert any("비밀번호" in p for p in d.validate_targets())

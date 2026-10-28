@@ -26,6 +26,26 @@
 
 IIS(Windows)는 자동 배포 대상이 아니다. [`deploy-iis.ps1`](../../certdeploy/deploy-iis.ps1) 초안을 수동/별도 자동화로 사용한다.
 
+### 1-1. 추가 기능 요약
+| 구분 | 기능 | 설명 |
+|---|---|---|
+| 발급 | 다중 인증서 | `certificates:` 목록으로 인증서별 lego·대상·상태를 분리(`--cert 이름`) |
+| 발급 | lego 옵션 | `key_type`(ec256 등), `dns_propagation_wait`, HTTP-01(`http_webroot`, 와일드카드 불가) |
+| 발급 | 실패 백오프 | 발급 실패 후 `lego_backoff_minutes`(기본 60) 동안 lego 를 호출하지 않아 속도 제한을 보호. 만료 14일 미만이면 알림이 critical |
+| 발급 | 키 권한 점검 | `validate` 가 개인키 파일·디렉터리 권한이 넓으면 문제로 보고(권장 600/700) |
+| 발급 | 암호화 백업 | `backup`/`restore`: lego 계정·인증서·상태·설정을 AES-256-GCM(scrypt)으로 암호화, 복원 시 경로 이탈 거부 |
+| 배포 | **preflight** | 접속, 대상 디렉터리 쓰기, 여유 공간, 점검/재로드 명령 존재, **sudo 허용(`sudo -n -l`)**, 현재 TLS, 헬스를 변경 없이 확인 |
+| 배포 | 엄격 TLS | `verify.strict: true` — 신뢰 저장소(또는 `ca_file`)로 **체인·호스트명까지** 검증. 중간 CA 누락·호스트명 불일치 탐지 |
+| 배포 | 헬스체크 | `health: {url, expect}` 배포 후 HTTP 상태 확인, 실패 시 롤백 |
+| 배포 | 훅 | `pre_cmd`(실패 시 변경 없이 중단), `post_cmd`(성공·롤백 후, `CERTDEPLOY_STATUS`) — 로드밸런서 제외/복귀 등. **훅에는 PATH/LANG/HOME 과 `CERTDEPLOY_*` 만 전달**(키스토어 비밀번호 등은 숨김), 필요한 변수는 대상의 `hook_env: [변수명]` 으로 명시 허용 |
+| 배포 | 소크 | `soak_seconds`: canary 후 일정 시간 새 인증서·헬스가 유지되는지 반복 확인 |
+| 배포 | defaults/password_file | 대상 공통 설정 병합, 키스토어 비밀번호를 파일(권한 600)로 |
+| 알림·기록 | 직접 알림 | SMTP 메일, 웹훅(Slack·Mattermost·Teams·일반), 성공 요약 선택 |
+| 알림·기록 | 보고서 | `report [--format md\|json]` 마지막 실행 결과 |
+| 알림·기록 | 감사 로그 | `audit_log` 해시 체인 기록, `verify-audit` 로 변조 검증 |
+| 알림·기록 | 지표 | Pushgateway/textfile 지표 → 감시 스택의 알림 규칙·Grafana 패널(정체·데드맨·연속 실패) |
+| 편의 | `scaffold`, `status --format json` | 서버 CSV 로 대상 설정 생성, 기계가 읽는 상태 |
+
 ## 2. 검증 현황 (정직한 범위)
 | 항목 | 상태 |
 |---|---|
@@ -34,6 +54,11 @@ IIS(Windows)는 자동 배포 대상이 아니다. [`deploy-iis.ps1`](../../cert
 | SSH 경유 배포 | ✅ 프로세스 내 SSH 서버(실제 셸 실행)로 끝까지 시험, 호스트 키 불일치·미등록 거부, **개인키가 원격 명령행에 노출되지 않음** 확인 |
 | TLS 반영 확인 / 재로드 실패 시 롤백 | ✅ 실제 TLS 서버로 시험(재로드되지 않는 서비스 시나리오 포함) |
 | Alertmanager 알림 | ✅ **실제 Alertmanager** 에 발생·해소 전송 후 웹훅 전달 확인 |
+| 엄격 TLS·헬스체크·훅·소크·password_file | ✅ 자동 테스트(실제 TLS 서버로 중간 CA 누락·호스트명 불일치 검증 포함) |
+| SMTP·웹훅 알림 | ✅ 가짜 SMTP/HTTP 서버로 형식·성공 요약 제어·실패 무영향 확인. ⚠ 실제 메일 릴레이·Teams/Slack 웹훅은 미시험(Teams 는 Adaptive Card 형식 — 환경에서 확인) |
+| 지표·감시 연동 | ✅ `promtool check metrics` 통과, **실제 Prometheus 가 certdeploy 지표를 수집**해 알림 규칙(`promtool test rules`)·대시보드 쿼리 동작 확인. ⚠ 실제 Pushgateway 컨테이너 기동은 미시험 |
+| 백업·복원 | ✅ 왕복·비밀번호 오류·변조·경로 이탈/링크 거부 |
+| 다중 인증서·백오프·preflight | ✅ 자동 테스트(가짜 lego, 로컬 셸). ⚠ 원격 sudo 허용 점검(`sudo -n -l`)은 실제 sudoers 환경에서 미시험 |
 | lego 호출 | ⚠ **명령 구성·실패 처리만 가짜 lego 로 시험.** 실제 lego 바이너리와 Infoblox 는 이 저장소 개발 환경에서 실행하지 못했다. 옵션·환경변수 이름·산출 파일명은 설치한 lego 로 확인(`lego --help`, `lego dnshelp -c infoblox`) |
 | 실제 Apache/Tomcat/WebtoB/JEUS 서버 | ❌ 미시험(해당 제품의 재로드 동작은 제품 문서로 확인, 아래 3-4) |
 | Windows/IIS | ❌ 자동화 안 함 |
@@ -121,13 +146,28 @@ echo 'TOMCAT_KS_PASS=...' | sudo tee /etc/certdeploy/env >/dev/null && sudo chow
    systemctl list-timers certdeploy-renew.timer
    ```
 
+## 4-1. 감시 스택 연동 (지표 푸시)
+1. 감시 VM: `monitoring/.env` 의 `PUSHGATEWAY_BIND` 를 감시 VM IP 로 바꾸고, **방화벽에서 발급 서버 IP 만 9091 허용**
+   ```bash
+   sudo firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="<발급 서버 IP>" port port="9091" protocol="tcp" accept' && sudo firewall-cmd --reload
+   ```
+2. certdeploy 설정: `notify.pushgateway_url: http://monitor.univ.example:9091` (인증이 필요하면 `pushgateway_user`/`pushgateway_password_env`)
+3. 같은 서버에 node_exporter 가 있다면 `notify.metrics_file`(textfile collector) 방식도 가능
+4. 감시 스택의 알림: `CertDeployTargetFailed`, `CertDeployIssueFailing`, `CertDeployStale`(3일)·`StaleCritical`(7일), `CertDeployNotRunning`(이틀간 실행 없음=타이머/서버 중단)
+
 ## 5. 명령 요약
 | 명령 | 설명 |
 |---|---|
-| `validate` | 설정·인증서·환경변수 점검(종료 코드 1: 문제 있음) |
+| `validate` | 설정·인증서·환경변수·**개인키 권한** 점검(종료 코드 1: 문제 있음) |
+| `preflight [--target N]` | **배포 전 사전 점검**(접속·쓰기 권한·명령·sudo·여유 공간·현재 TLS·헬스). 변경하지 않음 |
 | `plan [--target N]` | 배포 계획 출력(변경 없음) |
 | `deploy [--dry-run] [--force] [--target N] [--continue-on-error]` | 현재 인증서를 배포. 기본: 한 대씩, 실패 시 중단 |
-| `status` | 대상별 마지막 배포 기록과 **현재 서빙 중인 인증서** 대조 |
+| `status [--format json]` | 대상별 마지막 배포 기록과 **현재 서빙 중인 인증서** 대조 |
+| `report [--format md\|json]` | 마지막 실행 보고서 |
+| `verify-audit` | 배포 감사 로그 해시 체인 검증 |
+| `backup --out F --passphrase-env V` / `restore --in F --dest D --passphrase-env V` | 암호화 백업·복원(개인키 포함 — 안전한 곳에 보관) |
+| `scaffold CSV [--user U]` | 서버 목록 CSV(`name,host,type,port,canary,order,cert_path,key_path`)로 targets 설정 조각 생성 |
+| `--cert NAME`(전역 옵션) | `certificates:` 목록 중 하나만 대상으로 실행 |
 | `rollback --target N` | 마지막 배포 이전 파일로 되돌리고 재로드 |
 | `issue [--staging] [--no-deploy]` / `renew` | lego 발급·갱신 후 배포(타이머가 `renew` 를 호출) |
 종료 코드: 0 성공 · 1 배포/점검 문제 · 2 설정·인증서 오류 · 3 다른 작업 실행 중(동시 실행 방지 잠금)
@@ -151,6 +191,7 @@ echo 'TOMCAT_KS_PASS=...' | sudo tee /etc/certdeploy/env >/dev/null && sudo chow
 
 ## 8. 알려진 한계
 - IIS/Windows 자동 배포 없음, 로드밸런서·WAF·방화벽 장비 인증서는 해당 장비 방식으로 별도 교체
-- 대상은 순차 배포(대수가 많으면 시간이 길어짐 — 50대 이하 기준 문제 없음)
+- 대상은 순차 배포(의도적: 한 대씩 확인해야 실패 시 영향이 한 대에 그침. 50대 이하 기준 문제 없음). 병렬 배포는 지원하지 않음
+- `verify.strict` 는 Python 의 엄격 X.509 검사(RFC 5280)를 사용한다 — AKI·KeyUsage 가 없는 구형 사설 CA 인증서는 `lenient_x509: true` 로 완화
 - lego 옵션·산출 파일명 규칙(`*` → `_`)은 lego 버전에 따라 달라질 수 있어 첫 실행에서 확인 필요
 - 롤백은 파일 복원 + 재로드까지이며, 애플리케이션 단의 세션·연결 영향은 제품 특성에 따른다

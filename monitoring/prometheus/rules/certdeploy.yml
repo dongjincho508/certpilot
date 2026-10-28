@@ -1,0 +1,53 @@
+# certdeploy(인증서 발급·자동 배포) 실행 결과 감시. 지표는 certdeploy 가 Pushgateway 로 푸시한다.
+# 핵심 목적: "자동 갱신/배포가 조용히 멈추거나 실패하는 것"을 만료보다 훨씬 먼저 잡는다.
+groups:
+  - name: certdeploy
+    rules:
+      - alert: CertDeployTargetFailed
+        expr: certdeploy_target_ok == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "인증서 배포 실패 상태: {{ $labels.cert }}/{{ $labels.target }}"
+          description: "certdeploy 마지막 실행에서 {{ $labels.cert }} 인증서의 {{ $labels.target }} 배포가 실패(또는 롤백)했습니다. `certdeploy report` 와 서버 로그를 확인하세요."
+
+      - alert: CertDeployIssueFailing
+        expr: certdeploy_issue_failures >= 2
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "인증서 발급·갱신이 연속 실패 중: {{ $labels.cert }}"
+          description: "{{ $labels.cert }} 인증서 발급/갱신이 연속 {{ $value }}회 실패했습니다(DNS-01 연동·속도 제한·네트워크 확인)."
+
+      - alert: CertDeployStale
+        expr: time() - certdeploy_last_success_timestamp_seconds > 86400 * 3
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: "certdeploy 성공 실행이 3일 넘게 없음: {{ $labels.cert }}"
+          description: "{{ $labels.cert }} 의 마지막 정상 실행 이후 {{ $value | humanizeDuration }} 지났습니다. 타이머·서버·실패 원인을 확인하세요."
+
+      - alert: CertDeployStaleCritical
+        expr: time() - certdeploy_last_success_timestamp_seconds > 86400 * 7
+        for: 30m
+        labels: {severity: critical}
+        annotations:
+          summary: "certdeploy 성공 실행이 7일 넘게 없음: {{ $labels.cert }}"
+          description: "{{ $labels.cert }} 의 마지막 정상 실행 이후 {{ $value | humanizeDuration }} 지났습니다. 인증서 갱신이 중단되었을 수 있습니다."
+
+      # 타이머가 죽었거나 발급 서버가 멈춘 경우(데드맨 스위치). 정상이면 하루 2회 실행된다.
+      - alert: CertDeployNotRunning
+        expr: time() - certdeploy_last_run_timestamp_seconds > 86400 * 2
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: "certdeploy 가 이틀 넘게 실행되지 않음: {{ $labels.cert }}"
+          description: "마지막 실행 이후 {{ $value | humanizeDuration }} 지났습니다. systemd 타이머(certdeploy-renew.timer)와 발급 서버 상태를 확인하세요."
+
+      - alert: CertDeployPushgatewayDown
+        expr: up{job="pushgateway"} == 0
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Pushgateway 중단"
+          description: "Pushgateway 가 응답하지 않아 certdeploy 결과를 수집할 수 없습니다."

@@ -29,7 +29,20 @@ services:
       - prometheus-data:/prometheus
     ports:
       - "127.0.0.1:9090:9090"                    # 외부 노출 안 함(필요하면 역프록시 + 인증)
-    depends_on: [ssl-exporter, alertmanager]
+    depends_on: [ssl-exporter, alertmanager, pushgateway]
+    restart: unless-stopped
+    networks: [mon]
+
+  # certdeploy(발급·배포 서버)가 실행 결과 지표를 푸시하는 곳. 발급 서버 IP 에서만 접속되도록 방화벽으로 제한하세요.
+  pushgateway:
+    image: prom/pushgateway:v1.11.1
+    command:
+      - --persistence.file=/data/pushgateway.db     # 재시작해도 마지막 실행 지표 유지
+      - --persistence.interval=5m
+    volumes:
+      - pushgateway-data:/data
+    ports:
+      - "${PUSHGATEWAY_BIND:-127.0.0.1}:9091:9091"  # 발급 서버가 다른 VM 이면 감시 VM 의 IP 로 바인딩(+방화벽 제한)
     restart: unless-stopped
     networks: [mon]
 
@@ -77,4 +90,5 @@ networks:
 volumes:
   prometheus-data: {}
   alertmanager-data: {}
+  pushgateway-data: {}
   grafana-data: {}

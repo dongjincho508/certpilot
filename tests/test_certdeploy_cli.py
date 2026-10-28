@@ -15,6 +15,7 @@ from certdeploy.config import ConfigError, load_config, parse_config
 from certdeploy.issuer import (IssueError, LegoIssuer, build_command, lego_basename, lego_output_paths,
                                parse_env_file)
 from certdeploy.notify import AlertmanagerNotifier
+from lego_fake import install_fake_lego
 from pki_helpers import make_pki
 
 TESTS_DIR = os.path.dirname(__file__)
@@ -180,42 +181,14 @@ def test_notifier_unreachable_never_raises():
 
 
 # ------------------------------------------------------------------ CLI 전 과정 (가짜 lego + 로컬 배포)
-FAKE_LEGO = textwrap.dedent('''\
-    #!{python}
-    """가짜 lego: run/renew 를 흉내 낸다(renew 는 만료가 임박했을 때만 새 인증서를 쓴다)."""
-    import datetime as dt, os, sys
-    sys.path.insert(0, {tests!r})
-    from cryptography import x509
-    from pki_helpers import make_pki
-    from pathlib import Path
-    args = sys.argv[1:]
-    path = Path(args[args.index("--path") + 1]) / "certificates"
-    doms = [args[i + 1] for i, a in enumerate(args) if a == "--domains"]
-    if os.environ.get("FAKE_LEGO_FAIL"):
-        print("acme: error 429 rate limited", file=sys.stderr); sys.exit(1)
-    base = doms[0].replace("*", "_")
-    crt = path / (base + ".crt")
-    if "renew" in args and crt.exists():
-        days = int(args[args.index("--days") + 1])
-        left = (x509.load_pem_x509_certificates(crt.read_bytes())[0].not_valid_after_utc - dt.datetime.now(dt.timezone.utc)).days
-        if left > days:
-            print("no renewal needed"); sys.exit(0)
-    path.mkdir(parents=True, exist_ok=True)
-    c, k, *_ = make_pki(path, name=base, san=tuple(doms))
-    print("certificate written")
-''')
-
-
 @pytest.fixture
 def stack(tmp_path):
-    lego = tmp_path / "fake-lego"
-    lego.write_text(FAKE_LEGO.format(python=sys.executable, tests=TESTS_DIR))
-    lego.chmod(0o755)
+    lego = install_fake_lego(tmp_path)
     web = tmp_path / "web"
     web.mkdir()
     marks = tmp_path / "reloads.log"
     cfg = {"state_dir": str(tmp_path / "state"),
-           "lego": {"binary": str(lego), "email": "ops@univ.example", "dns_provider": "infoblox",
+           "lego": {"binary": lego, "email": "ops@univ.example", "dns_provider": "infoblox",
                     "domains": ["univ.example", "*.univ.example"], "path": str(tmp_path / "lego"), "renew_days": 30},
            "targets": [{"name": "web1", "type": "generic", "check_cmd": "true", "reload_cmd": f"echo r >> {marks}",
                         "files": [{"path": str(web / "site.crt"), "content": "fullchain"},

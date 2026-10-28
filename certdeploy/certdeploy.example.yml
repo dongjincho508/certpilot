@@ -23,6 +23,23 @@ lego:
 
 notify:
   alertmanager_url: http://127.0.0.1:9093    # 배포 실패 시 CertDeployFailed 알림(성공하면 자동 해소)
+  # 메일(SMTP): 실패는 항상, 성공 요약은 on_success 가 true 일 때만. 비밀번호는 환경변수/파일로.
+  # smtp: {host: smtp.univ.example, port: 587, starttls: true, from: cert-deploy@univ.example,
+  #        to: [cert-admin@univ.example], username: cert-deploy, password_env: SMTP_PASSWORD, on_success: true}
+  # 웹훅(Slack·Mattermost: slack, Teams Workflows: teams, 그 밖: generic). URL 의 토큰은 환경변수/파일에만 둔다.
+  # webhook: {url_env: CERTDEPLOY_WEBHOOK_URL, format: slack, on_success: false}
+  # 실행 결과 지표 → 감시 스택의 Pushgateway(방화벽으로 이 서버만 허용) 또는 node_exporter textfile
+  # pushgateway_url: http://monitor.univ.example:9091
+  # metrics_file: /var/lib/node_exporter/textfile/certdeploy.prom
+
+# 변조 탐지 해시 체인 감사 로그(누가·언제·무엇을 배포했는지). 검증: certdeploy verify-audit
+# audit_log: /var/log/certdeploy
+
+# 모든 대상에 공통으로 적용(대상에서 같은 키를 쓰면 그 값이 우선, transport/verify 는 키 단위로 병합)
+# defaults:
+#   transport: {kind: ssh, user: deploy, key_file: /var/lib/certdeploy/.ssh/id_ed25519,
+#               known_hosts: /var/lib/certdeploy/.ssh/known_hosts}
+#   verify: {strict: true}          # 신뢰 저장소로 체인·호스트명까지 검증(중간 CA 누락 탐지). 사설 CA 는 ca_file 지정
 
 options:
   verify_attempts: 6        # 재로드 후 새 인증서가 보일 때까지 재시도 횟수
@@ -41,7 +58,12 @@ targets:
                 known_hosts: /var/lib/certdeploy/.ssh/known_hosts}
     cert_path: /etc/ssl/univ/fullchain.pem     # SSLCertificateFile (서버+중간 CA)
     key_path: /etc/ssl/univ/privkey.pem        # SSLCertificateKeyFile
-    verify: {host: www1.univ.example, port: 443}
+    verify: {host: www1.univ.example, port: 443, strict: true}    # strict: 일련번호뿐 아니라 체인·호스트명도 검증
+    health: {url: https://www1.univ.example/health, expect: 200}   # 배포 후 HTTP 헬스체크(선택)
+    soak_seconds: 300               # canary: 5분간 새 인증서·헬스가 유지되는지 반복 확인한 뒤 다음 대상으로
+    # pre_cmd: /opt/certdeploy/hooks/lb-drain.sh      # 배포 전(예: 로드밸런서에서 제외). 실패하면 변경 없이 중단
+    # post_cmd: /opt/certdeploy/hooks/lb-restore.sh   # 성공·롤백 후(환경변수 CERTDEPLOY_STATUS 로 결과 전달)
+    # hook_env: [LB_API_TOKEN]    # 훅은 최소 환경만 받는다. 훅에 필요한 변수 이름만 명시적으로 허용
 
   - name: web-main
     type: apache
@@ -90,3 +112,13 @@ targets:
   #   type: nginx
   #   cert_path: /etc/ssl/univ/fullchain.pem
   #   key_path: /etc/ssl/univ/privkey.pem
+
+# ---- 여러 인증서를 각각 관리하려면 최상위 certificate/lego/targets 대신 certificates 목록을 쓴다.
+# certificates:
+#   - name: wildcard
+#     lego: {email: cert-admin@univ.example, dns_provider: infoblox, domains: ["univ.example", "*.univ.example"], path: /var/lib/lego/wildcard}
+#     targets: [...]
+#   - name: portal
+#     lego: {email: cert-admin@univ.example, http_webroot: /var/www/html, domains: ["portal.univ.example"], path: /var/lib/lego/portal, key_type: ec256}
+#     targets: [...]
+# 인증서별 상태는 state_dir/<name>/ 에 분리 저장되며, --cert <name> 으로 하나만 실행할 수 있다.

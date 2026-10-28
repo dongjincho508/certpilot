@@ -1,7 +1,11 @@
-"""설정 파일(YAML) 로드와 검증. 비밀번호·토큰은 설정에 쓰지 않고 환경변수 이름으로만 참조한다."""
+"""설정 파일(YAML) 로드와 검증. 비밀번호·토큰은 설정에 쓰지 않고 환경변수 이름/파일 경로로만 참조한다.
+
+구조: 단일 인증서(최상위 certificate/lego/targets)이거나, `certificates:` 목록으로 여러 인증서를 각각 관리.
+"""
+import copy
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 import yaml
 
@@ -10,6 +14,7 @@ from .handlers import FileSpec, SpecError, build_files, default_check, default_r
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 HOST_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$")
 PATH_BAD = re.compile(r"[\x00-\x1f\n]")
+WEBHOOK_FORMATS = ("generic", "slack", "teams")
 
 
 class ConfigError(Exception):
@@ -23,6 +28,17 @@ class Verify:
     host: str
     port: int = 443
     sni: Optional[str] = None
+    strict: bool = False              # True: 신뢰 저장소로 체인·호스트명까지 검증
+    ca_file: Optional[str] = None     # 사설 CA 인 경우 신뢰할 CA 번들
+    lenient_x509: bool = False        # 구형 사설 CA 인증서(확장 누락)용: RFC 5280 엄격 검사만 완화
+
+
+@dataclass
+class Health:
+    url: str
+    expect: int = 200
+    timeout: float = 10.0
+    insecure: bool = False            # True: 인증서 검증 없이 확인(내부 주소 등)
 
 
 @dataclass
@@ -36,6 +52,12 @@ class Target:
     verify: Optional[Verify]
     order: int = 100
     canary: bool = False
+    health: Optional[Health] = None
+    pre_cmd: Optional[str] = None     # certdeploy 서버에서 실행(실패하면 이 대상은 변경 없이 중단)
+    post_cmd: Optional[str] = None    # 성공·롤백 뒤 실행(결과는 환경변수 CERTDEPLOY_STATUS)
+    soak_seconds: int = 0             # 배포 후 이 시간 동안 새 인증서가 유지되는지 반복 확인
+    soak_interval: int = 10
+    hook_env: List[str] = field(default_factory=list)   # 훅에 전달할 환경변수 이름(그 밖의 비밀은 전달하지 않는다)
 
 
 @dataclass
@@ -45,18 +67,82 @@ class Options:
     keep_backups: int = 3
     min_days: float = 1.0
     command_timeout: int = 60
+    lego_backoff_minutes: int = 60    # 발급 실패 후 다음 시도까지 최소 대기(속도 제한 보호)
+
+
+@dataclass
+class SmtpCfg:
+    host: str
+    sender: str
+    to: List[str]
+    port: int = 587
+    starttls: bool = True
+    username: Optional[str] = None
+    password_env: Optional[str] = None
+    password_file: Optional[str] = None
+    on_success: bool = True
+
+
+@dataclass
+class WebhookCfg:
+    url_env: Optional[str] = None
+    url_file: Optional[str] = None
+    format: str = "generic"
+    on_success: bool = False
+
+
+@dataclass
+class NotifyCfg:
+    alertmanager_url: Optional[str] = None
+    smtp: Optional[SmtpCfg] = None
+    webhook: Optional[WebhookCfg] = None
+    pushgateway_url: Optional[str] = None
+    pushgateway_user: Optional[str] = None
+    pushgateway_password_env: Optional[str] = None
+    metrics_file: Optional[str] = None
+
+
+@dataclass
+class CertSet:
+    name: str
+    cert_file: str
+    key_file: str
+    key_password_env: Optional[str]
+    targets: List[Target]
+    options: Options
+    notify: NotifyCfg
+    lego: Optional[dict]
+    state_dir: str                    # 이 인증서의 상태 디렉터리
+    audit_dir: Optional[str] = None
 
 
 @dataclass
 class Config:
     state_dir: str
-    cert_file: str
-    key_file: str
-    key_password_env: Optional[str]
-    targets: List[Target]
+    certs: List[CertSet]
     options: Options = field(default_factory=Options)
-    alertmanager_url: Optional[str] = None
-    lego: Optional[dict] = None
+    notify: NotifyCfg = field(default_factory=NotifyCfg)
+    audit_dir: Optional[str] = None
+
+    def __getattr__(self, name):
+        """인증서가 하나일 때 cfg.targets, cfg.cert_file 같은 접근을 그 인증서로 위임(하위 호환)."""
+        if name == "certs":      # copy/pickle 중 속성이 아직 없을 때의 무한 재귀 방지
+            raise AttributeError(name)
+        if name in ("cert_file", "key_file", "key_password_env", "targets", "lego", "name") and len(self.certs) == 1:
+            return getattr(self.certs[0], name)
+        raise AttributeError(name)
+
+    @property
+    def alertmanager_url(self):
+        return self.notify.alertmanager_url
+
+    def select(self, name: Optional[str]) -> List[CertSet]:
+        if not name:
+            return self.certs
+        found = [c for c in self.certs if c.name == name]
+        if not found:
+            raise ConfigError([f"알 수 없는 인증서 이름: {name} (사용 가능: {', '.join(c.name for c in self.certs)})"])
+        return found
 
 
 def _abs(path, what, problems):
@@ -64,79 +150,181 @@ def _abs(path, what, problems):
         problems.append(f"{what}: 절대 경로여야 합니다: {path!r}")
 
 
+def _merge_defaults(raw: dict, defaults: dict) -> dict:
+    out = copy.deepcopy(defaults)
+    for k, v in raw.items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = {**out[k], **v}
+        else:
+            out[k] = v
+    return out
+
+
+def _parse_options(data, problems) -> Options:
+    opts = Options()
+    for k, v in (data or {}).items():
+        if not hasattr(opts, k):
+            problems.append(f"options.{k}: 알 수 없는 옵션")
+        else:
+            try:
+                setattr(opts, k, type(getattr(opts, k))(v))
+            except (TypeError, ValueError):
+                problems.append(f"options.{k}: 값이 올바르지 않습니다: {v!r}")
+    return opts
+
+
+def _parse_notify(data, problems) -> NotifyCfg:
+    n = NotifyCfg()
+    data = data or {}
+    n.alertmanager_url = data.get("alertmanager_url")
+    n.pushgateway_url = data.get("pushgateway_url")
+    n.pushgateway_user = data.get("pushgateway_user")
+    n.pushgateway_password_env = data.get("pushgateway_password_env")
+    n.metrics_file = data.get("metrics_file")
+    if n.metrics_file:
+        _abs(n.metrics_file, "notify.metrics_file", problems)
+    s = data.get("smtp")
+    if s:
+        if not s.get("host") or not s.get("from") or not s.get("to"):
+            problems.append("notify.smtp: host, from, to 가 필요합니다")
+        else:
+            to = s["to"] if isinstance(s["to"], list) else [x.strip() for x in str(s["to"]).split(",") if x.strip()]
+            n.smtp = SmtpCfg(s["host"], s["from"], to, int(s.get("port", 587)), bool(s.get("starttls", True)),
+                             s.get("username"), s.get("password_env"), s.get("password_file"),
+                             bool(s.get("on_success", True)))
+    w = data.get("webhook")
+    if w:
+        if not (w.get("url_env") or w.get("url_file")):
+            problems.append("notify.webhook: url_env 또는 url_file 이 필요합니다(URL 의 토큰을 설정 파일에 쓰지 않는다)")
+        elif w.get("format", "generic") not in WEBHOOK_FORMATS:
+            problems.append(f"notify.webhook.format 은 {', '.join(WEBHOOK_FORMATS)} 중 하나여야 합니다")
+        else:
+            n.webhook = WebhookCfg(w.get("url_env"), w.get("url_file"), w.get("format", "generic"),
+                                   bool(w.get("on_success", False)))
+    return n
+
+
+def _parse_target(raw, defaults, label_prefix, problems, seen) -> Optional[Target]:
+    name = raw.get("name", "") if isinstance(raw, dict) else ""
+    if not isinstance(raw, dict) or not NAME_RE.match(str(name)):
+        problems.append(f"{label_prefix}: name 은 영문·숫자·._- 64자 이내여야 합니다")
+        return None
+    raw = _merge_defaults(raw, defaults)
+    label = f"target {name}"
+    if name in seen:
+        problems.append(f"{label}: 이름이 중복됩니다")
+    seen.add(name)
+    tr = raw.get("transport") or {"kind": "local"}
+    kind = tr.get("kind")
+    if kind == "ssh":
+        if not tr.get("host") or not HOST_RE.match(str(tr.get("host", ""))) or not tr.get("user"):
+            problems.append(f"{label}: ssh transport 에는 host, user 가 필요합니다")
+    elif kind != "local":
+        problems.append(f"{label}: transport.kind 는 local 또는 ssh 여야 합니다")
+    try:
+        files = build_files(raw)
+    except SpecError as e:
+        problems.append(f"{label}: {e}")
+        return None
+    for f in files:
+        _abs(f.dest, f"{label} 파일 경로", problems)
+    check = raw.get("check_cmd", default_check(raw))
+    reload_cmd = raw.get("reload_cmd", default_reload(raw))
+    if raw["type"] in ("nodejs", "tomcat", "generic") and "reload_cmd" not in raw:
+        problems.append(f"{label}: reload_cmd 가 필요합니다(없으면 'none' 으로 명시)")
+    if str(reload_cmd).lower() == "none":
+        reload_cmd = None
+    if str(check).lower() == "none":
+        check = None
+    verify = None
+    if raw.get("verify"):
+        v = raw["verify"]
+        if not v.get("host"):
+            problems.append(f"{label}: verify.host 가 필요합니다")
+        else:
+            verify = Verify(v["host"], int(v.get("port", 443)), v.get("sni"), bool(v.get("strict", False)), v.get("ca_file"), bool(v.get("lenient_x509", False)))
+            if verify.ca_file:
+                _abs(verify.ca_file, f"{label} verify.ca_file", problems)
+    health = None
+    if raw.get("health"):
+        h = raw["health"]
+        if not str(h.get("url", "")).startswith(("http://", "https://")):
+            problems.append(f"{label}: health.url 은 http(s):// 로 시작해야 합니다")
+        else:
+            health = Health(h["url"], int(h.get("expect", 200)), float(h.get("timeout", 10)), bool(h.get("insecure", False)))
+    soak = int(raw.get("soak_seconds", 0))
+    if soak and not verify:
+        problems.append(f"{label}: soak_seconds 를 쓰려면 verify 가 필요합니다")
+    return Target(name, raw["type"], tr, files, check, reload_cmd, verify, int(raw.get("order", 100)),
+                  bool(raw.get("canary", False)), health, raw.get("pre_cmd"), raw.get("post_cmd"), soak,
+                  int(raw.get("soak_interval", 10)), [str(x) for x in (raw.get("hook_env") or [])])
+
+
+def _parse_certset(spec, name, defaults, state_dir, options, notify, audit_dir, problems, multi) -> Optional[CertSet]:
+    cert = spec.get("certificate") or {}
+    lego = spec.get("lego")
+    cert_file, key_file = cert.get("cert_file"), cert.get("key_file")
+    if lego and not (cert_file and key_file):
+        if not lego.get("domains"):
+            problems.append(f"[{name}] lego.domains 가 필요합니다")
+        else:
+            from .issuer import lego_output_paths
+            cert_file, key_file = lego_output_paths(lego)
+    if not cert_file or not key_file:
+        problems.append(f"[{name}] certificate.cert_file / key_file 가 필요합니다(또는 lego 설정)")
+    else:
+        _abs(cert_file, f"[{name}] certificate.cert_file", problems)
+        _abs(key_file, f"[{name}] certificate.key_file", problems)
+    targets, seen = [], set()
+    for i, raw in enumerate(spec.get("targets") or [], start=1):
+        t = _parse_target(raw, defaults, f"[{name}] targets[{i}]", problems, seen)
+        if t:
+            targets.append(t)
+    if not spec.get("targets"):
+        problems.append(f"[{name}] targets 가 비어 있습니다")
+    return CertSet(name, cert_file or "", key_file or "", cert.get("key_password_env"), targets, options, notify,
+                   lego, f"{state_dir.rstrip('/')}/{name}" if multi else state_dir, audit_dir)
+
+
 def parse_config(data: dict) -> Config:
     problems: List[str] = []
     if not isinstance(data, dict):
         raise ConfigError(["최상위가 매핑이 아닙니다"])
-    cert = data.get("certificate") or {}
-    lego = data.get("lego")
-    cert_file, key_file = cert.get("cert_file"), cert.get("key_file")
-    if lego and not (cert_file and key_file):
-        from .issuer import lego_output_paths
-        cert_file, key_file = lego_output_paths(lego)
-    if not cert_file or not key_file:
-        problems.append("certificate.cert_file / key_file 가 필요합니다(또는 lego 설정)")
-    else:
-        _abs(cert_file, "certificate.cert_file", problems)
-        _abs(key_file, "certificate.key_file", problems)
     state_dir = data.get("state_dir", "/var/lib/certdeploy")
     _abs(state_dir, "state_dir", problems)
+    options = _parse_options(data.get("options"), problems)
+    notify = _parse_notify(data.get("notify"), problems)
+    audit_dir = data.get("audit_log")
+    if audit_dir:
+        _abs(audit_dir, "audit_log", problems)
+    defaults = data.get("defaults") or {}
+    if not isinstance(defaults, dict):
+        problems.append("defaults 는 매핑이어야 합니다")
+        defaults = {}
 
-    opts = Options()
-    for k, v in (data.get("options") or {}).items():
-        if not hasattr(opts, k):
-            problems.append(f"options.{k}: 알 수 없는 옵션")
-        else:
-            setattr(opts, k, type(getattr(opts, k))(v))
-
-    targets, seen = [], set()
-    for i, raw in enumerate(data.get("targets") or [], start=1):
-        label = f"targets[{i}]"
-        name = raw.get("name", "") if isinstance(raw, dict) else ""
-        if not isinstance(raw, dict) or not NAME_RE.match(str(name)):
-            problems.append(f"{label}: name 은 영문·숫자·._- 64자 이내여야 합니다")
-            continue
-        label = f"target {name}"
-        if name in seen:
-            problems.append(f"{label}: 이름이 중복됩니다")
-        seen.add(name)
-        tr = raw.get("transport") or {"kind": "local"}
-        kind = tr.get("kind")
-        if kind == "ssh":
-            if not tr.get("host") or not HOST_RE.match(str(tr.get("host", ""))) or not tr.get("user"):
-                problems.append(f"{label}: ssh transport 에는 host, user 가 필요합니다")
-        elif kind != "local":
-            problems.append(f"{label}: transport.kind 는 local 또는 ssh 여야 합니다")
-        try:
-            files = build_files(raw)
-        except SpecError as e:
-            problems.append(f"{label}: {e}")
-            continue
-        for f in files:
-            _abs(f.dest, f"{label} 파일 경로", problems)
-        check = raw.get("check_cmd", default_check(raw))
-        reload_cmd = raw.get("reload_cmd", default_reload(raw))
-        if raw["type"] in ("nodejs", "tomcat", "generic") and "reload_cmd" not in raw:
-            problems.append(f"{label}: reload_cmd 가 필요합니다(없으면 'none' 으로 명시)")
-        if str(reload_cmd).lower() == "none":
-            reload_cmd = None
-        if str(check).lower() == "none":
-            check = None
-        verify = None
-        if raw.get("verify"):
-            v = raw["verify"]
-            if not v.get("host"):
-                problems.append(f"{label}: verify.host 가 필요합니다")
-            else:
-                verify = Verify(v["host"], int(v.get("port", 443)), v.get("sni"))
-        targets.append(Target(name, raw["type"], tr, files, check, reload_cmd, verify,
-                              int(raw.get("order", 100)), bool(raw.get("canary", False))))
-    if not targets:
-        problems.append("targets 가 비어 있습니다")
+    certs: List[CertSet] = []
+    if data.get("certificates"):
+        if data.get("targets") or data.get("certificate") or data.get("lego"):
+            problems.append("certificates 와 최상위 targets/certificate/lego 를 함께 쓸 수 없습니다")
+        names = set()
+        for i, spec in enumerate(data["certificates"], start=1):
+            name = spec.get("name", "") if isinstance(spec, dict) else ""
+            if not NAME_RE.match(str(name)):
+                problems.append(f"certificates[{i}]: name 은 영문·숫자·._- 64자 이내여야 합니다")
+                continue
+            if name in names:
+                problems.append(f"certificates: 이름이 중복됩니다: {name}")
+            names.add(name)
+            cs = _parse_certset(spec, name, defaults, state_dir, options, notify, audit_dir, problems, True)
+            if cs:
+                certs.append(cs)
+    else:
+        cs = _parse_certset(data, "default", defaults, state_dir, options, notify, audit_dir, problems, False)
+        if cs:
+            certs.append(cs)
     if problems:
         raise ConfigError(problems)
-    return Config(state_dir, cert_file, key_file, cert.get("key_password_env"), targets, opts,
-                  (data.get("notify") or {}).get("alertmanager_url"), lego)
+    return Config(state_dir, certs, options, notify, audit_dir)
 
 
 def load_config(path: str) -> Config:

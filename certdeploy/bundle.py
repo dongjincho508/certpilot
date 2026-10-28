@@ -168,3 +168,22 @@ def validate(b: Bundle, min_days: float = 1.0, now: Optional[datetime] = None) -
         b.warnings.append("중간 CA 체인이 없습니다 — 일부 클라이언트에서 신뢰 오류가 날 수 있습니다")
     if not b.names:
         b.warnings.append("SAN(dNSName)이 없습니다")
+
+
+def key_permission_problems(path: str) -> List[str]:
+    """개인키 파일/디렉터리 권한 점검: 소유자 외에 읽을 수 있으면 문제로 본다(권장 600 / 700)."""
+    problems = []
+    try:
+        st = os.stat(path)
+    except OSError:
+        return problems
+    if st.st_mode & 0o077:
+        problems.append(f"개인키 파일 권한이 너무 넓습니다(현재 {st.st_mode & 0o777:o}, 권장 600): {path}")
+    parent = os.path.dirname(path) or "."
+    try:
+        pst = os.stat(parent)
+        if pst.st_mode & 0o022:
+            problems.append(f"개인키가 있는 디렉터리가 다른 사용자에게 쓰기 가능합니다(현재 {pst.st_mode & 0o777:o}): {parent}")
+    except OSError:
+        pass
+    return problems
