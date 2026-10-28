@@ -75,6 +75,15 @@ def _normalize(path: str) -> str:
     return posixpath.normpath(path)
 
 
+_PATH_BAD = re.compile(r"[;&|`$<>()\\\s\"'*?{}\[\]~!#]")
+
+
+def is_safe_path(path: str) -> bool:
+    """등록·제안 가능한 경로인지(문법 검증): 절대 경로, '..' 없음, 셸 메타문자·공백 없음"""
+    return isinstance(path, str) and path.startswith("/") and ".." not in path.split("/") \
+        and not _PATH_BAD.search(path)
+
+
 def path_allowed(path: str, whitelist: Sequence[str]) -> bool:
     """절대 경로이며 '..' 이탈이 없고 화이트리스트 디렉터리/파일 하위일 때만 허용 (S-3)"""
     if not path.startswith("/") or ".." in path.split("/"):

@@ -9,7 +9,7 @@ from typing import Callable, Dict, List, Optional
 
 from . import status as st
 from .audit_storage import AuditLogWriter
-from .remote import CAUSE_INFO, ParamikoExecutor, RemoteExecutor
+from .remote import CAUSE_INFO, ParamikoExecutor, RemoteExecutor, is_safe_path
 from .scanner import Scanner, Target
 from .store import Store
 
@@ -56,13 +56,20 @@ def validate_server(data: dict) -> dict:
         raise ValidationError("경고 기준은 1~365일이어야 합니다.")
     paths = []
     for p in data.get("paths", []):
-        if not isinstance(p, str) or not p.startswith("/") or ".." in p.split("/") \
-                or re.search(r"[;&|`$<>()\\\s\"'*?{}\[\]~!#]", p):
-            raise ValidationError(f"조회 경로가 올바르지 않습니다: 절대 경로만 허용합니다.")
+        if not is_safe_path(p):
+            raise ValidationError("조회 경로가 올바르지 않습니다: 절대 경로만 허용합니다.")
         paths.append(posixpath.normpath(p))
     return {"name": name, "hostname": hostname, "port": port, "account": account,
             "paths": paths, "tls_ports": tls_ports, "warn_days": warn_days,
             "group": (data.get("group") or None), "memo": (data.get("memo") or None)}
+
+
+def validate_connection(data: dict) -> Target:
+    """연결 테스트용 최소 검증(서버명 불필요). 저장하지 않는다."""
+    v = validate_server({"name": "probe", **{k: data.get(k) for k in
+                         ("hostname", "port", "account", "username", "tls_ports", "paths") if k in data}})
+    return Target(server_id="probe", name="probe", hostname=v["hostname"], port=v["port"],
+                  account=v["account"], paths=v["paths"], tls_ports=v["tls_ports"])
 
 
 class CertPilotService:
@@ -128,6 +135,15 @@ class CertPilotService:
         ids = [s["id"] for s in self.store.list_servers()]
         with ThreadPoolExecutor(max_workers=MAX_PARALLEL) as pool:
             return list(pool.map(lambda i: self.scan_server(i, actor), ids))
+
+    def probe_server(self, data: dict, actor: str) -> dict:
+        """서버를 저장하지 않고 연결 가능 여부와 조회 가능한 경로를 확인한다(등록 전 점검)."""
+        target = validate_connection(data)
+        out, raw = self.scanner.check_connection(target)
+        self.audit.write({"event_type": "server_probe", "description": f"{target.hostname}:{target.port}",
+                          "details": {"actor": actor, "connected": out["connected"], "cause": out["cause"],
+                                      "raw_error": raw}})
+        return out
 
     # ---- 현황
     def overview(self, status: Optional[str] = None, group: Optional[str] = None) -> List[dict]:

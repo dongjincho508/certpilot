@@ -279,3 +279,29 @@ def test_reset_with_weak_password_keeps_old(tmp_path):
     create_app(cfg)
     app2 = create_app({**cfg, "ADMIN_PASSWORD": "weak", "ADMIN_RESET": True})
     assert login(app2.test_client(), "admin", PW).status_code == 200
+
+
+def test_probe_endpoint_admin_only_and_not_persisted(ctx):
+    ctx.box.put("/etc/nginx/ssl/a.crt", pem(make_cert("a.test")[1]))
+    ctx.box.put("/etc/nginx/conf.d/s.conf", "ssl_certificate /srv/app/tls/app.crt;\n")
+    a = admin(ctx)
+    r = a.post("/servers/probe", json={"hostname": "web1.example", "account": "certscan"})
+    assert r.status_code == 200 and r.json["connected"]
+    assert r.json["standard_paths"][0]["path"] == "/etc/nginx/ssl"
+    assert r.json["suggested_paths"][0]["path"] == "/srv/app/tls/app.crt"
+    assert a.get("/servers").json["servers"] == []                       # 저장하지 않음
+    assert "server_probe" in [l["event_type"] for l in a.get("/audit-logs").json["logs"]]
+    assert ctx.client().post("/servers/probe", json={}).status_code == 401
+    a.post("/users", json={"username": "op9", "password": PW + "9", "role": "operator"})
+    o = ctx.client(); login(o, "op9", PW + "9")
+    assert o.post("/servers/probe", json={"hostname": "h", "account": "u"}).status_code == 403
+
+
+def test_probe_validation_and_failure(ctx):
+    a = admin(ctx)
+    assert a.post("/servers/probe", json={"hostname": "", "account": "u"}).status_code == 422
+    assert a.post("/servers/probe", json={"hostname": "h", "account": "u", "port": 99999}).status_code == 422
+    ctx.app.extensions["certpilot"]["service"].scanner.executor_factory = (
+        lambda t: (_ for _ in ()).throw(RemoteError(FailureCause.TIMEOUT, "raw detail")))
+    r = a.post("/servers/probe", json={"hostname": "h", "account": "u"})
+    assert r.status_code == 200 and r.json["cause"] == "TIMEOUT" and "raw detail" not in r.get_data(as_text=True)

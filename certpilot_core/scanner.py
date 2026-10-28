@@ -16,7 +16,7 @@ from . import status as st
 from .cert_parser import (CertificateInfo, extract_pem_certs, parse_der_certificate,
                           parse_pem_blocks)
 from .remote import (CAUSE_INFO, RETRYABLE, FailureCause, PolicyExecutor, PolicyViolation,
-                     RemoteError, RemoteExecutor, parse_openssh_version, path_allowed)
+                     RemoteError, RemoteExecutor, is_safe_path, parse_openssh_version, path_allowed)
 from .status import Status
 
 # 조직 표준 경로: 미리 정의된 후보의 존재 여부만 확인하며 find/전체 탐색은 하지 않는다 (B-6)
@@ -185,6 +185,48 @@ class Scanner:
         res.cause = res.cause or e.cause
         res.cause_detail = res.cause_detail or e.detail
 
+    # --- 등록 전 연결 테스트 + 경로 탐지 (저장하지 않음)
+    def check_connection(self, target: Target):
+        """(결과 dict, 원문 오류) 반환. 원문 오류는 감사 로그 전용이며 화면에 노출하지 않는다."""
+        extra = [posixpath.normpath(p) for p in target.paths]
+        out = {"connected": False, "ssh_version": None, "supported": None, "cause": None,
+               "cause_label": None, "action": None, "hostkey_blocked": False,
+               "standard_paths": [], "suggested_paths": [], "tls": []}
+        raw = ""
+        ex = None
+        try:
+            ex = self._connect(target, STANDARD_CANDIDATES + SUGGEST_ROOTS + extra)
+            out["connected"] = True
+            ver = parse_openssh_version(ex.server_version)
+            out["ssh_version"] = f"{ver[0]}.{ver[1]}" if ver else (ex.server_version or None)
+            out["supported"] = ver is None or ver >= MIN_OPENSSH
+            if out["supported"]:
+                scanned = []
+                for cand in STANDARD_CANDIDATES + extra:
+                    files = self._expand(ex, cand, depth=0)
+                    if files:
+                        scanned += files
+                        out["standard_paths"].append({"path": cand, "files": len(files), "sample": files[:3]})
+                out["suggested_paths"] = self._suggest(ex, scanned, extra)
+        except RemoteError as e:
+            out["cause"], out["cause_label"], out["action"] = e.cause.value, CAUSE_INFO[e.cause][0], CAUSE_INFO[e.cause][1]
+            out["hostkey_blocked"] = e.cause == FailureCause.HOSTKEY
+            raw = e.detail
+        finally:
+            if ex is not None:
+                ex.close()
+        for port in target.tls_ports:
+            try:
+                info = parse_der_certificate(self.probe.fetch(target.hostname, port, sni=target.hostname))
+                out["tls"].append({"port": port, "ok": info is not None,
+                                   "subject": info.subject if info else None,
+                                   "not_after": st.iso_z(info.not_after) if info else None})
+            except RemoteError as e:
+                out["tls"].append({"port": port, "ok": False, "cause_label": CAUSE_INFO[e.cause][0],
+                                   "action": CAUSE_INFO[e.cause][1]})
+                raw = raw or e.detail
+        return out, raw
+
     # --- 연결 + 재시도
     def _connect(self, target: Target, whitelist: Sequence[str]) -> RemoteExecutor:
         attempt = 0
@@ -210,11 +252,22 @@ class Scanner:
             self._read_file(ex, path, target, now, prev_hashes, res)
 
         # 웹 서버 설정에서 인증서 경로 추출 → 등록 후보로만 제시 (확정은 사용자)
-        known = set(files)
+        for item in self._suggest(ex, files, extra):
+            if item["path"] not in res.suggested_paths:
+                res.suggested_paths.append(item["path"])
+
+    def _suggest(self, ex, scanned_files: Sequence[str], extra: Sequence[str]) -> List[dict]:
+        """웹 설정에서 추출한 경로 중 아직 조회 대상이 아닌 것. 인증서 파일명 규칙을 지키고 개인키 이름은 제외한다.
+        이 단계에서는 해당 경로를 읽지 않는다(등록 후에만 조회)."""
+        covered = set(scanned_files)
+        out = []
         for p in self._extract_webcfg(ex):
-            if p not in known and any(path_allowed(p, [r]) for r in SUGGEST_ROOTS) \
-                    and p not in res.suggested_paths:
-                res.suggested_paths.append(p)
+            if p in covered or not is_safe_path(p) or not self._wanted(p):
+                continue
+            if any(path_allowed(p, [e]) for e in extra):
+                continue  # 이미 등록된 경로 하위
+            out.append({"path": p, "in_standard_root": any(path_allowed(p, [r]) for r in SUGGEST_ROOTS)})
+        return out
 
     def _expand(self, ex, path: str, depth: int) -> List[str]:
         """후보 경로가 파일이면 그대로, 디렉터리면 (깊이 제한) 인증서 후보 파일만 나열"""

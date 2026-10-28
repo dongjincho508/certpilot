@@ -246,6 +246,12 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
     def add_server():
         return jsonify({"server": service.add_server(body(), g.user["username"])}), 201
 
+    @app.post("/servers/probe")
+    @require(ADMIN)
+    def probe_server():
+        """등록 전 연결 테스트 + 경로 탐지. 서버를 저장하지 않는다."""
+        return jsonify(service.probe_server(body(), g.user["username"]))
+
     @app.delete("/servers/<server_id>")
     @require(ADMIN)
     def del_server(server_id):

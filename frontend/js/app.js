@@ -253,6 +253,63 @@ async function registerServer(e) {
     serverModal.hide(); toast('서버를 등록했습니다.'); await loadServers();
   });
 }
+// ---------------------------------------------------------------- 등록 전 연결 테스트 · 경로 탐지
+function serverFormData() {
+  return {
+    hostname: $('f-host').value.trim(), port: Number($('f-port').value), account: $('f-account').value.trim(),
+    paths: $('f-paths').value.split('\n').map((x) => x.trim()).filter(Boolean),
+    tls_ports: $('f-tls').value.split(',').map((x) => x.trim()).filter(Boolean).map(Number),
+  };
+}
+function addPathsToForm(paths) {
+  const cur = $('f-paths').value.split('\n').map((x) => x.trim()).filter(Boolean);
+  paths.forEach((p) => { if (!cur.includes(p)) cur.push(p); });
+  $('f-paths').value = cur.join('\n');
+}
+function renderProbe(r) {
+  const box = $('probe-result'); box.replaceChildren();
+  const status = el('div', null, `alert ${r.connected ? 'alert-success' : 'alert-danger'} py-2 small mb-2`);
+  if (r.connected) {
+    status.append(icon('bi-check-circle-fill'), document.createTextNode(` SSH 연결 성공 (OpenSSH ${r.ssh_version || '버전 미확인'})`));
+    if (r.supported === false) status.append(el('div', 'OpenSSH 7.0 미만은 지원 범위 밖이라 조회되지 않습니다(확인 필요로 표시).', 'mt-1'));
+  } else {
+    status.append(icon('bi-x-octagon-fill'), el('strong', ` ${r.cause_label}`), document.createTextNode(` — ${r.action}`));
+    if (r.hostkey_blocked) status.append(el('div', '호스트 키가 이전과 다릅니다. 보안 이벤트일 수 있으니 확인 전까지 진행하지 마세요.', 'mt-1'));
+  }
+  box.append(status);
+  (r.tls || []).forEach((t) => {
+    const line = el('div', null, `small mb-1 ${t.ok ? 'text-success' : 'text-danger'}`);
+    line.append(icon(t.ok ? 'bi-check-circle' : 'bi-x-circle'),
+      document.createTextNode(t.ok ? ` TLS ${t.port}: ${t.subject} (만료 ${t.not_after})` : ` TLS ${t.port}: ${t.cause_label} — ${t.action}`));
+    box.append(line);
+  });
+  if (r.standard_paths.length) {
+    const d = el('div', null, 'small mb-2'); d.append(el('div', '자동 조회되는 경로 (추가 불필요)', 'fw-semibold'));
+    r.standard_paths.forEach((p) => d.append(el('div', `${p.path} — 인증서 파일 ${p.files}개`, 'mono text-body-secondary')));
+    box.append(d);
+  } else if (r.connected && r.supported !== false) {
+    box.append(el('div', '표준 경로에서 인증서 파일을 찾지 못했습니다. 아래 제안이나 직접 입력한 경로를 사용하세요.', 'small text-body-secondary mb-2'));
+  }
+  if (r.suggested_paths.length) {
+    const d = el('div', null, 'small'); d.append(el('div', '웹 서버 설정에서 발견한 경로 (선택해 추가)', 'fw-semibold mb-1'));
+    const boxes = [];
+    r.suggested_paths.forEach((s, i) => {
+      const row = el('div', null, 'form-check'); const cb = el('input', null, 'form-check-input'); cb.type = 'checkbox'; cb.id = `sg-${i}`; cb.checked = true; cb.value = s.path;
+      const lb = el('label', s.path, 'form-check-label mono'); lb.htmlFor = cb.id;
+      if (!s.in_standard_root) lb.append(el('span', ' 표준 위치 밖', 'badge text-bg-warning ms-2'));
+      row.append(cb, lb); d.append(row); boxes.push(cb);
+    });
+    d.append(btn('선택한 경로 추가', 'btn-primary mt-2', () => { addPathsToForm(boxes.filter((b) => b.checked).map((b) => b.value)); toast('조회 경로에 추가했습니다.'); }, 'bi-plus-lg'));
+    d.append(el('div', '이 단계에서는 해당 경로를 읽지 않습니다. 등록 후 조회할 때 확인됩니다.', 'text-body-secondary mt-1'));
+    box.append(d);
+  }
+}
+async function probeServer() {
+  const data = serverFormData();
+  if (!data.hostname || !data.account) { toast('호스트와 조회 계정을 먼저 입력하세요.', 'warning'); return; }
+  await guarded(() => busy($('btn-probe'), async () => renderProbe(await api('/servers/probe', 'POST', data))));
+}
+
 async function loadAudit() {
   const { logs } = await api('/audit-logs?limit=200');
   const tb = $('audit-body'); tb.replaceChildren();
@@ -310,6 +367,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('btn-export').addEventListener('click', () => { window.location = '/export.csv'; });
   $('btn-verify').addEventListener('click', () => guarded(verifyAudit));
   $('server-form').addEventListener('submit', registerServer);
+  $('btn-probe').addEventListener('click', probeServer);
+  $('server-modal').addEventListener('hidden.bs.modal', () => $('probe-result').replaceChildren());
   $('user-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     await guarded(async () => { await api('/users', 'POST', { username: $('u-name').value, password: $('u-pass').value, role: $('u-role').value }); $('user-form').reset(); toast('사용자를 추가했습니다.'); loadUsers(); });
