@@ -10,13 +10,18 @@ audit_log: /var/lib/certdeploy/audit            # 변조 탐지 해시 체인 �
 certificate:
   cert_file: /var/lib/certdeploy/managed/wildcard.crt
   key_file: /var/lib/certdeploy/managed/wildcard.key
+  # 개인키 저장 방식(선택): 기본은 평문(권한 600). 암호로 보호하려면 아래 두 줄을 켜고 `certdeploy key-encrypt` 로 변환
+  #   (재부팅·타이머 실행 때마다 /etc/certdeploy/env 의 암호가 필요하며, 배포 때만 메모리에서 복호화한다)
+  # key_encryption: passphrase
+  # key_password_env: CERTDEPLOY_KEY_PASSPHRASE
 
 # 관리 서버(같은 VM)의 감시 스택으로 결과 전달
 notify:
   alertmanager_url: http://127.0.0.1:9093
   pushgateway_url: http://127.0.0.1:9091
-  # smtp: {host: smtp.univ.example, port: 587, starttls: true, from: cert-deploy@univ.example, to: [cert-admin@univ.example], username: cert-deploy, password_env: SMTP_PASSWORD}
-  # webhook: {url_env: CERTDEPLOY_WEBHOOK_URL, format: teams}
+  # 메일(우선 채널): 실패·수동 교체 필요는 항상, 성공 요약은 on_success. 비밀번호는 /etc/certdeploy/env 의 SMTP_PASSWORD
+  smtp: {host: smtp.univ.example, port: 587, starttls: true, from: cert-deploy@univ.example, to: [cert-admin@univ.example], username: cert-deploy, password_env: SMTP_PASSWORD, on_success: true}
+  # webhook: {url_env: CERTDEPLOY_WEBHOOK_URL, format: teams}      # Teams 는 이후 추가
 
 defaults:
   transport: {kind: ssh, user: deploy, key_file: /var/lib/certdeploy/.ssh/id_ed25519, known_hosts: /var/lib/certdeploy/.ssh/known_hosts}

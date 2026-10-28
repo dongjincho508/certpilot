@@ -1272,6 +1272,104 @@
         },
         "overrides": []
       }
+    },
+    {
+      "id": 15,
+      "type": "table",
+      "title": "수동 교체 대기 장비 (certdeploy)",
+      "description": "사람이 직접 교체해야 하는 장비(웹방화벽 등)가 교체를 기다린 시간. 교체 후 certdeploy deploy --target 또는 confirm 으로 완료를 기록하면 사라집니다.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 18,
+        "x": 6,
+        "y": 50
+      },
+      "targets": [
+        {
+          "expr": "(time() - certdeploy_target_manual_pending_since_timestamp_seconds) and on(cert, target) (certdeploy_target_manual_pending == 1)",
+          "instant": true,
+          "format": "table",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "job": true,
+              "__name__": true,
+              "instance": true
+            },
+            "renameByName": {
+              "cert": "인증서",
+              "target": "장비",
+              "Value": "대기 시간"
+            },
+            "indexByName": {
+              "cert": 0,
+              "target": 1,
+              "Value": 2
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "대기 시간"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 86400
+                    },
+                    {
+                      "color": "red",
+                      "value": 259200
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      }
     }
   ],
   "annotations": {

@@ -7,6 +7,7 @@
 """
 import logging
 import os
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass
@@ -15,10 +16,10 @@ from typing import Callable, List, Optional
 
 from certpilot_core import trace
 
-from . import remote
+from . import apideploy, remote
 from .bundle import Bundle, BundleError
 from .config import Config, Target
-from .handlers import KEY_KINDS, FileSpec
+from .handlers import FileSpec
 from .notify import NullNotifier
 from .state import State
 from .transport import LocalTransport, SSHTransport, Transport, TransportError
@@ -33,6 +34,7 @@ class TargetResult:
     status: str            # deployed | skipped | failed | rolled_back | dry_run | not_run
     message: str = ""
     serial_before: Optional[int] = None
+    since: Optional[str] = None      # manual_pending 의 최초 안내 시각(ISO)
 
 
 class DeployFailure(Exception):
@@ -71,6 +73,16 @@ class Deployer:
         """대상 호스트명이 인증서 SAN 에 포함되는지, 키스토어 비밀번호 환경변수가 있는지 점검(문제 목록 반환)."""
         problems = []
         for t in self.cfg.targets:
+            if t.manual:
+                if "pfx" in t.manual["formats"] and not self.environ.get(t.manual["pfx_password_env"] or ""):
+                    problems.append(f"{t.name}: 환경변수 {t.manual['pfx_password_env']} (PFX 비밀번호)가 설정되지 않았습니다")
+                if t.verify and not self.bundle.covers(t.verify.sni or t.verify.host):
+                    problems.append(f"{t.name}: 인증서 SAN 이 {t.verify.sni or t.verify.host} 를 포함하지 않습니다")
+                continue
+            if t.api:
+                names = {n for is_env, n in apideploy.referenced(t.api) if is_env}
+                names |= {t.api["pfx_password_env"]} if t.api.get("pfx_password_env") else set()
+                problems += [f"{t.name}: 환경변수 {n} 가 설정되지 않았습니다" for n in sorted(names) if not self.environ.get(n)]
             if t.verify and not self.bundle.covers(t.verify.sni or t.verify.host):
                 problems.append(f"{t.name}: 인증서 SAN 이 {t.verify.sni or t.verify.host} 를 포함하지 않습니다")
             for f in t.files:
@@ -91,6 +103,15 @@ class Deployer:
         for t in self.ordered(only):
             where = t.transport.get("host") or "로컬"
             lines.append(f"[{t.name}] {t.type}@{where}" + (" (canary)" if t.canary else ""))
+            if t.manual:
+                m = t.manual
+                lines.append(f"    수동 교체: 교체용 파일({', '.join(m['formats'])})을 {m['export_dir'] or self.state.dir + '/handoff/' + t.name} 에 준비하고 알림 — 담당자가 장비에서 교체")
+                lines.append(f"    확인: {('%s:%d' % (t.verify.host, t.verify.port)) if t.verify else '없음 — 교체 후 certdeploy confirm --target ' + t.name}")
+                continue
+            if t.api:
+                lines += apideploy.plan_lines(t.api)
+                lines.append(f"    확인: {('%s:%d' % (t.verify.host, t.verify.port)) if t.verify else '없음(TLS 확인을 하지 않음)'}")
+                continue
             for f in t.files:
                 lines.append(f"    파일 {f.dest}  ← {f.content} ({f.mode})")
             lines.append(f"    점검: {t.check_cmd or '없음'}")
@@ -195,7 +216,82 @@ class Deployer:
             return f" (post_cmd 실행 오류: {type(e).__name__})"
         return "" if rc == 0 else f" (post_cmd 실패: {self._last(out)})"
 
+    # ---------------------------------------------------------------- 수동 교체 대상(자동화할 수 없는 장비)
+    def _handoff_dir(self, t: Target) -> str:
+        return t.manual["export_dir"] or os.path.join(self.state.dir, "handoff", t.name)
+
+    def manual_done(self, t: Target) -> None:
+        """수동 교체가 끝났음(서빙 확인 또는 confirm): 상태 기록, 개인키가 든 교체용 파일 삭제, 알림 해소."""
+        self.state.set_target(t.name, serial=f"{self.bundle.serial:x}", deployed_at=self.clock().isoformat(), status="ok", error="", pending_since=None)
+        self.state.save()
+        shutil.rmtree(self._handoff_dir(t), ignore_errors=True)
+        self.notifier.resolve(t.name)
+
+    def _deploy_manual(self, t: Target, force: bool, dry_run: bool) -> TargetResult:
+        new, m = self.bundle.serial, t.manual
+        before = self._served_serial(t)
+        rec = self.state.target(t.name)
+        done = (before == new) if t.verify else (rec.get("status") == "ok" and rec.get("serial") == f"{new:x}")
+        if done and not force:
+            if rec.get("status") != "ok" or rec.get("serial") != f"{new:x}":
+                self.manual_done(t)
+            return TargetResult(t.name, "skipped", "수동 교체 확인됨(새 인증서 서빙 중)" if t.verify else "수동 교체 완료 기록 있음", before)
+        if dry_run:
+            return TargetResult(t.name, "dry_run", "교체용 파일 준비·안내 예정(계획만)", before)
+        d = self._handoff_dir(t)
+        try:
+            files = self._write_handoff(t, d)
+        except (OSError, BundleError, DeployFailure) as e:
+            self.state.set_target(t.name, status="failed", error=f"교체용 파일 준비 실패: {e}", failed_at=self.clock().isoformat())
+            self.state.save()
+            self.notifier.fire(t.name, f"인증서 수동 교체 준비 실패: {t.name}", str(e), "critical")
+            return TargetResult(t.name, "failed", f"교체용 파일 준비 실패: {e}", before)
+        same = rec.get("status") == "manual_pending" and rec.get("serial") == f"{new:x}"
+        since = rec.get("pending_since") if same and rec.get("pending_since") else self.clock().isoformat()
+        self.state.set_target(t.name, status="manual_pending", serial=f"{new:x}", pending_since=since, error="")
+        self.state.save()
+        waited = (self.clock() - datetime.fromisoformat(since)).total_seconds() / 86400
+        how = (f"교체 후 `certdeploy deploy --target {t.name}` 를 다시 실행하면 서빙 인증서를 확인합니다" if t.verify
+               else f"교체 후 `certdeploy confirm --target {t.name}` 를 실행해 완료를 기록하세요")
+        text = (f"{t.name}: 새 인증서(일련번호 {new:x}, 만료 {self.bundle.not_after:%Y-%m-%d})를 장비에서 직접 교체해야 합니다.\n"
+                f"교체용 파일: {d} ({', '.join(files)}) — 개인키가 들어 있으니 안전하게 옮기고, 완료되면 자동 삭제됩니다.\n"
+                + (f"절차 메모: {m['instructions']}\n" if m["instructions"] else "") + how + f"\n안내 후 {waited:.1f}일 경과")
+        self.notifier.fire(t.name, f"인증서 수동 교체 필요: {t.name}", text, "critical" if waited >= m["remind_days"] else "warning")
+        return TargetResult(t.name, "manual_pending", f"수동 교체 대기 — 교체용 파일 {d} ({how})", before, since)
+
+    def _write_handoff(self, t: Target, d: str) -> List[str]:
+        m, b = t.manual, self.bundle
+        os.makedirs(d, mode=0o700, exist_ok=True)
+        os.chmod(d, 0o700)
+        written = []
+        pfx_pw = None
+        if "pfx" in m["formats"]:                       # 비밀번호가 없으면 개인키 사본을 만들기 전에 중단
+            pfx_pw = self.environ.get(m["pfx_password_env"] or "")
+            if not pfx_pw:
+                raise DeployFailure(f"PFX 비밀번호 환경변수 {m['pfx_password_env']} 가 설정되지 않았습니다")
+
+        def put(name, data, mode):
+            tmp = os.path.join(d, f".tmp-{name}")
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+            os.chmod(tmp, mode)
+            os.replace(tmp, os.path.join(d, name))
+            written.append(name)
+        if "pem" in m["formats"]:
+            put("fullchain.pem", b.fullchain_pem(), 0o644)
+            put("cert.pem", b.cert_pem(), 0o644)
+            put("chain.pem", b.chain_pem(), 0o644)
+            put("privkey.pem", b.key_pem(), 0o600)
+        if pfx_pw:
+            put("server.pfx", b.pkcs12(pfx_pw, m["pfx_alias"]), 0o600)
+        put("INSTRUCTIONS.txt", (f"대상: {t.name}\n일련번호: {b.serial:x}\n만료: {b.not_after:%Y-%m-%d}\n이름: {', '.join(b.names)}\n"
+                                 f"{m['instructions']}\n교체 후 certdeploy 로 확인/완료 처리(confirm 또는 deploy --target {t.name})\n").encode(), 0o600)
+        return written
+
     def _deploy_target(self, t: Target, force: bool, dry_run: bool) -> TargetResult:
+        if t.manual:
+            return self._deploy_manual(t, force, dry_run)
         new = self.bundle.serial
         with trace.span("deploy", "served_serial", target=t.name) as ctx:
             before = self._served_serial(t)
@@ -220,6 +316,8 @@ class Deployer:
                 self.state.save()
                 self.notifier.fire(t.name, f"인증서 배포 중단: {t.name}", msg, "warning")
                 return TargetResult(t.name, "failed", msg, before)
+        if t.api:
+            return self._deploy_api(t, before)
         ts = self.clock().strftime("%Y%m%d%H%M%S")
         installed: List[remote.Installed] = []
         transport: Optional[Transport] = None
@@ -247,6 +345,82 @@ class Deployer:
         self.notifier.resolve(t.name)
         msg = "배포·확인 완료" if t.verify else "배포 완료(TLS 확인은 설정 안 됨)"
         return TargetResult(t.name, "deployed", msg + self._post_hook(t, "deployed"), before)
+
+    def _deploy_api(self, t: Target, before) -> TargetResult:
+        """웹방화벽·어플라이언스: 설정한 HTTP 단계 실행 → TLS 일련번호 확인 → 실패 시 이전 배포본으로 rollback_steps."""
+        api, new = t.api, self.bundle.serial
+        runner = apideploy.ApiRunner(api, t.name, self.environ, self.sleep)
+        prev = apideploy.load_prev(self.state.dir, t.name)
+        reason = None
+        try:
+            runner.vars.update(api.get("vars") or {})
+            runner.vars.update(runner.bundle_vars(self.bundle))
+            runner.vars["name"] = t.name
+            runner.run(api["steps"])
+            self._verify_new(t)
+            self._health_and_soak(t)
+        except (apideploy.ApiError, DeployFailure) as e:
+            reason = str(e)
+        rolled, problem = False, ""
+        if reason is not None:
+            trace.event("deploy", "failure", "error", target=t.name, reason=reason, api=True)
+            if api.get("rollback_steps") and prev is not None:
+                try:
+                    runner.vars.update(runner.bundle_vars(prev, "prev_"))
+                    runner.run(api["rollback_steps"])
+                    rolled = True
+                except (apideploy.ApiError, DeployFailure) as e:
+                    problem = f" / 롤백도 실패({e}) — 수동 조치 필요"
+            elif api.get("rollback_steps"):
+                problem = " / 이전 배포본 기록이 없어 롤백하지 못함(수동 조치 필요)"
+            else:
+                problem = " / rollback_steps 가 설정되지 않아 자동 롤백 없음(수동 확인 필요)"
+        for st in api.get("finally_steps") or []:          # 로그아웃 등: 실패해도 결과를 바꾸지 않는다
+            try:
+                runner.run_step(st)
+            except apideploy.ApiError as e:
+                trace.event("deploy", "finally_step", "warning", target=t.name, message=str(e))
+        if reason is None:
+            try:
+                apideploy.save_prev(self.state.dir, t.name, self.bundle)
+            except OSError as e:
+                log.warning("[%s] 이전 배포본 보관 실패(롤백 불가): %s", t.name, e)
+            self.state.set_target(t.name, serial=f"{new:x}", deployed_at=self.clock().isoformat(), status="ok", error="")
+            self.state.save()
+            self.notifier.resolve(t.name)
+            return TargetResult(t.name, "deployed", ("배포·확인 완료" if t.verify else "배포 완료(TLS 확인은 설정 안 됨)") + self._post_hook(t, "deployed"), before)
+        status = "rolled_back" if rolled else "failed"
+        msg = reason + (" → 이전 인증서로 롤백함" if rolled else "") + problem
+        self.state.set_target(t.name, status=status, error=msg, failed_at=self.clock().isoformat())
+        self.state.save()
+        self.notifier.fire(t.name, f"인증서 배포 실패: {t.name}", msg, "critical")
+        return TargetResult(t.name, status, msg + self._post_hook(t, status), before)
+
+    def _rollback_api(self, t: Target) -> TargetResult:
+        prev = apideploy.load_prev(self.state.dir, t.name, "previous")
+        if prev is None or not t.api.get("rollback_steps"):
+            return TargetResult(t.name, "failed", "되돌릴 이전 배포본 기록 또는 rollback_steps 가 없습니다")
+        runner = apideploy.ApiRunner(t.api, t.name, self.environ, self.sleep)
+        try:
+            runner.vars.update(t.api.get("vars") or {})
+            runner.vars.update(runner.bundle_vars(self.bundle, ""))
+            runner.vars.update(runner.bundle_vars(prev, "prev_"))
+            runner.vars["name"] = t.name
+            steps = t.api["steps"]                      # 로그인처럼 값을 추출(extract)하는 단계까지는 수동 롤백 때도 다시 실행한다
+            last = max((i for i, st in enumerate(steps) if st.get("extract")), default=-1)
+            runner.run(steps[:last + 1] + t.api["rollback_steps"])
+        except apideploy.ApiError as e:
+            return TargetResult(t.name, "failed", f"롤백 실패: {e}")
+        finally:
+            for st in t.api.get("finally_steps") or []:
+                try:
+                    runner.run_step(st)
+                except apideploy.ApiError:
+                    pass
+        apideploy.promote_previous(self.state.dir, t.name)
+        self.state.set_target(t.name, status="rolled_back", error="수동 롤백")
+        self.state.save()
+        return TargetResult(t.name, "rolled_back", "이전 인증서로 되돌림")
 
     def _health_and_soak(self, t: Target) -> None:
         """HTTP 헬스체크 → (설정 시) 소크: 일정 시간 동안 새 인증서와 헬스가 유지되는지 반복 확인."""
@@ -347,6 +521,10 @@ class Deployer:
         t = next((x for x in self.cfg.targets if x.name == name), None)
         if t is None:
             raise KeyError(name)
+        if t.manual:
+            return TargetResult(name, "failed", "수동 교체 대상은 자동 롤백하지 않습니다(장비에서 이전 인증서로 되돌리세요)")
+        if t.api:
+            return self._rollback_api(t)
         backups = self.state.target(name).get("backups") or []
         if not backups:
             return TargetResult(name, "failed", "되돌릴 백업 기록이 없습니다")

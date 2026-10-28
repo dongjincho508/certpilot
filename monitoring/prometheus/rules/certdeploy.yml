@@ -11,6 +11,23 @@ groups:
           summary: "인증서 배포 실패 상태: {{ $labels.cert }}/{{ $labels.target }}"
           description: "certdeploy 마지막 실행에서 {{ $labels.cert }} 인증서의 {{ $labels.target }} 배포가 실패(또는 롤백)했습니다. `certdeploy report` 와 서버 로그를 확인하세요."
 
+      # 자동화할 수 없는 장비(type: manual)는 사람이 교체해야 한다 — 방치되지 않도록 단계적으로 독촉한다
+      - alert: CertDeployManualReplacementPending
+        expr: certdeploy_target_manual_pending == 1 and (time() - certdeploy_target_manual_pending_since_timestamp_seconds) > 86400
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "수동 교체 대기 1일 초과: {{ $labels.cert }}/{{ $labels.target }}"
+          description: "{{ $labels.target }} 장비의 인증서를 직접 교체해야 하는데 안내 후 하루가 넘게 지났습니다. 교체 후 certdeploy deploy --target {{ $labels.target }} (또는 confirm)으로 완료를 기록하세요."
+
+      - alert: CertDeployManualReplacementOverdue
+        expr: certdeploy_target_manual_pending == 1 and (time() - certdeploy_target_manual_pending_since_timestamp_seconds) > 86400 * 3
+        for: 10m
+        labels: {severity: critical}
+        annotations:
+          summary: "수동 교체 대기 3일 초과: {{ $labels.cert }}/{{ $labels.target }}"
+          description: "{{ $labels.target }} 장비의 인증서 수동 교체가 3일 넘게 지연되고 있습니다. 만료 전에 교체되도록 담당자를 확인하세요."
+
       - alert: CertDeployIssueFailing
         expr: certdeploy_issue_failures >= 2
         for: 5m

@@ -1,5 +1,7 @@
 # CertPilot 제품 방향·로드맵 (제안 v1)
 
+> **현재 상태 (2026-10-28)**: 감시 스택·`certdeploy`(자동 발급·수동 가져오기·자동 배포·웹방화벽 API)의 코드와 자동 테스트가 완료되었고, 실제 VM·장비 검증 전이다. 문서 목차 [docs/README.md](README.md), 준비 [pre-vm-checklist](ops/pre-vm-checklist.md), 검증 현황 [verification-report](ops/verification-report.md).
+
 > **결정 (2026-10-28, 오너): 감시는 Prometheus + ssl_exporter + Grafana 오픈소스 스택으로 진행한다.** → [`monitoring/`](../monitoring/README.md)
 > CertPilot(이 저장소의 Flask 앱)의 개발은 **보류**한다. 코드·테스트·문서는 그대로 보존하며, SSH 디스크 파일 인벤토리·감사 로그·교체 체크리스트 워크플로가
 > 꼭 필요해질 때 아래 Phase 0 부터 재개한다. 이 문서의 이하 내용은 재개 시 참고하는 계획이다. 발급·배포·갱신은 [갱신 자동화](ops/acme-automation.md) 참고.

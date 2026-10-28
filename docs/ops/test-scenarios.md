@@ -33,6 +33,12 @@ curl -s -XPOST http://127.0.0.1:9093/api/v2/alerts -H 'Content-Type: application
 
 ---
 ## 발급·배포 (발급·배포 VM)
+### T-02a 메일 알림 시험 (메일 우선)
+```bash
+$CD notify-test
+```
+- **기대**: `시험 알림을 보냈습니다: 메일(수신자…)` 출력, 수신함에 "WARNING certdeploy 알림 시험" 도착. 도착하지 않으면 `$CD trace --errors` 의 `notify/smtp` 이벤트(접속 거부·인증 실패·TLS 오류)와 SMTP 릴레이의 허용 IP 설정 확인
+
 ### T-03 사전 점검 (변경 없음)
 - **절차**
 ```bash
@@ -167,6 +173,108 @@ $CD trace --errors
   `metrics/pushgateway` 오류가 보여야 한다. 시험 후 Pushgateway 재기동
 
 ---
+## 자동 발급·호환성 (내장 ACME · DNS 제공자 · 웹방화벽)
+> 아래는 [자동 발급 가이드](auto-issue.md)·[호환성 가이드](compatibility.md) 설정을 마친 뒤 수행한다. **반드시 스테이징(시험 CA)부터** 한다.
+
+### T-14 내장 ACME 스테이징 발급 (DNS 연동 모드)
+- **사전조건**: 설정에 `acme:` + `dns.mode`(infoblox 등), `/etc/certdeploy/env` 에 계정, `check_resolvers` 에 권한 DNS IP, `dig CAA` 확인 완료
+- **절차**
+```bash
+$CD validate
+```
+```bash
+$CD --cert hnu issue --staging
+```
+- **기대**: `스테이징 발급 성공(일련번호 …) — 운영 위치에는 설치하지 않았습니다`, 종료 코드 0. DNS 에 만들어진 `_acme-challenge` TXT 가 **발급 후 모두 삭제**되어 있고(DNS 관리 화면/`dig TXT _acme-challenge.hnu.kr` 로 확인), 운영 인증서 파일(`managed/…`)과 대상 서버는 바뀌지 않음
+- **증거**: 출력, `$CD trace --debug` 의 `acme/*` 단계(register_account, new_order, dns_present, challenge, finalize, dns_cleanup)
+- **실패 시**: 메시지의 단계(검증 실패 `No TXT record found` → 뷰·전파·CNAME 존재, `Infoblox … HTTP 401/403` → 계정·권한·WAPI 버전)와 `diagnose --out` 번들
+
+### T-15 수동 TXT 두 단계 (DNS 연동 없음)
+- **사전조건**: `dns.mode: manual`
+- **절차**
+```bash
+$CD --cert hannam issue --staging
+```
+  종료 코드 **4** 와 등록할 TXT(이름·값, 같은 이름에 값 2개)가 출력되고 알림이 온다 → DNS 관리 화면에서 TXT 를 **모두** 등록 → 같은 명령 재실행
+- **기대**: 일부만 등록한 상태에서는 `아직 보이지 않는 레코드` 와 함께 종료 코드 4 유지(주문은 같은 것 재사용), 모두 등록 후 `스테이징 발급 성공`, 종료 코드 0
+- **정리**: 시험이 끝나면 등록했던 TXT 삭제. 처음부터 다시 하려면 `$CD acme-reset`
+```bash
+$CD acme-reset
+```
+
+### T-16 운영 발급 → canary 배포 → 갱신 판정
+```bash
+$CD --cert hnu issue --no-deploy
+```
+```bash
+$CD --cert hnu deploy --target hnu-web-canary
+```
+```bash
+$CD --cert hnu renew
+```
+- **기대**: 운영 발급 성공 → canary 배포 확인(T-05 와 동일 기준) → `renew` 는 `갱신 불필요: 만료까지 N일` (만료가 `renew_days` 이내가 아닐 때). 타이머 사용 시 `systemctl list-timers certdeploy-renew.timer`
+
+### T-17 다른 DNS 제공자 선택 (사용 시)
+- **대상**: `rfc2136`/`cloudflare`/`powerdns`/`webhook`/`exec` 중 실제로 쓸 것만
+- **절차**: T-14 와 동일(`issue --staging`). `rfc2136` 은 서버의 update-policy 가 `_acme-challenge` TXT 만 허용하는지, TSIG 키 이름·알고리즘이 일치하는지 확인. `exec`/`webhook` 은 `present`/`cleanup` 을 **스크립트·중계 서비스에서 단독 실행**해 TXT 가 생겼다 지워지는지 먼저 확인
+- **기대**: T-14 의 기대와 동일. 실패 시 `acme/dns_*` 이벤트와 `exec 훅 실패(…, 종료 코드 N)`·`DNS UPDATE 거부됨: NOTAUTH/NOTZONE`·`Cloudflare … HTTP 403` 같은 메시지로 원인 구분
+
+### T-18 웹방화벽(HTTP API) 배포 — API 문서 확보 후
+- **사전조건**: 제품 관리 API 문서로 `certdeploy.waf.example.yml` 을 실제 경로·필드로 바꿈, **시험용 가상 호스트/대기 장비**, [WAF 확인 질문 7가지](compatibility.md) 답 확보(특히 '적용' 이 다른 설정 변경까지 반영하는지)
+```bash
+$CD preflight
+```
+```bash
+$CD plan
+```
+```bash
+$CD deploy --target waf-main
+```
+- **기대**: `preflight` 가 API 관리 주소 도달·`rollback_steps` 설정을 확인(요청은 보내지 않음). `deploy` 가 로그인→업로드→적용→(wait)→TLS 일련번호 확인 후 `배포·확인 완료`. **의도적 실패 시험**: 적용 단계 URL 을 일부러 틀리게 하면 `rollback_steps` 가 실행되어 이전 인증서로 복귀(`롤백함`)하고 알림이 오며, 장비는 이전 인증서를 계속 서빙
+```bash
+$CD rollback --target waf-main
+```
+- **증거**: deploy 출력, 장비 관리 화면의 인증서 목록(이름·만료), 앞단 `openssl s_client` 일련번호
+- **주의**: 운영 장비는 시험 장비에서 통과한 뒤에, 점검 시간대에, 담당자 입회로
+
+### T-19 알림·감시 연동 종합
+```bash
+$CD diagnose --prometheus http://127.0.0.1:9090 --alertmanager http://127.0.0.1:9093 --pushgateway http://127.0.0.1:9091
+```
+- **기대**: 모든 점검 `OK`. 수신함/Teams 에서 (a) DNS TXT 등록 필요 알림(수동 모드), (b) 배포 실패 알림(T-07), (c) 해소 알림을 각각 1건 이상 확인. Grafana 「certdeploy」 패널에 대상별 상태·마지막 성공 경과·연속 발급 실패가 표시
+
+
+### T-20 개인키 저장 방식: 평문 ↔ 암호 보호 (둘 다 시험)
+- **절차**: 기본(평문)에서 `validate` 가 `평문(권한 600으로 보호)` 로 표시되는지 확인 → 암호 환경변수 준비(`/etc/certdeploy/env` 에 `CERTDEPLOY_KEY_PASSPHRASE`, 설정에 `key_password_env`) → 전환
+```bash
+$CD key-encrypt
+```
+  설정에 `key_encryption: passphrase` 를 켜고
+```bash
+$CD validate
+```
+```bash
+$CD deploy --force --target web-canary
+```
+- **기대**: `key-encrypt` 후 키 파일이 `BEGIN ENCRYPTED PRIVATE KEY`(0600), 변환 전 파일은 `*.key.bak-<시각>`(0600)으로 남음(확인 후 `shred -u` 로 삭제), `validate` 가 `암호화됨(…)`, **대상 서버에 배포된 키 파일은 평문(0600)** 이고 서비스 정상. 암호 환경변수를 빼고 실행하면 `개인키 암호화가 켜져 있습니다 — 환경변수 … 를 설정하세요` 로 중단. 되돌리기: `$CD key-decrypt` 후 설정을 `none` 으로
+- **재부팅 시험**: 암호 보호 상태에서 재부팅 → 타이머(`renew`)가 환경변수 파일의 암호로 정상 동작하는지(T-12 와 함께)
+
+### T-21 수동 교체 대상(웹방화벽 옵션 C) — API 문서 확인 전에도 가능
+- **사전조건**: `certdeploy.waf-manual.example.yml` 기반 설정, `WAF_PFX_PASSWORD` 설정, 메일 수신 가능
+```bash
+$CD deploy --target waf-main
+```
+- **기대**: `[waf-main] 수동 교체 대기 — 교체용 파일 …`, 종료 코드 **0**, `state_dir/handoff/waf-main/` 에 파일(디렉터리 0700, 개인키·PFX 0600)이 생기고 **메일로 '수동 교체 필요'** 도착. 담당자가 모니터랩 화면에서 PFX 업로드·적용 → WAF 앞단에서 새 일련번호가 서빙되면
+```bash
+$CD deploy --target waf-main
+```
+  `건너뜀 — 수동 교체 확인됨`, 교체용 파일 삭제, 해소 알림. 교체하지 않고 두면 다음 실행마다 같은 안내(3일 후 긴급 표시)와 감시 알림(1일 경고·3일 긴급), Grafana 「수동 교체 대기 장비」 패널에 대기 시간이 표시됨
+- `verify` 를 두지 않은 경우: 교체 후 `$CD confirm --target waf-main`
+```bash
+$CD confirm --target waf-main
+```
+
+---
 ## 결과 기록표
 | ID | 일시 | 수행자 | 합격(O/X) | 증거 파일/링크 | 비고(실패 시 번들 경로) |
 |---|---|---|---|---|---|
@@ -183,3 +291,12 @@ $CD trace --errors
 | T-11 | | | | | |
 | T-12 | | | | | |
 | T-13 | | | | | |
+| T-14 | | | | | |
+| T-15 | | | | | |
+| T-16 | | | | | |
+| T-17 | | | | | |
+| T-18 | | | | | |
+| T-19 | | | | | |
+| T-20 | | | | | |
+| T-21 | | | | | |
+| T-02a | | | | | |

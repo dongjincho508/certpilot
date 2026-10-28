@@ -4,7 +4,7 @@
 OS 를 '자동 감지'로 두면 /etc/os-release 의 ID/ID_LIKE 로 계열을 판별하고, 판별 못 하면 모든 계열의 합집합(generic)을 쓴다.
 """
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 OS_RELEASE = "/etc/os-release"

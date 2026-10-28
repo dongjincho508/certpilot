@@ -7,7 +7,7 @@ import socket
 import sys
 import urllib.error
 import urllib.request
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from . import netutil
 from .trace import redact

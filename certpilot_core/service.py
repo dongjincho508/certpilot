@@ -5,11 +5,11 @@ import posixpath
 import re
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from typing import Callable, Dict, List, Optional
+from typing import Callable, List, Optional
 
 from . import status as st
 from .audit_storage import AuditLogWriter
-from .remote import CAUSE_INFO, ParamikoExecutor, RemoteExecutor, is_safe_path
+from .remote import ParamikoExecutor, RemoteExecutor, is_safe_path
 from .osprofiles import AUTO, VALID_OS_TYPES
 from .scanner import Scanner, Target
 from .store import Store

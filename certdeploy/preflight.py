@@ -55,6 +55,53 @@ def _check_command(t, label: str, cmd: Optional[str], out: List[Check], tr) -> N
     out.append(Check(t.name, f"{label} 명령({first})", r.ok, "있음" if r.ok else "원격 서버에서 찾을 수 없습니다"))
 
 
+def _check_manual(d, t, out: List[Check]) -> None:
+    import os
+    m = t.manual
+    folder = d._handoff_dir(t)
+    parent = os.path.dirname(folder.rstrip("/"))
+    while parent and not os.path.isdir(parent):
+        parent = os.path.dirname(parent)
+    out.append(Check(t.name, "교체용 파일 위치", bool(parent) and os.access(parent, os.W_OK), folder))
+    if "pfx" in m["formats"]:
+        out.append(Check(t.name, "PFX 비밀번호", bool(d.environ.get(m["pfx_password_env"] or "")), f"환경변수 {m['pfx_password_env']}"))
+    if not t.verify:
+        out.append(Check(t.name, "완료 확인", True, "verify 가 없어 교체 후 `confirm` 으로 완료를 기록해야 합니다"))
+    else:
+        try:
+            got = d._tls(t)
+            out.append(Check(t.name, "현재 TLS", True, f"서빙 중 일련번호 {got:x}" + (" (이미 최신)" if got == d.bundle.serial else " (교체 필요)")))
+        except VerifyError as e:
+            out.append(Check(t.name, "현재 TLS", False, str(e)))
+
+
+def _check_api(d, t, out: List[Check]) -> None:
+    """API 대상: 관리 주소의 TCP/TLS 도달성만 확인한다(로그인·변경 요청은 보내지 않는다)."""
+    import socket
+    import ssl
+    import urllib.parse
+    base = t.api.get("base_url") or next((s["url"] for s in t.api["steps"] if str(s["url"]).startswith("http")), "")
+    u = urllib.parse.urlparse(base)
+    port = u.port or (443 if u.scheme == "https" else 80)
+    try:
+        with socket.create_connection((u.hostname, port), timeout=8) as s:
+            if u.scheme == "https":
+                ctx = ssl.create_default_context(cafile=t.api.get("ca_file")) if t.api.get("verify_tls") is not False else ssl._create_unverified_context()  # nosec B323
+                with ctx.wrap_socket(s, server_hostname=u.hostname):
+                    pass
+        out.append(Check(t.name, "API 관리 주소", True, f"{u.hostname}:{port} 도달"))
+    except (OSError, ssl.SSLError) as e:
+        out.append(Check(t.name, "API 관리 주소", False, f"{u.hostname}:{port} {type(e).__name__}: {e}"))
+    if not t.api.get("rollback_steps"):
+        out.append(Check(t.name, "롤백 설정", False, "rollback_steps 가 없어 실패 시 자동 롤백이 되지 않습니다(권장: 설정)"))
+    if t.verify:
+        try:
+            got = d._tls(t)
+            out.append(Check(t.name, "현재 TLS", True, f"서빙 중 일련번호 {got:x}" + (" (이미 최신)" if got == d.bundle.serial else "")))
+        except VerifyError as e:
+            out.append(Check(t.name, "현재 TLS", False, str(e)))
+
+
 def run_preflight(d: Deployer, only=None) -> List[Check]:
     out: List[Check] = []
     for problem in d.validate_targets():
@@ -69,6 +116,12 @@ def run_preflight(d: Deployer, only=None) -> List[Check]:
             if first:
                 out.append(Check(t.name, f"{label}({first})", shutil.which(first) is not None,
                                  "있음" if shutil.which(first) else "certdeploy 서버에서 찾을 수 없습니다"))
+        if t.manual:
+            _check_manual(d, t, out)
+            continue
+        if t.api:
+            _check_api(d, t, out)
+            continue
         try:
             tr = d.transport_factory(t.transport)
         except TransportError as e:

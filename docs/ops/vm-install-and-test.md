@@ -6,6 +6,8 @@
 > ⚠️ **현재 RapidSSL 와일드카드는 2026-11-12 08:59(KST) 만료**다. 이 시스템의 시험 완료를 기다리지 말고, 만료 전 교체는 기존 절차([교체 체크리스트](cert-rotation-checklist.md))로 진행한다. 교체본으로 8~9단계를 처음 실사용해도 된다(실패하면 자동 롤백).
 > 이 문서의 OS 명령은 RHEL 계열 표준 절차이며 Rocky 10 에서 직접 실행해 보지는 못했다. 막히면 **그 단계의 명령과 출력**을 알려 달라.
 
+> 📋 설치 전에 정할 것·모을 정보·요청 문구는 **[VM 구성 전 준비 체크리스트](pre-vm-checklist.md)**, 검증 현황은 [검증 보고서](verification-report.md).
+
 ## 구성
 ```
  관리자 PC ──HTTPS 443──▶ [관리 서버 Rocky 10]
@@ -15,6 +17,17 @@
  감시: 관리 서버 ──TLS 접속──▶ 대상 서버들의 443/8443 …
 ```
 개인키는 관리 서버의 `certdeploy` 계정만 접근한다. 관리자 계정(`certadmin`)은 개인키를 읽을 수 없게 둔다(권한 700/600).
+
+## 예상 화면 (설치 후 이렇게 보인다)
+> 아래는 **시험 환경에서 만든 예상 화면**이다. CertPilot 웹 앱 화면은 관리 서버에 설치되지 않으며(보류·미사용), 관리 서버에서 보는 화면은 **① Grafana 대시보드 ② 터미널 `certdeploy` 출력 ③ 알림(메일/Teams)** 이다.
+
+**① Grafana 「인증서 현황」** — 시험용 TLS 서버 5대와 가상 certdeploy 지표를 *실제* Prometheus·ssl_exporter 로 수집해 대시보드 JSON 의 쿼리를 그대로 실행한 결과(Grafana 자체는 이 환경에서 실행하지 못해 레이아웃을 재현했으므로 실제 모양과 다소 다를 수 있음). 상단 카드(감시 대상·조회 실패·30일 이내 만료·만료됨), 만료 임박 순 표, 같은 인증서를 쓰는 서버 수, 와일드카드 사용 현황, certdeploy 배포 상태·마지막 성공 이후 경과·연속 발급 실패.
+![Grafana 인증서 현황(예상)](images/grafana-expected.png)
+
+**② 터미널 `certdeploy`** — 실제 certdeploy 를 시험 환경(로컬 대상 3개, 가짜 CA)에서 실행한 출력. 세 번째 대상의 재로드 실패 → 자동 롤백 → 원인 제거 후 재배포(이미 배포된 대상은 건너뜀) → `check`.
+![certdeploy 터미널 출력(예상)](images/terminal-expected.png)
+
+**③ 알림** — 배포 실패·DNS TXT 등록 필요·만료 임박 알림이 메일/Teams 로 전달되고, 해소되면 복구 알림이 온다(T-02, T-19 에서 확인).
 
 ## 0. 준비물 (설치 전)
 - [ ] VM: 4 vCPU / 8 GB / 디스크 100 GB 이상(`/var` 40 GB 이상). **CPU 는 x86-64-v3 지원**(VM 설정에서 호스트 CPU 통과) — 아니면 Rocky 10 이 설치·부팅되지 않는다
@@ -217,12 +230,21 @@ sudo cp /opt/cert-monitor/src/certdeploy/certdeploy.manual.example.yml /etc/cert
 ```bash
 echo 'TOMCAT_KS_PASS=<비밀번호>' | sudo tee /etc/certdeploy/env >/dev/null && sudo chown certdeploy:certdeploy /etc/certdeploy/env && sudo chmod 600 /etc/certdeploy/env
 ```
+**알림은 메일 우선**: 설정의 `notify.smtp`(예시 파일에 포함)에 SMTP 서버·수신자를 채우고 비밀번호는 `/etc/certdeploy/env` 에 `SMTP_PASSWORD=…` 로 둔다. Alertmanager(감시 알림)의 메일 설정은 5단계. 설정 후 시험 메일을 보낸다(아래 `$CD` 정의 뒤):
+```bash
+$CD notify-test
+```
+**개인키 저장 방식(선택)**: 기본은 평문(권한 600). 암호로 보호하려면 설정에 `key_encryption: passphrase`, `key_password_env: CERTDEPLOY_KEY_PASSPHRASE` 를 켜고 암호를 `/etc/certdeploy/env` 에 둔 뒤 `$CD key-encrypt` 로 변환한다(설명·장단점: [준비 체크리스트 D9](pre-vm-checklist.md), 시험 T-20). 어느 쪽이든 대상 서버에 배포되는 키는 평문이다.
+
 편의 변수(이후 명령에서 사용 — 새 터미널마다 다시 지정):
 ```bash
 CD="sudo -u certdeploy /opt/certdeploy/venv/bin/certdeploy -c /etc/certdeploy/certdeploy.yml"
 ```
 
-### 7-3. (선택) lego 자동 발급을 쓸 때만
+### 7-3. (선택) 자동 발급 — **내장 ACME(권장, lego 불필요)** 또는 lego
+내장 ACME(Let's Encrypt, DNS-01)는 [자동 발급 가이드](auto-issue.md)를 따른다(설정 예시 `certdeploy/certdeploy.acme.example.yml`, Infoblox 연동 또는 수동 TXT 방식). 아래는 lego 를 대신 쓰고 싶을 때만 필요하다.
+
+#### lego 설치(대체 방식)
 ```bash
 LEGO_VER=X.Y.Z   # https://github.com/go-acme/lego/releases 에서 확인한 최신 버전 번호로 바꾼다
 ```
@@ -343,7 +365,7 @@ mkdir -p /opt/cert-monitor/backup && cd /opt/cert-monitor/src/monitoring && dock
 ```bash
 sudo cp /opt/cert-monitor/src/certdeploy/systemd/certdeploy-renew.* /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now certdeploy-renew.timer
 ```
-수동 인증서 운영은 타이머가 필요 없다. 만료 임박은 감시 스택 알림(60/30/14/7일)이 알려 주고, 갱신 때 9단계를 반복한다.
+수동 인증서 운영은 타이머가 필요 없다. 만료 임박은 감시 스택 알림(60/30/14/7일)이 알려 주고, 갱신 때 9단계를 반복한다(유효기간이 단축되므로 장기적으로는 [자동 발급](auto-issue.md)으로 전환).
 **업그레이드**: `cd /opt/cert-monitor/src && git pull` → 감시는 `docker compose pull && docker compose up -d`, certdeploy 는 `sudo /opt/certdeploy/venv/bin/pip install --upgrade /opt/cert-monitor/src`.
 
 ## 11. 시험·버그 수집
@@ -373,5 +395,5 @@ $CD diagnose --out /tmp/diag.json
 - [ ] T-01~T-13 합격 · 결과표 보관
 - [ ] VMware: EVC/CPU 호환성 확인, VMware Tools 시간 동기화 끔, 스냅샷 없음(작업 시에만), VM 콘솔·스냅샷·백업 접근 인원 최소화, 디스크 암호화 방식(LUKS 또는 vSphere 암호화) 결정·암호 봉인 보관
 - [ ] 개인키 권한 600, `certdeploy` 계정 외 접근 불가, 백업본 암호화 보관·복원 시험 완료
-- [ ] 알림 수신자·야간/휴일 담당 확정, 갱신 달력(약 200일 주기, 단축 예정) 등록
+- [ ] 알림 수신자·야간/휴일 담당 확정, 갱신 달력 등록(수동 방식: 현재 약 200일, **2027-03-15 부터 100일, 2029-03-15 부터 47일** → 자동 발급 전환 계획)
 - [ ] 담당자 2인 이상이 접속·재기동·롤백(`rollback --target`)·복구 방법 숙지

@@ -1,6 +1,5 @@
 """수동 발급 인증서(상용 CA 구매 등) 흐름: CSR 생성 → CA 가 준 파일 정리·검증 → 설치 → 자동 배포."""
 import os
-import shutil
 import stat
 import subprocess
 

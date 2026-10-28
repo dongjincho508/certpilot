@@ -1,0 +1,67 @@
+# Let's Encrypt 자동 발급(내장 ACME 클라이언트, DNS-01) + 자동 배포 — hnu.kr / hannam.ac.kr 예시
+# 복사:  sudo cp certdeploy/certdeploy.acme.example.yml /etc/certdeploy/certdeploy.yml
+# 절차:  docs/ops/auto-issue.md   (반드시 issue --staging 로 먼저 시험)
+# 비밀(Infoblox 계정)은 이 파일에 쓰지 않고 /etc/certdeploy/env 의 환경변수(이름만 여기서 참조)로 둔다.
+
+state_dir: /var/lib/certdeploy
+audit_log: /var/lib/certdeploy/audit
+
+notify:
+  alertmanager_url: http://127.0.0.1:9093
+  pushgateway_url: http://127.0.0.1:9091
+  # 메일(우선 채널): 실패·수동 교체 필요·DNS TXT 등록 필요는 항상, 성공 요약은 on_success 가 true 일 때. 비밀번호는 /etc/certdeploy/env 의 SMTP_PASSWORD
+  smtp: {host: smtp.hnu.kr, port: 587, starttls: true, from: cert-deploy@hnu.kr, to: [cert-admin@hnu.kr], username: cert-deploy, password_env: SMTP_PASSWORD, on_success: true}
+  # webhook: {url_env: CERTDEPLOY_WEBHOOK_URL, format: teams}      # Teams 는 이후 추가(웹훅 URL 은 환경변수로)
+
+defaults:
+  transport: {kind: ssh, user: deploy, key_file: /var/lib/certdeploy/.ssh/id_ed25519, known_hosts: /var/lib/certdeploy/.ssh/known_hosts}
+
+# 도메인마다 인증서를 따로 발급한다(개인키 분리). 하나로 합치려면 domains 에 4개를 모두 넣고
+# certificates 대신 acme/targets 를 최상위에 둔다.
+certificates:
+  - name: hnu
+    acme:
+      email: cert-admin@hnu.kr                  # 만료·문제 안내를 받을 주소
+      domains: ["hnu.kr", "*.hnu.kr"]           # 와일드카드는 루트를 포함하지 않으므로 루트도 함께
+      key_type: rsa2048                         # rsa2048|rsa3072|rsa4096|ec256|ec384 (구형 서버 호환은 rsa2048)
+      renew_days: 30                            # 만료 30일 이내일 때만 갱신(타이머가 매일 renew 실행)
+      dns:
+        mode: infoblox                          # infoblox(자동 등록·삭제) | manual(사람이 TXT 등록)
+        check_resolvers: ["203.0.113.53"]       # 전파 확인할 DNS(권장: 이 영역의 권한 DNS IP). 생략하면 서버 DNS 설정 사용
+        propagation_timeout: 300                # TXT 가 보일 때까지 최대 대기(초)
+        infoblox:
+          host: infoblox-gm.hnu.kr              # Grid Master (WAPI 주소)
+          wapi_version: v2.12                   # 장비가 지원하는 WAPI 버전
+          view: external                        # 공개 DNS 뷰 이름(뷰를 안 쓰면 생략)
+          user_env: INFOBLOX_USER               # 계정·비밀번호는 환경변수 이름으로만 참조
+          password_env: INFOBLOX_PASSWORD
+          # ca_file: /etc/pki/ca-trust/source/anchors/infoblox-ca.pem   # 사설 CA 인증서일 때
+          # ttl: 60
+    targets:
+      - name: hnu-web-canary
+        type: apache
+        canary: true
+        order: 1
+        transport: {host: www1.hnu.kr}
+        cert_path: /etc/ssl/hnu/fullchain.pem
+        key_path: /etc/ssl/hnu/privkey.pem
+        reload_cmd: sudo -n systemctl reload httpd
+        verify: {host: www1.hnu.kr, port: 443, strict: true}
+
+  - name: hannam
+    acme:
+      email: cert-admin@hnu.kr
+      domains: ["hannam.ac.kr", "*.hannam.ac.kr"]
+      dns:
+        mode: manual                            # Infoblox API 없이: TXT 안내 → 사람이 등록 → 재실행하면 발급
+        check_resolvers: ["203.0.113.53"]
+    targets:
+      - name: hannam-web-canary
+        type: apache
+        canary: true
+        order: 1
+        transport: {host: www.hannam.ac.kr}
+        cert_path: /etc/ssl/hannam/fullchain.pem
+        key_path: /etc/ssl/hannam/privkey.pem
+        reload_cmd: sudo -n systemctl reload httpd
+        verify: {host: www.hannam.ac.kr, port: 443, strict: true}
