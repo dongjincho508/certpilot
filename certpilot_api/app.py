@@ -56,10 +56,10 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
         resp.headers["X-Content-Type-Options"] = "nosniff"
         resp.headers["X-Frame-Options"] = "DENY"
         resp.headers["Referrer-Policy"] = "no-referrer"
+        # 외부 CDN 없이 모든 자산을 /static/vendor 에서 제공하므로 self 만 허용한다.
         resp.headers["Content-Security-Policy"] = (
-            "default-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net "
-            "https://cdnjs.cloudflare.com; script-src 'self' https://cdn.jsdelivr.net; "
-            "font-src 'self' https://cdnjs.cloudflare.com; img-src 'self' data:")
+            "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; "
+            "font-src 'self'; img-src 'self' data:; frame-ancestors 'none'")
         if request.path not in ("/",) and not request.path.startswith("/static/"):
             resp.headers["Cache-Control"] = "no-store"
         return resp

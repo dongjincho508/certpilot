@@ -38,8 +38,11 @@ def test_health_public(ctx):
 def test_index_and_static_public(ctx):
     c = ctx.client()
     assert c.get("/").status_code == 200
-    assert c.get("/static/css/style.css").status_code == 200
-    assert c.get("/static/js/app.js").status_code == 200
+    for path in ("/static/css/app.css", "/static/js/app.js", "/static/js/theme.js",
+                 "/static/vendor/flatly.min.css", "/static/vendor/darkly.min.css",
+                 "/static/vendor/bootstrap.bundle.min.js", "/static/vendor/bootstrap-icons.min.css",
+                 "/static/vendor/fonts/bootstrap-icons.woff2"):
+        assert c.get(path).status_code == 200, path
 
 
 @pytest.mark.parametrize("method,path", [
@@ -219,3 +222,14 @@ def test_change_password_flow(ctx):  # S-6
     assert c.get("/servers").status_code == 401  # 기존 세션 폐기
     assert login(ctx.client(), pw=PW).status_code == 401
     assert login(ctx.client(), pw=PW + "2").status_code == 200
+
+
+def test_ui_has_no_external_dependencies(ctx):  # 폐쇄망 동작 + CSP self 전용
+    import re
+    c = ctx.client()
+    html = c.get("/").get_data(as_text=True)
+    assert not re.search(r'(?:src|href)="https?://', html)
+    for css in ("flatly", "darkly"):
+        assert "@import" not in c.get(f"/static/vendor/{css}.min.css").get_data(as_text=True)
+    csp = c.get("/").headers["Content-Security-Policy"]
+    assert "http" not in csp and "script-src 'self'" in csp

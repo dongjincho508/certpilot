@@ -34,7 +34,7 @@ python -m certpilot_cli.cli audit-verify /data/audit
 certpilot_core/  status · remote(명령 정책·SSH) · scanner · cert_parser · store · auth · audit_storage · service
 certpilot_api/   Flask create_app() (인증·RBAC·REST)
 certpilot_cli/   로컬 점검 CLI
-frontend/        단일 페이지 UI (로그인·현황·상세·등록·감사·사용자)
+frontend/        단일 페이지 UI — Bootstrap 5 + Bootswatch(Flatly/Darkly 라이트·다크), 외부 CDN 없음(vendor/ 포함)
 tests/           pytest (단위·API·통합) / scripts/ 개발 서버·화면 스모크
 docs/            PRD · 결정 기록 · ARCHITECTURE · TRACEABILITY · OPEN_ITEMS · design/ · history/ · archive/
 ```
