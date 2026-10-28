@@ -63,7 +63,7 @@ def serve_static(filename):
     if filename.startswith('css/'):
         return send_from_directory(os.path.join(app.static_folder, 'css'), filename[4:])
     elif filename.startswith('js/'):
-        return send_from_directory(os.path.join(app.static_folder, 'js'), filename[2:])
+        return send_from_directory(os.path.join(app.static_folder, 'js'), filename[3:])
     return send_from_directory(app.static_folder, filename)
 
 

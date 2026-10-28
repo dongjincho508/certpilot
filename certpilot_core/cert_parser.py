@@ -2,12 +2,20 @@
 CertPilot Core - Certificate Parser Module
 PEM/PKCS#12/JKS 인증서 파싱 모듈
 """
+import os
+import re
 import subprocess
 import tempfile
-import os
-from datetime import datetime
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import List, Optional
+
+from cryptography import x509
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
+from cryptography.hazmat.primitives.serialization import pkcs12
+
+_PEM_BLOCK = re.compile(
+    r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----", re.DOTALL)
 
 
 @dataclass
@@ -31,234 +39,90 @@ class CertificateInfo:
             self.subject_alt_name = []
 
 
-def parse_pem_certificates(cert_path: str) -> List[CertificateInfo]:
-    """
-    PEM 형식 인증서 파싱
-    단일 또는 멀티파트 PEM 인증서를 파싱하여 인증서 정보를 반환
-    """
+def _to_info(cert: x509.Certificate, now: Optional[datetime] = None) -> CertificateInfo:
+    """cryptography 인증서 객체를 CertificateInfo 로 변환 (시각은 UTC naive)"""
+    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    not_before = cert.not_valid_before_utc.replace(tzinfo=None)
+    not_after = cert.not_valid_after_utc.replace(tzinfo=None)
+    pub = cert.public_key()
+    if isinstance(pub, rsa.RSAPublicKey):
+        algo = "rsaEncryption"
+    elif isinstance(pub, ec.EllipticCurvePublicKey):
+        algo = "id-ecPublicKey"
+    else:
+        algo = type(pub).__name__
+    try:
+        san_ext = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName)
+        sans = [f"DNS:{n}" for n in san_ext.value.get_values_for_type(x509.DNSName)]
+        sans += [f"IP:{n}" for n in san_ext.value.get_values_for_type(x509.IPAddress)]
+    except x509.ExtensionNotFound:
+        sans = []
+    sig = cert.signature_algorithm_oid._name or cert.signature_algorithm_oid.dotted_string
+    return CertificateInfo(
+        subject=cert.subject.rfc4514_string(),
+        issuer=cert.issuer.rfc4514_string(),
+        serial=format(cert.serial_number, "x"),
+        not_before=not_before,
+        not_after=not_after,
+        version=cert.version.value + 1,
+        signature_algorithm=sig,
+        public_key_algorithm=algo,
+        public_key_bits=getattr(pub, "key_size", 0),
+        is_expired=not_after < now,
+        is_not_yet_valid=not_before > now,
+        subject_alt_name=sans,
+    )
+
+
+def parse_pem_text(pem_text: str) -> List[CertificateInfo]:
+    """PEM 문자열(멀티파트 가능)에서 인증서를 파싱. 깨진 블록은 건너뛴다."""
     certs = []
-    current_cert = []
-    
-    with open(cert_path, 'r') as f:
-        for line in f:
-            if line.strip().startswith('-----BEGIN CERTIFICATE-----'):
-                current_cert = [line]
-            elif line.strip().startswith('-----END CERTIFICATE-----'):
-                current_cert.append(line)
-                cert_pem = ''.join(current_cert)
-                cert_info = _parse_pem_cert(cert_pem)
-                if cert_info:
-                    certs.append(cert_info)
-                current_cert = []
-            elif current_cert:
-                current_cert.append(line)
-    
+    for block in _PEM_BLOCK.findall(pem_text):
+        try:
+            certs.append(_to_info(x509.load_pem_x509_certificate(block.encode())))
+        except ValueError:
+            continue
     return certs
 
 
-def _parse_pem_cert(cert_pem: str) -> Optional[CertificateInfo]:
-    """PEM 인증서 하나를 파싱"""
-    try:
-        # OpenSSL 명령 실행
-        result = subprocess.run(
-            ['openssl', 'x509', '-noout', '-text'],
-            input=cert_pem,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-        
-        if result.returncode != 0:
-            return None
-        
-        output = result.stdout
-        cert_info = _parse_x509_output(output)
-        return cert_info
-        
-    except Exception as e:
-        return None
-
-
-def _parse_x509_output(output: str) -> Optional[CertificateInfo]:
-    """OpenSSL x509 -noout -text 출력 파싱"""
-    import re
-    
-    cert_info = CertificateInfo(
-        subject="",
-        issuer="",
-        serial="",
-        not_before=datetime.now(),
-        not_after=datetime.now(),
-        version=0,
-        signature_algorithm="",
-        public_key_algorithm="",
-        public_key_bits=0,
-        is_expired=False,
-        is_not_yet_valid=False
-    )
-    
-    # Subject 파싱
-    subject_match = re.search(r'Subject:\s+(.*)', output)
-    if subject_match:
-        cert_info.subject = subject_match.group(1).strip()
-    
-    # Issuer 파싱
-    issuer_match = re.search(r'Issuer:\s+(.*)', output)
-    if issuer_match:
-        cert_info.issuer = issuer_match.group(1).strip()
-    
-    # Serial 파싱
-    serial_match = re.search(r'Serial Number:\s+(.*)', output)
-    if serial_match:
-        cert_info.serial = serial_match.group(1).strip()
-    
-    # Validity dates 파싱
-    not_before_match = re.search(r'Not Before:\s+(.*)', output)
-    not_after_match = re.search(r'Not After:\s+(.*)', output)
-    
-    if not_before_match:
-        try:
-            cert_info.not_before = datetime.strptime(
-                not_before_match.group(1).strip(),
-                '%b %d %H:%M:%S %Y %Z'
-            )
-        except ValueError:
-            # 시간대 제거
-            try:
-                cert_info.not_before = datetime.strptime(
-                    not_before_match.group(1).strip(),
-                    '%b %d %H:%M:%S %Y'
-                )
-            except ValueError:
-                pass
-    
-    if not_after_match:
-        try:
-            cert_info.not_after = datetime.strptime(
-                not_after_match.group(1).strip(),
-                '%b %d %H:%M:%S %Y %Z'
-            )
-        except ValueError:
-            try:
-                cert_info.not_after = datetime.strptime(
-                    not_after_match.group(1).strip(),
-                    '%b %d %H:%M:%S %Y'
-                )
-            except ValueError:
-                pass
-    
-    # Version 파싱
-    version_match = re.search(r'Version:\s+(\d+)', output)
-    if version_match:
-        cert_info.version = int(version_match.group(1))
-    
-    # Signature Algorithm 파싱
-    sig_alg_match = re.search(r'Signature Algorithm:\s+(.*)', output)
-    if sig_alg_match:
-        cert_info.signature_algorithm = sig_alg_match.group(1).strip()
-    
-    # Public Key Algorithm 파싱
-    pub_key_match = re.search(r'Public Key Algorithm:\s+(.*)', output)
-    if pub_key_match:
-        cert_info.public_key_algorithm = pub_key_match.group(1).strip()
-    
-    # Public Key Bits 파싱
-    key_bits_match = re.search(r'Public-Key:\s+(\d+ bit)', output)
-    if key_bits_match:
-        cert_info.public_key_bits = int(key_bits_match.group(1))
-    
-    # Subject Alternative Name 파싱
-    san_match = re.search(r'Subject Alternative Name:\s+(.*)', output)
-    if san_match:
-        cert_info.subject_alt_name = [san_match.group(1).strip()]
-    
-    # 인증서 유효성 검사
-    now = datetime.now()
-    cert_info.is_expired = cert_info.not_after < now
-    cert_info.is_not_yet_valid = cert_info.not_before > now
-    
-    return cert_info
+def parse_pem_certificates(cert_path: str) -> List[CertificateInfo]:
+    """PEM 파일 경로에서 인증서 파싱 (개인키 블록은 읽지 않는다)"""
+    with open(cert_path, "r", errors="replace") as f:
+        return parse_pem_text(f.read())
 
 
 def parse_pkcs12(pfx_path: str, pfx_password: str = None) -> List[CertificateInfo]:
-    """
-    PKCS#12 (.pfx/.p12) 인증서 파싱
-    """
-    certs = []
-    
+    """PKCS#12 (.pfx/.p12) 에서 인증서만 추출 (개인키는 메모리에서도 사용하지 않고 버린다)"""
     try:
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.pem', delete=False) as tmp:
-            tmp_path = tmp.name
-        
-        try:
-            # OpenSSL로 PKCS#12를 PEM으로 변환
-            cmd = ['openssl', 'pkcs12', '-in', pfx_path, '-out', tmp_path, '-nodes']
-            if pfx_password:
-                cmd.extend(['-passin', f'pass:{pfx_password}'])
-            
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-            
-            if result.returncode == 0:
-                # 변환된 PEM 파일 파싱
-                certs = parse_pem_certificates(tmp_path)
-            else:
-                # 오류 로깅
-                print(f"PKCS#12 파싱 오류: {result.stderr}")
-                
-        finally:
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-    
-    except Exception as e:
-        print(f"PKCS#12 파싱 에러: {e}")
-    
+        with open(pfx_path, "rb") as f:
+            data = f.read()
+        pw = pfx_password.encode() if pfx_password else None
+        p12 = pkcs12.load_pkcs12(data, pw)
+    except (ValueError, OSError):
+        return []
+    certs = []
+    if p12.cert:
+        certs.append(_to_info(p12.cert.certificate))
+    certs.extend(_to_info(c.certificate) for c in p12.additional_certs)
     return certs
 
 
-def parse_jks(jks_path: str, keytool_path: str = 'keytool') -> List[CertificateInfo]:
-    """
-    JKS (Java KeyStore) 인증서 파싱
-    (Java keytool이 필요하고, JKS 파일을 PEM으로 변환)
-    """
-    certs = []
-    
-    try:
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.pem', delete=False) as tmp:
-            tmp_path = tmp.name
-        
+def parse_jks(jks_path: str, keytool_path: str = "keytool",
+              password: str = "changeit") -> List[CertificateInfo]:
+    """JKS 에서 인증서만 추출 (keytool 로 임시 PKCS#12 변환 후 파싱)"""
+    with tempfile.TemporaryDirectory() as tmp:
+        dest = os.path.join(tmp, "out.p12")
+        cmd = [keytool_path, "-importkeystore",
+               "-srckeystore", jks_path, "-srcstoretype", "JKS", "-srcstorepass", password,
+               "-destkeystore", dest, "-deststoretype", "PKCS12", "-deststorepass", password,
+               "-noprompt"]
         try:
-            # JKS를 PFX로 변환 (keytool 사용)
-            cmd = [
-                keytool_path, '-importkeystore',
-                '-srckeystore', jks_path,
-                '-srcstoretype', 'JKS',
-                '-destkeystore', tmp_path + '.pfx',
-                '-deststoretype', 'PKCS12'
-            ]
-            
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-            
-            if result.returncode == 0:
-                # PFX를 PEM으로 변환
-                openssl_cmd = [
-                    'openssl', 'pkcs12', '-in', tmp_path + '.pfx',
-                    '-out', tmp_path, '-nodes'
-                ]
-                result2 = subprocess.run(openssl_cmd, capture_output=True, text=True, timeout=60)
-                
-                if result2.returncode == 0:
-                    certs = parse_pem_certificates(tmp_path)
-            
-            os.unlink(tmp_path + '.pfx')
-            
-        finally:
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-    
-    except Exception as e:
-        print(f"JKS 파싱 에러: {e}")
-    
-    return certs
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.TimeoutExpired):
+            return []
+        if r.returncode != 0 or not os.path.exists(dest):
+            return []
+        return parse_pkcs12(dest, password)
 
 
 if __name__ == "__main__":

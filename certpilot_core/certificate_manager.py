@@ -4,7 +4,7 @@ CertPilot Core - Certificate Manager Module
 """
 from datetime import datetime
 from typing import List, Dict, Any
-from .cert_parser import parse_pem_certificates, parse_pkcs12, parse_jks, CertificateInfo
+from .cert_parser import parse_pem_text, parse_pem_certificates, parse_pkcs12, parse_jks, CertificateInfo
 from .ssh_integration import SSHClientWrapper, Server
 
 
@@ -133,7 +133,7 @@ class CertificateManager:
             cert_content = stdout.read().decode('utf-8', errors='replace')
             
             # 인증서 파싱
-            certs = parse_pem_certificates(cert_content)
+            certs = parse_pem_text(cert_content)
             
             if certs:
                 cert = certs[0]

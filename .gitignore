@@ -16,3 +16,6 @@ __pycache__/
 .vscode/
 .idea/
 *.swp
+
+# pytest
+.pytest_cache/

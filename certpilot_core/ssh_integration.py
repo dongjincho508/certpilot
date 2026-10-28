@@ -291,8 +291,8 @@ class ServerManager:
         
         # 인증서 정보 파싱
         try:
-            from certpilot_core.cert_parser import parse_pem_certificates
-            certs = parse_pem_certificates(cert_content)
+            from certpilot_core.cert_parser import parse_pem_text
+            certs = parse_pem_text(cert_content)
             
             if certs:
                 return {
