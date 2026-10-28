@@ -19,10 +19,10 @@ COPY certpilot_api/ certpilot_api/
 COPY frontend/ frontend/
 COPY docker/manager/startup.sh /app/startup.sh
 
-# 비루트 사용자로 실행. /data 는 DB·감사 로그 저장소(볼륨)
+# 앱은 비루트 사용자(10001)로 실행한다. Render 디스크는 root 소유로 마운트되므로
+# 컨테이너는 root 로 시작해 /data 소유권을 맞춘 뒤 startup.sh 가 권한을 내린다(setpriv).
 RUN useradd --system --uid 10001 certpilot && mkdir -p /data && chown certpilot /data \
     && chmod +x /app/startup.sh
-USER certpilot
 VOLUME ["/data"]
 EXPOSE 8080
 

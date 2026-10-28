@@ -233,3 +233,18 @@ def test_ui_has_no_external_dependencies(ctx):  # 폐쇄망 동작 + CSP self �
         assert "@import" not in c.get(f"/static/vendor/{css}.min.css").get_data(as_text=True)
     csp = c.get("/").headers["Content-Security-Policy"]
     assert "http" not in csp and "script-src 'self'" in csp
+
+
+def test_boots_even_if_admin_password_is_weak(tmp_path, capsys):
+    app = create_app({"DATA_DIR": str(tmp_path), "ADMIN_USER": "admin", "ADMIN_PASSWORD": "weak",
+                      "SECURE_COOKIE": False})
+    assert app.test_client().get("/health").status_code == 200
+    err = capsys.readouterr().err
+    assert "최초 관리자 생성 실패" in err and "weak" not in err.replace("weak_password", "")
+
+
+def test_unwritable_data_dir_gives_clear_error(tmp_path):
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    with pytest.raises(RuntimeError, match="데이터 디렉터리"):
+        create_app({"DATA_DIR": str(blocker / "sub")})

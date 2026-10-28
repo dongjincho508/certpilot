@@ -35,7 +35,15 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
         **(config or {}),
     }
     data_dir = Path(cfg["DATA_DIR"])
-    data_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        data_dir.mkdir(parents=True, exist_ok=True)
+        probe_file = data_dir / ".write-test"
+        probe_file.write_text("ok")
+        probe_file.unlink()
+    except OSError as e:
+        raise RuntimeError(
+            f"데이터 디렉터리({data_dir})에 쓸 수 없습니다: {e}. "
+            "Render 디스크는 root 소유로 마운트되므로 컨테이너를 root 로 시작해 소유권을 맞춰야 합니다.") from e
     store = Store(cfg.get("DB_PATH") or str(data_dir / "certpilot.db"))
     audit = AuditLogWriter(cfg["AUDIT_DIR"] or str(data_dir / "audit"), log_type="certpilot")
     kw = {"sleep": sleep} if sleep else {}
@@ -45,7 +53,12 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
                        **{k: cfg[k] for k in ("max_failures", "lock_minutes", "max_sessions") if k in cfg})
 
     if cfg["ADMIN_USER"] and cfg["ADMIN_PASSWORD"] and not store.get_user(cfg["ADMIN_USER"]):
-        auth.create_user(cfg["ADMIN_USER"], cfg["ADMIN_PASSWORD"], ADMIN)
+        try:
+            auth.create_user(cfg["ADMIN_USER"], cfg["ADMIN_PASSWORD"], ADMIN)
+        except AuthError as e:  # 서버가 죽지 않도록 하고, 원인은 로그에 명확히 남긴다 (비밀번호 값은 기록하지 않음)
+            import sys
+            print(f"오류: 최초 관리자 생성 실패 — {e.message} (CERTPILOT_ADMIN_USER/PASSWORD 를 확인하세요)",
+                  file=sys.stderr, flush=True)
 
     app = Flask(__name__, static_folder=None)
     app.extensions["certpilot"] = {"store": store, "audit": audit, "service": service, "auth": auth}
