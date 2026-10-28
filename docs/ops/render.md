@@ -16,7 +16,10 @@
 1. Render 대시보드 → New → Blueprint → 이 저장소 선택 (`render.yaml` 자동 인식)
 2. 비밀 값 입력
    - `CERTPILOT_ADMIN_PASSWORD`: 12자 이상, 대/소문자·숫자·특수문자 중 3종 이상, 계정명 미포함
-   - `CERTPILOT_SSH_PRIVATE_KEY_B64` (권장): `base64 -w0 certpilot_scan` 의 출력(한 줄). macOS 는 `base64 -i certpilot_scan | tr -d '\n'`
+   - `CERTPILOT_SSH_PRIVATE_KEY_B64` (권장): 키 파일을 한 줄 base64 로 변환한 값
+     - Linux: `base64 -w0 certpilot_scan` · macOS: `base64 -i certpilot_scan | tr -d '\n'`
+     - **Windows(명령 프롬프트/PowerShell)**: `powershell -NoProfile -Command "[Convert]::ToBase64String([IO.File]::ReadAllBytes('certpilot_scan')) | Set-Clipboard"` 실행 후 붙여넣기(클립보드에 복사됨). `certutil -encode` 는 헤더가 붙으니 쓰지 않는다
+     - 키 원문을 이 칸에 그대로 붙여넣어도 인식은 하지만, 줄바꿈이 깨질 수 있어 변환값을 권장
    - 또는 `CERTPILOT_SSH_PRIVATE_KEY`: 키 파일 내용 전체. 줄바꿈이 깨져도(공백·`\n`·CRLF) 자동 복원하지만 B64 가 가장 안전하다
 3. 배포 후 `https://<서비스>.onrender.com` 접속 → `admin` 로그인 → 서버 등록 → 조회
 
