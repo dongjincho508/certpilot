@@ -1,59 +1,32 @@
-# CertPilot Manager - Docker 이미지 빌드 설정
-
-# 메인 이미지: Python 3.11-slim + Flask + Frontend
+# CertPilot - 단일 이미지 (Flask API + 정적 UI, gunicorn)
 FROM python:3.11-slim
 
-# 환경 변수
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV CERTPILOT_API_PORT=8080
-ENV CERTPILOT_DATA_DIR=/data
-ENV CERTPILOT_LOG_DIR=/var/log/certpilot
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
+    CERTPILOT_DATA_DIR=/data PORT=8080
 
-# 작업 디렉토리
 WORKDIR /app
 
-# 시스템 패키지 설치
-# - curl: 헬스체크
-# - libpq-dev, gcc: Python 패키지 빌드
-# - openssh-client, sshpass: 원격 서버 SSH 연결
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    libpq-dev \
-    gcc \
-    openssh-client \
-    sshpass \
+# curl: 헬스체크. openssh-client: 비밀 환경변수의 키를 ssh-agent 에 올리기 위한 ssh-agent/ssh-add (SSH 접속 자체는 paramiko).
+RUN apt-get update && apt-get install -y --no-install-recommends curl openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
-# Python 의존성 설치
-COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# 프로젝트 파일 복사
-COPY certpilot_core/ /app/certpilot_core/
-COPY certpilot_cli/ /app/certpilot_cli/
-COPY certpilot_api/ /app/certpilot_api/
-COPY frontend/ /app/frontend/
+COPY certpilot_core/ certpilot_core/
+COPY certpilot_cli/ certpilot_cli/
+COPY certpilot_api/ certpilot_api/
+COPY frontend/ frontend/
+COPY docker/manager/startup.sh /app/startup.sh
 
-# 시작 스크립트 복사
-COPY docker/manager/startup.sh /app/docker/manager/startup.sh
-RUN chmod +x /app/docker/manager/startup.sh
-
-# 데이터와 로그 디렉토리 생성
-RUN mkdir -p /data/certs /data/logs /data/config && \
-    mkdir -p /var/log/certpilot && \
-    chmod 755 /data /data/certs /data/logs /data/config && \
-    chown -R www-data:www-data /var/log/certpilot
-
-# 볼륨 설정
-VOLUME ["/data/certs", "/data/logs", "/data/config"]
-
-# 포트 노출 (Flask API: 8080)
+# 비루트 사용자로 실행. /data 는 DB·감사 로그 저장소(볼륨)
+RUN useradd --system --uid 10001 certpilot && mkdir -p /data && chown certpilot /data \
+    && chmod +x /app/startup.sh
+USER certpilot
+VOLUME ["/data"]
 EXPOSE 8080
 
-# 헬스체크 (Flask API 기준)
-HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=60s \
-    CMD curl -f http://localhost:8080/health || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=20s \
+    CMD curl -fsS http://localhost:${PORT}/health || exit 1
 
-# 진입점
-CMD ["/app/docker/manager/startup.sh"]
+CMD ["/app/startup.sh"]

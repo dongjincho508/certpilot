@@ -1,22 +1,22 @@
-# CertPilot Manager - Render 배포 설정
-# CertPilot 매니페스트 관리 서버 - 멀티 컨테이너 구성
-version: '3.8'
-
+# Render 블루프린트. DB·감사 로그(/data)·TOFU 호스트 키는 영구 디스크가 있어야 재배포 후에도 남는다.
+# 영구 디스크는 유료 플랜(starter 이상)에서만 쓸 수 있다. 무료 플랜은 재배포·유휴 후 데이터가 사라진다.
 services:
   - type: web
-    name: certpilot-api
+    name: certpilot
     runtime: docker
-    dockerfilePath: Dockerfile
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
     envVars:
-      - key: CERTPILOT_API_PORT
-        value: "8080"
-      - key: CERTPILOT_DATA_DIR
-        value: /data
-      - key: CERTPILOT_LOG_DIR
-        value: /var/log/certpilot
-      - key: CERTPILOT_AUTH_MODE
-        value: disabled
-      - key: CERTPILOT_SSH_KEY_DIR
-        value: /data/config/keys
-      - key: CERTPILOT_DB_URL
-        value: sqlite:///data/certpilot.db
+      - key: CERTPILOT_ADMIN_USER
+        value: admin
+      - key: CERTPILOT_ADMIN_PASSWORD
+        sync: false            # 최초 관리자 비밀번호 — 대시보드에서 직접 입력
+      - key: CERTPILOT_SSH_PRIVATE_KEY
+        sync: false            # 조회 전용 계정의 개인키(암호 없는 키) — 대시보드 비밀 값으로 입력
+      - key: CERTPILOT_SECURE_COOKIE
+        value: "1"
+    disk:
+      name: certpilot-data
+      mountPath: /data
+      sizeGB: 1

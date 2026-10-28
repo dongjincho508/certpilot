@@ -1,0 +1,44 @@
+/* Bootswatch(Flatly/Darkly) 위에 얹는 최소 보정. 색은 Bootstrap 토큰만 사용해 라이트/다크 모두 따라간다. */
+:root { --cp-font: -apple-system, BlinkMacSystemFont, "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", "Segoe UI", Roboto, sans-serif; }
+body { font-family: var(--cp-font); }
+.navbar-brand .bi { color: var(--bs-primary); }
+.stat-card { cursor: pointer; transition: transform .12s ease, box-shadow .12s ease; border-width: 1px; }
+.stat-card:hover { transform: translateY(-2px); box-shadow: var(--bs-box-shadow); }
+.stat-card.active { outline: 2px solid var(--bs-primary); }
+.stat-card .stat-icon { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 12px; font-size: 1.3rem; }
+.stat-card .stat-value { font-size: 1.9rem; font-weight: 700; line-height: 1; }
+#servers-table tbody tr { cursor: pointer; }
+.badge .bi { margin-right: .25rem; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .8rem; word-break: break-all; }
+.cert-card { border-left: 4px solid var(--bs-secondary); }
+.cert-card.s-OK { border-left-color: var(--bs-success); }
+.cert-card.s-WARN { border-left-color: var(--bs-warning); }
+.cert-card.s-EXPIRED, .cert-card.s-CHAIN_RISK { border-left-color: var(--bs-danger); }
+.cert-card.s-NOT_YET { border-left-color: var(--bs-info); }
+.progress.thin { height: 6px; }
+.skeleton { background: linear-gradient(90deg, var(--bs-tertiary-bg) 25%, var(--bs-secondary-bg) 37%, var(--bs-tertiary-bg) 63%); background-size: 400% 100%; animation: sk 1.4s ease infinite; border-radius: 6px; height: 1.1rem; }
+@keyframes sk { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+.toast-container { z-index: 1100; }
+@media (prefers-reduced-motion: reduce) { .stat-card, .skeleton { transition: none; animation: none; } }
+
+/* 다크(Darkly) 가독성 보정: 기본 primary 가 어두운 남색이라 윤곽선 버튼·내비·표 머리글이 묻힘 */
+[data-bs-theme="dark"] .navbar {
+  --bs-navbar-color: rgba(255,255,255,.72); --bs-navbar-hover-color: #fff; --bs-navbar-active-color: #fff;
+  --bs-navbar-brand-color: #fff; --bs-navbar-brand-hover-color: #fff;
+}
+[data-bs-theme="dark"] .btn-outline-primary {
+  --bs-btn-color: #6ea8fe; --bs-btn-border-color: #6ea8fe; --bs-btn-hover-bg: #6ea8fe; --bs-btn-hover-border-color: #6ea8fe;
+  --bs-btn-hover-color: #000; --bs-btn-active-bg: #6ea8fe; --bs-btn-active-color: #000;
+}
+[data-bs-theme="dark"] .btn-primary { --bs-btn-bg: #3b82f6; --bs-btn-border-color: #3b82f6; --bs-btn-hover-bg: #2563eb; --bs-btn-hover-border-color: #2563eb; }
+[data-bs-theme="dark"] .text-primary, [data-bs-theme="dark"] .navbar-brand .bi { color: #6ea8fe !important; }
+.table > thead > tr > th { background: var(--bs-tertiary-bg); color: var(--bs-body-color); border-bottom: 1px solid var(--bs-border-color); white-space: nowrap; }
+[data-bs-theme="dark"] .form-control, [data-bs-theme="dark"] .form-select { background-color: var(--bs-body-bg); color: var(--bs-body-color); }
+[data-bs-theme="dark"] .form-control::placeholder { color: var(--bs-secondary-color); }
+[data-bs-theme="dark"] .card { --bs-card-bg: var(--bs-secondary-bg); }
+[data-bs-theme="dark"] .navbar .nav-link { color: rgba(255,255,255,.75) !important; }
+[data-bs-theme="dark"] .navbar .nav-link:hover, [data-bs-theme="dark"] .navbar .nav-link.active { color: #fff !important; }
+[data-bs-theme="dark"] .navbar .nav-link.active { border-bottom: 2px solid #6ea8fe; }
+[data-bs-theme="dark"] .btn-outline-primary { color: #6ea8fe !important; border-color: #6ea8fe !important; background: transparent; }
+[data-bs-theme="dark"] .btn-outline-primary:hover { color: #000 !important; background: #6ea8fe; }
+[data-bs-theme="dark"] .btn-outline-secondary { color: #ced4da; border-color: #6c757d; }

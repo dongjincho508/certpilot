@@ -16,3 +16,9 @@ __pycache__/
 .vscode/
 .idea/
 *.swp
+
+# pytest
+.pytest_cache/
+
+# 런타임 데이터
+data/
