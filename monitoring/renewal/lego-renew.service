@@ -1,9 +1,0 @@
-# /etc/systemd/system/lego-renew.service  (타이머와 함께 설치)
-[Unit]
-Description=lego 인증서 갱신(DNS-01) 및 배포
-After=network-online.target
-
-[Service]
-Type=oneshot
-User=lego
-ExecStart=/opt/cert-deploy/lego-renew.sh renew

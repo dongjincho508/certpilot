@@ -303,24 +303,6 @@ def test_inventory_snapshot_unknown_serial_and_unreachable(prom, tmp_path, capsy
     assert inv.main(["--url", "http://127.0.0.1:9", "list"]) == 3
 
 
-# ------------------------------------------------------------------ 갱신 스크립트 초안(문법만)
-@pytest.mark.parametrize("name", ["lego-renew.sh", "deploy.sh"])
-def test_renewal_shell_scripts_have_valid_syntax(name):
-    r = run(["bash", "-n", str(MON / "renewal" / name)])
-    assert r.returncode == 0, r.stderr
-
-
-def test_deploy_hook_does_not_let_ssh_consume_loop_input():
-    text = (MON / "renewal/deploy.sh").read_text(encoding="utf-8")
-    assert "ssh -n" in text and "<&3" in text and "3< " in text   # 대상 목록이 첫 줄에서 끊기는 고전적 버그 방지
-
-
-def test_renewal_example_targets_format():
-    for line in (MON / "renewal/targets.conf.example").read_text(encoding="utf-8").splitlines():
-        if line.strip() and not line.startswith("#"):
-            assert len(line.split("|")) >= 4
-
-
 def test_bind_mounts_have_selinux_label_for_rocky():
     """Rocky/RHEL(SELinux enforcing)에서 컨테이너가 바인드 마운트 파일을 읽으려면 z 라벨이 필요하다."""
     c = load("docker-compose.yml")

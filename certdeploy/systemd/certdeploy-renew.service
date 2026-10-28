@@ -1,0 +1,20 @@
+# /etc/systemd/system/certdeploy-renew.service
+[Unit]
+Description=certdeploy: 인증서 갱신(lego) 및 자동 배포
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=certdeploy
+Group=certdeploy
+# 키스토어 비밀번호 등 비밀 환경변수 (KEY=VALUE, 권한 600, 소유자 certdeploy)
+EnvironmentFile=-/etc/certdeploy/env
+ExecStart=/opt/certdeploy/venv/bin/certdeploy -c /etc/certdeploy/certdeploy.yml renew
+TimeoutStartSec=30min
+# 하드닝: 필요한 경로만 쓰기 허용
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/lego /var/lib/certdeploy

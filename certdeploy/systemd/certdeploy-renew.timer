@@ -1,0 +1,11 @@
+# /etc/systemd/system/certdeploy-renew.timer — 하루 2회 점검(만료 30일 이내일 때만 실제 갱신·배포가 일어난다)
+[Unit]
+Description=certdeploy 갱신 점검
+
+[Timer]
+OnCalendar=*-*-* 03,15:17:00
+RandomizedDelaySec=30m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

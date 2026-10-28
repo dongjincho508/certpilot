@@ -16,7 +16,7 @@
 | ✅ 교체 확인 | 일련번호·발급일 변화로 새 인증서 반영 여부 확인(이력 400일 보관) |
 | ✅ 갱신 지연 | 인증서 수명의 75% 가 지났는데 교체되지 않으면 경보(자동 갱신 조용한 실패 탐지) |
 | ❌ 디스크 파일 | 서비스되지 않는 인증서·갱신 파일은 보지 못한다(필요하면 각 서버에 `x509-certificate-exporter` 추가) |
-| ❌ 발급·배포 | 하지 않는다. `renewal/` 의 lego 초안과 배포 훅을 사용 → [갱신 자동화](../docs/ops/acme-automation.md) |
+| ❌ 발급·배포 | 이 스택은 하지 않는다(개인키를 다루지 않음). 발급·자동 배포는 **[certdeploy](../docs/ops/certdeploy.md)** 가 별도 서버에서 수행하고, 이 스택이 결과를 독립 검증한다 |
 
 ## 설치 (교내 VM 1대, Docker 필요)
 > **Rocky Linux 10 기준 전 과정(OS 설치·SELinux·방화벽·HTTPS 역프록시·운영)은 [Rocky 10 구축 가이드](../docs/ops/rocky-linux-deploy.md)** 를 따른다. 아래는 요약.
@@ -80,7 +80,6 @@ python scripts/cert_inventory.py check --snapshot before.csv -o result.csv     #
 | 대시보드 쿼리 | ✅ 모든 패널의 PromQL 을 실제 Prometheus 에서 실행해 결과 확인 |
 | **Grafana 화면 렌더링** | ❌ 직접 확인하지 못함(실행 환경에서 Grafana 를 받을 수 없었음). 첫 접속 후 패널 표시를 확인해 주세요 |
 | **docker compose 기동** | ❌ 직접 실행하지 못함(Docker 데몬 없음). 이미지 태그 4종은 Docker Hub 에 **실재함을 확인**했고, ssl_exporter·Prometheus·Alertmanager 는 같은 버전 바이너리의 동작도 확인했다 |
-| 갱신 스크립트(`renewal/`) | ⚠ 초안. 문법 검사만 했고 실제 발급·배포는 시험하지 않았다 |
 
 실행: `pytest tests/test_monitoring.py` (promtool/amtool 이 PATH 에 있거나 `PROMTOOL`/`AMTOOL` 환경변수로 지정되면 도구 검증도 수행, 없으면 해당 항목은 건너뜀). CI 에서는 릴리스 바이너리를 내려받아 전체 검증한다.
 
