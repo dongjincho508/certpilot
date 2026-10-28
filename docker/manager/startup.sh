@@ -17,15 +17,20 @@ if [ -z "$CERTPILOT_ADMIN_USER" ] || [ -z "$CERTPILOT_ADMIN_PASSWORD" ]; then
 fi
 
 # Render 등 ssh-agent 가 없는 환경: 비밀 환경변수의 개인키를 컨테이너 안 ssh-agent 메모리에만 올린다.
-# 키는 디스크에 쓰지 않고, 로드 직후 환경변수에서 지운다. (키는 암호 없는 키여야 한다)
-if [ -n "$CERTPILOT_SSH_PRIVATE_KEY" ]; then
-  eval "$(ssh-agent -s)" >/dev/null
-  if printf '%s\n' "$CERTPILOT_SSH_PRIVATE_KEY" | ssh-add - >/dev/null 2>&1; then
-    echo "ssh-agent 에 조회용 키를 로드했습니다."
+# 키는 디스크에 쓰지 않는다. 줄바꿈이 깨진 키는 자동 복원하고, 실패하면 사유(키 내용 제외)를 로그에 남긴다.
+# CERTPILOT_SSH_PRIVATE_KEY(여러 줄) 또는 CERTPILOT_SSH_PRIVATE_KEY_B64(한 줄, 권장) 를 지원한다.
+if [ -n "$CERTPILOT_SSH_PRIVATE_KEY" ] || [ -n "$CERTPILOT_SSH_PRIVATE_KEY_B64" ]; then
+  if KEY="$(python -m certpilot_core.sshkey)"; then
+    eval "$(ssh-agent -s)" >/dev/null
+    if ADD_ERR="$(printf '%s\n' "$KEY" | ssh-add - 2>&1 >/dev/null)"; then
+      echo "ssh-agent 에 조회용 키를 로드했습니다."
+    else
+      echo "오류: ssh-add 실패 — $(printf '%s' "$ADD_ERR" | head -c 200). SSH 조회는 실패합니다." >&2
+    fi
   else
-    echo "오류: CERTPILOT_SSH_PRIVATE_KEY 를 ssh-agent 에 로드하지 못했습니다(형식·암호 확인). SSH 조회는 실패합니다." >&2
+    echo "오류: 위 사유로 SSH 키를 ssh-agent 에 올리지 못했습니다. SSH 조회는 실패합니다." >&2
   fi
-  unset CERTPILOT_SSH_PRIVATE_KEY
+  unset KEY ADD_ERR CERTPILOT_SSH_PRIVATE_KEY CERTPILOT_SSH_PRIVATE_KEY_B64
 elif [ -z "$SSH_AUTH_SOCK" ]; then
   echo "알림: SSH_AUTH_SOCK 도 CERTPILOT_SSH_PRIVATE_KEY 도 없어 SSH 조회는 '인증 실패'로 표시됩니다(TLS 포트 조회는 가능)." >&2
 fi
