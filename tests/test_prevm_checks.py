@@ -106,8 +106,9 @@ def test_compose_renders_and_fails_fast_without_secrets(tmp_path):
 
 def test_example_config_parses_and_matches_schema():
     jsonschema = pytest.importorskip("jsonschema")
-    example = yaml.safe_load(read(os.path.join(ROOT, "certdeploy", "certdeploy.example.yml")))
-    jsonschema.validate(example, config_schema())
+    for name in ("certdeploy.example.yml", "certdeploy.manual.example.yml"):
+        jsonschema.validate(yaml.safe_load(read(os.path.join(ROOT, "certdeploy", name))), config_schema())
+        parse_config(yaml.safe_load(read(os.path.join(ROOT, "certdeploy", name))))
     bad = {"state_dir": "relative", "targets": [{"name": "x y", "type": "iis"}]}
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(bad, config_schema())
@@ -261,3 +262,19 @@ def test_scenario_doc_covers_all_tests_and_commands():
     used = set(re.findall(r"^\$CD ([a-z][a-z-]+)", text, re.M))
     assert {"validate", "preflight", "csr", "import", "deploy", "status", "check", "verify-audit", "backup", "restore", "trace", "plan"} <= used
     assert not (used - set(cd_main.commands))
+
+
+def test_install_manual_commands_and_files_exist():
+    text = read(os.path.join(ROOT, "docs", "ops", "vm-install-and-test.md"))
+    for rel in re.findall(r"/opt/cert-monitor/src/([\w./*-]+)", text):
+        if rel.endswith("/"):
+            continue
+        import glob
+        assert glob.glob(os.path.join(ROOT, rel)), f"매뉴얼이 가리키는 파일 없음: {rel}"
+    used = set(re.findall(r"(?:^|&& )\$CD ([a-z][a-z-]+)", text, re.M))
+    assert {"validate", "preflight", "csr", "import", "plan", "deploy", "check", "diagnose", "backup"} <= used
+    assert not (used - set(cd_main.commands))
+    for img in re.findall(r"prom/(?:prometheus|alertmanager):v[\d.]+", text):
+        assert img in read(os.path.join(ROOT, "monitoring", "docker-compose.yml")), f"compose 와 이미지 태그가 다름: {img}"
+    for svc in ("ssl-exporter", "prometheus", "pushgateway", "alertmanager", "grafana"):
+        assert svc in text
