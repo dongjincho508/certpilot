@@ -25,7 +25,9 @@ LEAF = '{dnsnames!=""}'
 
 def query(base, expr, timeout=30):
     url = base.rstrip("/") + "/api/v1/query?" + urllib.parse.urlencode({"query": expr})
-    with urllib.request.urlopen(url, timeout=timeout) as r:
+    if urllib.parse.urlparse(url).scheme not in ("http", "https"):
+        raise SystemExit("Prometheus 주소는 http/https 여야 합니다")
+    with urllib.request.urlopen(url, timeout=timeout) as r:  # nosec B310 — 위에서 스킴 검증
         body = json.load(r)
     if body.get("status") != "success":
         raise RuntimeError(f"Prometheus 오류: {body}")

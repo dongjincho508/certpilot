@@ -319,7 +319,7 @@ class ParamikoExecutor(RemoteExecutor):
             raise RemoteError(FailureCause.COMMAND, "not connected")
         cmd = " ".join(shlex.quote(a) for a in argv)
         try:
-            _, out, err = self.client.exec_command(cmd, timeout=timeout)
+            _, out, err = self.client.exec_command(cmd, timeout=timeout)  # nosec B601 — 화이트리스트 정책·shlex.quote 통과분만
             rc = out.channel.recv_exit_status()
             return rc, out.read().decode("utf-8", "replace"), err.read().decode("utf-8", "replace")
         except socket.timeout as e:

@@ -13,6 +13,18 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: scripts/check.sh
 
+  security:
+    # 정적 보안 분석(중간 이상 지적 0건 유지)과 의존성 취약점 점검
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install bandit pip-audit -r requirements.txt
+      - run: bandit -q -r certpilot_core certpilot_api certpilot_cli certdeploy monitoring/scripts -ll
+      - run: pip-audit -r requirements.txt
+
   monitoring:
     # 감시 스택 설정 검증: promtool(설정·규칙·단위 테스트), amtool(Alertmanager 설정)
     runs-on: ubuntu-latest

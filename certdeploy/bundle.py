@@ -94,7 +94,7 @@ class Bundle:
         if legacy:
             enc = (serialization.PrivateFormat.PKCS12.encryption_builder()
                    .kdf_rounds(2048).key_cert_algorithm(pkcs12.PBES.PBESv1SHA1And3KeyTripleDESCBC)
-                   .hmac_hash(hashes.SHA1()).build(password.encode()))
+                   .hmac_hash(hashes.SHA1()).build(password.encode()))  # nosec B303 — JKS/구형 Java 호환 PKCS12 전용
         else:
             enc = serialization.BestAvailableEncryption(password.encode())
         return pkcs12.serialize_key_and_certificates(alias.encode(), self.key, self.leaf, self.chain or None, enc)

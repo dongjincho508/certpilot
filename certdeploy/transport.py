@@ -78,7 +78,7 @@ class SSHTransport(Transport):
 
     def run(self, cmd, stdin=None, timeout=60):
         try:
-            si, so, se = self.client.exec_command(_wrap_sudo(cmd, self.sudo), timeout=timeout)
+            si, so, se = self.client.exec_command(_wrap_sudo(cmd, self.sudo), timeout=timeout)  # nosec B601 — 명령은 운영자 설정
             if stdin is not None:
                 si.write(stdin)
             si.channel.shutdown_write()

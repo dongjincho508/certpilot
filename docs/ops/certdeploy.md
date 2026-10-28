@@ -169,6 +169,8 @@ echo 'TOMCAT_KS_PASS=...' | sudo tee /etc/certdeploy/env >/dev/null && sudo chow
 | `scaffold CSV [--user U]` | 서버 목록 CSV(`name,host,type,port,canary,order,cert_path,key_path`)로 targets 설정 조각 생성 |
 | `--cert NAME`(전역 옵션) | `certificates:` 목록 중 하나만 대상으로 실행 |
 | `trace [--errors] [--run ID] [--debug]` / `diagnose [--out F] [--prometheus URL ...]` / 전역 `--debug` | 단계별 진단 이벤트 보기, 점검·진단 번들 생성(비밀값 마스킹). [debugging.md](debugging.md) |
+| `check [--warn 30] [--crit 14]` | Nagios/Zabbix/cron 용 한 줄 점검(만료일 + 서버가 같은 인증서를 서빙하는지). 종료 코드 0 OK·1 WARNING·2 CRITICAL·3 UNKNOWN. 예: `certdeploy -c cd.yml check` |
+| `schema` | 설정 파일 JSON Schema 출력(편집기 자동완성) — `certdeploy schema > certdeploy.schema.json` |
 | `rollback --target N` | 마지막 배포 이전 파일로 되돌리고 재로드 |
 | `issue [--staging] [--no-deploy]` / `renew` | lego 발급·갱신 후 배포(타이머가 `renew` 를 호출) |
 | `csr --domains A,B [--key-type rsa2048\|rsa3072\|rsa4096\|ecdsa256\|ecdsa384] [--org ..] [--force]` | **수동 발급용** 개인키+CSR 생성. 키는 `state_dir/pending/<name>/key.pem`(0600), CSR 은 화면 출력 |
