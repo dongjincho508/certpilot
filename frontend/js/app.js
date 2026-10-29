@@ -388,11 +388,46 @@ async function loadCd() {
   if (m) {
     $('m-enabled').checked = m.enabled !== false; $('m-host').value = m.host || ''; $('m-port').value = m.port || 587; $('m-starttls').checked = m.starttls !== false;
     $('m-from').value = m.from || ''; $('m-to').value = (m.to || []).join(', '); $('m-user').value = m.username || ''; $('m-success').checked = m.on_success !== false;
+    $('m-sev').value = m.min_severity || 'info';
     $('m-pass').value = ''; $('m-pass-hint').textContent = m.password_set ? '비밀번호가 저장되어 있습니다. 비워 두면 유지합니다(화면에는 표시되지 않음).' : '비밀번호가 설정되어 있지 않습니다(인증 없는 릴레이면 비워 두세요).';
   }
   const box = $('cd-certs'); box.replaceChildren();
   o.certificates.forEach((c) => box.append(certCard(c)));
+  fillChannels(o);
   await loadApprovals();
+}
+// ---- 알림 채널(웹훅·티켓·공통)
+function chResult(id, ok, msg) { const s = $(id); s.className = `small fw-semibold ${ok ? 'text-success' : 'text-danger'}`; s.textContent = msg; }
+function fillChannels(o) {
+  const w = o.webhook;
+  $('cd-wh-source').textContent = w ? `출처: ${w.source}` : '설정 없음';
+  $('w-enabled').checked = !!(w && w.enabled !== false); $('w-format').value = (w && w.format) || 'teams'; $('w-sev').value = (w && w.min_severity) || 'info';
+  $('w-success').checked = !!(w && w.on_success); $('w-url').value = '';
+  $('w-url-hint').textContent = w && w.url_set ? '주소가 저장되어 있습니다. 비워 두면 유지합니다(화면에는 표시되지 않음).' : '주소 안에 토큰이 들어 있어 비밀로 취급합니다. 저장된 주소가 없습니다.';
+  const i = o.itsm;
+  $('cd-it-source').textContent = i ? `출처: ${i.source}` : '설정 없음';
+  $('i-enabled').checked = !!(i && i.enabled !== false); $('i-format').value = (i && i.format) || 'servicenow'; $('i-url').value = (i && i.url) || '';
+  $('i-auth').value = (i && i.auth) || 'basic'; $('i-user').value = (i && i.username) || ''; $('i-pass').value = ''; $('i-token').value = '';
+  $('i-sev').value = (i && i.min_severity) || 'warning'; $('i-project').value = (i && i.project) || ''; $('i-type').value = (i && i.issue_type) || '';
+  $('i-transition').value = (i && i.resolve_transition_id) || ''; $('i-group').value = (i && i.assignment_group) || ''; $('i-category').value = (i && i.category) || '';
+  $('i-ca').value = (i && i.ca_file) || ''; $('i-verify').checked = !i || i.verify_tls !== false;
+  $('i-secret-hint').textContent = i && (i.password_set || i.token_set) ? '비밀번호/토큰이 저장되어 있습니다. 비워 두면 유지합니다(화면에는 표시되지 않음).' : '저장된 비밀번호/토큰이 없습니다.';
+  const nc = o.notify_common || {};
+  $('cd-nc-source').textContent = `출처: ${nc.source || '-'}`; $('n-repeat').value = nc.repeat_hours || 0;
+}
+function whPayload() { return { enabled: $('w-enabled').checked, format: $('w-format').value, url: $('w-url').value.trim(), min_severity: $('w-sev').value, on_success: $('w-success').checked }; }
+function itPayload() {
+  return { enabled: $('i-enabled').checked, format: $('i-format').value, url: $('i-url').value.trim(), auth: $('i-auth').value, username: $('i-user').value.trim(),
+    password: $('i-pass').value, token: $('i-token').value, min_severity: $('i-sev').value, project: $('i-project').value.trim(), issue_type: $('i-type').value.trim(),
+    resolve_transition_id: $('i-transition').value.trim(), assignment_group: $('i-group').value.trim(), category: $('i-category').value.trim(),
+    ca_file: $('i-ca').value.trim(), verify_tls: $('i-verify').checked };
+}
+function wireChannels() {
+  $('cd-wh-form').addEventListener('submit', (e) => { e.preventDefault(); guarded(() => busy($('btn-wh-save'), async () => { await api('/certdeploy/settings', 'PUT', { webhook: whPayload() }); chResult('cd-wh-result', true, '저장했습니다.'); toast('웹훅 설정을 저장했습니다.'); await loadCd(); })); });
+  $('btn-wh-test').addEventListener('click', () => { chResult('cd-wh-result', true, '시험 메시지를 보내는 중…'); guarded(() => busy($('btn-wh-test'), async () => { const r = await api('/certdeploy/webhook-test', 'POST', whPayload()); chResult('cd-wh-result', r.ok, r.message); })); });
+  $('cd-it-form').addEventListener('submit', (e) => { e.preventDefault(); guarded(() => busy($('btn-it-save'), async () => { await api('/certdeploy/settings', 'PUT', { itsm: itPayload() }); chResult('cd-it-result', true, '저장했습니다.'); toast('티켓 연동 설정을 저장했습니다.'); await loadCd(); })); });
+  $('btn-it-test').addEventListener('click', () => { chResult('cd-it-result', true, '접속을 확인하는 중…'); guarded(() => busy($('btn-it-test'), async () => { const r = await api('/certdeploy/itsm-test', 'POST', itPayload()); chResult('cd-it-result', r.ok, r.message); })); });
+  $('cd-nc-form').addEventListener('submit', (e) => { e.preventDefault(); guarded(() => busy($('btn-nc-save'), async () => { await api('/certdeploy/settings', 'PUT', { notify_common: { repeat_hours: Number($('n-repeat').value || 0) } }); chResult('cd-nc-result', true, '저장했습니다.'); toast('공통 알림 설정을 저장했습니다.'); await loadCd(); })); });
 }
 const APPROVAL_LABEL = { pending: '승인 대기', approved: '승인됨(배포 대기)', applied: '배포 완료', rejected: '반려', expired: '만료', superseded: '새 인증서로 대체', bypassed: '긴급 우회' };
 async function loadApprovals() {
@@ -469,7 +504,7 @@ function certCard(c) {
 }
 function mailPayload() {
   return { enabled: $('m-enabled').checked, host: $('m-host').value.trim(), port: Number($('m-port').value || 587), starttls: $('m-starttls').checked,
-    from: $('m-from').value.trim(), to: $('m-to').value, username: $('m-user').value.trim(), password: $('m-pass').value, on_success: $('m-success').checked };
+    from: $('m-from').value.trim(), to: $('m-to').value, username: $('m-user').value.trim(), password: $('m-pass').value, on_success: $('m-success').checked, min_severity: $('m-sev').value };
 }
 function mailResult(ok, msg) { const s = $('cd-mail-result'); s.className = `small fw-semibold ${ok ? 'text-success' : 'text-danger'}`; s.textContent = msg; }
 async function saveMail(e) {
@@ -556,6 +591,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('btn-export').addEventListener('click', () => { window.location = '/export.csv'; });
   $('btn-verify').addEventListener('click', () => guarded(verifyAudit));
   $('cd-mail-form').addEventListener('submit', saveMail);
+  wireChannels();
   $('btn-mail-test').addEventListener('click', testMail);
   $('btn-cd-refresh').addEventListener('click', () => guarded(loadCd));
   $('btn-dbg-refresh').addEventListener('click', () => guarded(loadDebug));

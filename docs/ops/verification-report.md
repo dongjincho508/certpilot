@@ -110,6 +110,7 @@
 | `tests/test_approval.py` | 34 | 배포 승인(정책 검증, 1·2인 승인, 요청자 제한, 반려·만료·대체, CLI 실제 배포 흐름, 긴급 우회, 감사, 관리자 화면 API, 알림 규칙). 실제 SSH 대상과의 조합은 미검증 |
 | `tests/test_iis.py` | 32 | Windows IIS 배포(설정 검증·주입 방지, 스크립트 생성·비밀 비노출, 배포·멱등·부분 실패 복구·롤백·preflight, 가짜 Windows). **실제 PowerShell/Windows 실행은 미검증** |
 | `tests/test_webtob_jeus.py` | 21 | WebtoB/JEUS 유형(설정 검증, 암호화 개인키 2형식, 소유자, PKCS12 키스토어, 재로드 실패 롤백, 비밀번호 누락 시 무변경). **실제 WebtoB/JEUS 제품과 재기동 명령은 미검증** |
+| `tests/test_notify_channels.py` | 35 | 알림 확장(웹훅 5형식·심각도 필터·반복 억제, ServiceNow/Jira/일반 티켓 생성·중복 방지·해소·실패 재시도, YAML 검증, 관리자 화면 저장/마스킹/시험, 감사 로그 비밀 비노출). **실제 ServiceNow/Jira/Teams 는 미검증** |
 | `tests/test_pipeline_e2e.py` | 1 | 전 과정 시나리오(등록→발급→배포→지표→실패 주입→진단→복구) |
 
 ## 6. 재현 방법

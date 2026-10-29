@@ -14,7 +14,9 @@ from .handlers import FileSpec, SpecError, build_files, default_check, default_r
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 HOST_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$")
 PATH_BAD = re.compile(r"[\x00-\x1f\n]")
-WEBHOOK_FORMATS = ("generic", "slack", "teams")
+WEBHOOK_FORMATS = ("generic", "slack", "teams", "googlechat", "discord")
+SEVERITIES = ("info", "warning", "critical")
+ITSM_FORMATS = ("servicenow", "jira", "generic")
 
 
 class ConfigError(Exception):
@@ -85,6 +87,7 @@ class SmtpCfg:
     password_file: Optional[str] = None
     on_success: bool = True
     password: Optional[str] = None    # 관리자 화면(settings.json)에서 입력한 비밀번호(YAML 에는 쓰지 않는다)
+    min_severity: str = "info"        # 이 심각도 이상만 보낸다(info < warning < critical)
 
 
 @dataclass
@@ -93,6 +96,30 @@ class WebhookCfg:
     url_file: Optional[str] = None
     format: str = "generic"
     on_success: bool = False
+    url: Optional[str] = None         # 관리자 화면(settings.json)에서 입력한 주소(토큰 포함; YAML 에는 쓰지 않는다)
+    min_severity: str = "info"
+
+
+@dataclass
+class ItsmCfg:
+    """티켓 시스템(ITSM) 연동: 장애 알림이 생기면 티켓을 만들고, 해소되면 닫는다(같은 대상은 중복 생성하지 않음)."""
+    format: str                       # servicenow | jira | generic
+    url: str                          # servicenow: 인스턴스 주소 / jira: 서버 주소 / generic: 티켓 생성 POST 주소
+    auth: str = "basic"               # basic | bearer
+    username: Optional[str] = None
+    password: Optional[str] = None    # 관리자 화면에서 입력한 값(YAML 은 password_env)
+    password_env: Optional[str] = None
+    token: Optional[str] = None       # bearer 토큰(관리자 화면) — YAML 은 token_env
+    token_env: Optional[str] = None
+    min_severity: str = "warning"
+    project: Optional[str] = None     # jira 프로젝트 키
+    issue_type: str = "Task"          # jira 이슈 유형
+    priority_map: Optional[dict] = None   # {critical: "High", ...}  (jira priority 이름 / servicenow urgency 값)
+    assignment_group: Optional[str] = None   # servicenow
+    category: Optional[str] = None           # servicenow
+    resolve_transition_id: Optional[str] = None   # jira: 해소 시 적용할 전환 ID(없으면 댓글만)
+    verify_tls: bool = True
+    ca_file: Optional[str] = None
 
 
 @dataclass
@@ -104,6 +131,9 @@ class NotifyCfg:
     pushgateway_user: Optional[str] = None
     pushgateway_password_env: Optional[str] = None
     metrics_file: Optional[str] = None
+    itsm: Optional[ItsmCfg] = None
+    repeat_hours: int = 0             # 같은 대상·같은 알림을 이 시간 안에는 다시 보내지 않음(0=항상 보냄)
+    state_dir: Optional[str] = None   # 반복 억제·티켓 기록을 두는 곳(parse_config 가 채움)
 
 
 @dataclass
@@ -192,6 +222,11 @@ def _parse_notify(data, problems) -> NotifyCfg:
     n.metrics_file = data.get("metrics_file")
     if n.metrics_file:
         _abs(n.metrics_file, "notify.metrics_file", problems)
+    rh = data.get("repeat_hours", 0)
+    if not isinstance(rh, int) or isinstance(rh, bool) or not 0 <= rh <= 720:
+        problems.append("notify.repeat_hours 는 0~720 정수여야 합니다")
+    else:
+        n.repeat_hours = rh
     s = data.get("smtp")
     if s:
         if not s.get("host") or not s.get("from") or not s.get("to"):
@@ -200,7 +235,7 @@ def _parse_notify(data, problems) -> NotifyCfg:
             to = s["to"] if isinstance(s["to"], list) else [x.strip() for x in str(s["to"]).split(",") if x.strip()]
             n.smtp = SmtpCfg(s["host"], s["from"], to, int(s.get("port", 587)), bool(s.get("starttls", True)),
                              s.get("username"), s.get("password_env"), s.get("password_file"),
-                             bool(s.get("on_success", True)))
+                             bool(s.get("on_success", True)), None, _sev(s.get("min_severity", "info"), "notify.smtp", problems))
     w = data.get("webhook")
     if w:
         if not (w.get("url_env") or w.get("url_file")):
@@ -209,8 +244,58 @@ def _parse_notify(data, problems) -> NotifyCfg:
             problems.append(f"notify.webhook.format 은 {', '.join(WEBHOOK_FORMATS)} 중 하나여야 합니다")
         else:
             n.webhook = WebhookCfg(w.get("url_env"), w.get("url_file"), w.get("format", "generic"),
-                                   bool(w.get("on_success", False)))
+                                   bool(w.get("on_success", False)), None, _sev(w.get("min_severity", "info"), "notify.webhook", problems))
+    if data.get("itsm"):
+        n.itsm = _parse_itsm(data["itsm"], problems)
     return n
+
+
+def _sev(v, label, problems) -> str:
+    if v not in SEVERITIES:
+        problems.append(f"{label}.min_severity 는 {', '.join(SEVERITIES)} 중 하나여야 합니다")
+        return "info"
+    return v
+
+
+_ITSM_KEYS = {"format", "url", "auth", "username", "password_env", "token_env", "min_severity", "project", "issue_type", "priority_map",
+              "assignment_group", "category", "resolve_transition_id", "verify_tls", "ca_file"}
+
+
+def _parse_itsm(i, problems) -> Optional[ItsmCfg]:
+    if not isinstance(i, dict):
+        problems.append("notify.itsm 은 매핑이어야 합니다")
+        return None
+    bad = set(i) - _ITSM_KEYS
+    if bad:
+        problems.append(f"notify.itsm 의 알 수 없는 키: {', '.join(sorted(bad))}")
+    n0 = len(problems)
+    fmt = i.get("format")
+    if fmt not in ITSM_FORMATS:
+        problems.append(f"notify.itsm.format 은 {', '.join(ITSM_FORMATS)} 중 하나여야 합니다")
+    url = str(i.get("url", ""))
+    if not url.startswith(("http://", "https://")):
+        problems.append("notify.itsm.url 은 http(s):// 로 시작해야 합니다")
+    auth = i.get("auth", "basic")
+    if auth not in ("basic", "bearer"):
+        problems.append("notify.itsm.auth 는 basic 또는 bearer 여야 합니다")
+    elif auth == "basic" and not (i.get("username") and i.get("password_env")):
+        problems.append("notify.itsm: basic 인증에는 username 과 password_env 가 필요합니다(비밀번호를 설정 파일에 쓰지 않는다)")
+    elif auth == "bearer" and not i.get("token_env"):
+        problems.append("notify.itsm: bearer 인증에는 token_env 가 필요합니다")
+    if fmt == "jira" and not i.get("project"):
+        problems.append("notify.itsm: jira 에는 project(프로젝트 키)가 필요합니다")
+    if i.get("ca_file"):
+        _abs(i["ca_file"], "notify.itsm.ca_file", problems)
+    pm = i.get("priority_map")
+    if pm is not None and (not isinstance(pm, dict) or set(pm) - set(SEVERITIES)):
+        problems.append("notify.itsm.priority_map 은 info/warning/critical 키를 가진 매핑이어야 합니다")
+    sev = _sev(i.get("min_severity", "warning"), "notify.itsm", problems)
+    if len(problems) > n0:
+        return None
+    return ItsmCfg(fmt, url, auth, i.get("username"), None, i.get("password_env"), None, i.get("token_env"), sev, i.get("project"),
+                   str(i.get("issue_type", "Task")), pm, i.get("assignment_group"), i.get("category"),
+                   str(i["resolve_transition_id"]) if i.get("resolve_transition_id") is not None else None,
+                   bool(i.get("verify_tls", True)), i.get("ca_file"))
 
 
 def _parse_target(raw, defaults, label_prefix, problems, seen) -> Optional[Target]:
@@ -435,6 +520,7 @@ def parse_config(data: dict) -> Config:
             certs.append(cs)
     if problems:
         raise ConfigError(problems)
+    notify.state_dir = state_dir
     return Config(state_dir, certs, options, notify, audit_dir)
 
 

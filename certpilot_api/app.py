@@ -452,6 +452,28 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
                      "details": {"actor": g.user["username"], "cert": r["cert"], "status": r["request"]["status"], "security": True}})
         return jsonify(r)
 
+    @app.post("/certdeploy/webhook-test")
+    @require(ADMIN)
+    def cd_webhook_test():
+        d = request.get_json(silent=True)
+        r = cd_call(lambda m: m.webhook_test(cfg.get("CERTDEPLOY_CONFIG"), d if isinstance(d, dict) and d else None))
+        if isinstance(r, tuple):
+            return r
+        audit.write({"event_type": "certdeploy_webhook_test", "description": "ok" if r["ok"] else "failed",
+                     "details": {"actor": g.user["username"], "ok": r["ok"], "message": r["message"]}})
+        return jsonify(r)
+
+    @app.post("/certdeploy/itsm-test")
+    @require(ADMIN)
+    def cd_itsm_test():
+        d = request.get_json(silent=True)
+        r = cd_call(lambda m: m.itsm_test(cfg.get("CERTDEPLOY_CONFIG"), d if isinstance(d, dict) and d else None))
+        if isinstance(r, tuple):
+            return r
+        audit.write({"event_type": "certdeploy_itsm_test", "description": "ok" if r["ok"] else "failed",
+                     "details": {"actor": g.user["username"], "ok": r["ok"], "message": r["message"]}})
+        return jsonify(r)
+
     @app.post("/certdeploy/mail-test")
     @require(ADMIN)
     def cd_mail_test():

@@ -14,8 +14,8 @@ from . import approval, settings as st
 from .bundle import BundleError, load_bundle
 from .config import ConfigError, parse_config
 from .manual import ManualError, convert_key_file, rekey_file
-from .notify import MailTestError, send_test_mail
-from .config import SmtpCfg
+from .config import ItsmCfg, SmtpCfg, WebhookCfg
+from .notify import MailTestError, NotifyTestError, check_itsm, send_test_mail, send_test_webhook
 
 
 class AdminError(Exception):
@@ -68,7 +68,24 @@ def overview(config_path: Optional[str]) -> dict:
     elif cfg.notify.smtp:
         s = cfg.notify.smtp
         out["mail"] = {"enabled": True, "host": s.host, "port": s.port, "starttls": s.starttls, "from": s.sender, "to": s.to, "username": s.username,
-                       "on_success": s.on_success, "password_set": bool(s.password_env or s.password_file), "source": "설정 파일(YAML)"}
+                       "on_success": s.on_success, "password_set": bool(s.password_env or s.password_file), "min_severity": s.min_severity, "source": "설정 파일(YAML)"}
+    out["webhook"] = out["itsm"] = None
+    if data.get("webhook") is not None:
+        out["webhook"] = {**st.mask({"webhook": data["webhook"]})["webhook"], "source": "관리자 화면"}
+    elif cfg.notify.webhook:
+        w = cfg.notify.webhook
+        out["webhook"] = {"enabled": True, "format": w.format, "url_set": bool(w.url_env or w.url_file), "on_success": w.on_success,
+                          "min_severity": w.min_severity, "source": "설정 파일(YAML)"}
+    if data.get("itsm") is not None:
+        out["itsm"] = {**st.mask({"itsm": data["itsm"]})["itsm"], "source": "관리자 화면"}
+    elif cfg.notify.itsm:
+        i = cfg.notify.itsm
+        out["itsm"] = {"enabled": True, "format": i.format, "url": i.url, "auth": i.auth, "username": i.username, "password_set": bool(i.password_env),
+                       "token_set": bool(i.token_env), "min_severity": i.min_severity, "project": i.project, "issue_type": i.issue_type,
+                       "assignment_group": i.assignment_group, "category": i.category, "resolve_transition_id": i.resolve_transition_id,
+                       "verify_tls": i.verify_tls, "ca_file": i.ca_file, "source": "설정 파일(YAML)"}
+    nc = data.get("notify_common")
+    out["notify_common"] = {**nc, "source": "관리자 화면"} if nc is not None else {"repeat_hours": cfg.notify.repeat_hours, "source": "설정 파일(YAML)"}
     out["alertmanager_url"] = cfg.notify.alertmanager_url
     for cs in cfg.certs:
         o = (data.get("certificates") or {}).get(cs.name) or {}
@@ -105,6 +122,19 @@ def save(config_path: Optional[str], payload: dict, actor: str) -> dict:
         except st.SettingsError as e:
             raise AdminError("; ".join(e.problems))
         changed.append("mail")
+    for key, fn in (("webhook", st.normalize_webhook), ("itsm", st.normalize_itsm)):
+        if key in payload:
+            try:
+                new[key] = fn(payload[key] or {}, data.get(key))
+            except st.SettingsError as e:
+                raise AdminError("; ".join(e.problems))
+            changed.append(key)
+    if "notify_common" in payload:
+        try:
+            new["notify_common"] = st.normalize_common(payload["notify_common"] or {})
+        except st.SettingsError as e:
+            raise AdminError("; ".join(e.problems))
+        changed.append("notify_common")
     pending_conv = []
     if payload.get("certificates"):
         names = {c.name: c for c in cfg.certs}
@@ -179,6 +209,52 @@ def mail_test(config_path: Optional[str], payload: Optional[dict] = None, smtp_f
     except MailTestError as e:
         return {"ok": False, "message": str(e)}
     return {"ok": True, "message": f"시험 메일을 보냈습니다: {', '.join(scfg.to)} (수신함을 확인하세요)"}
+
+
+def _channel_test(config_path, payload, key, normalizer, build, run, ok_msg):
+    cfg = _yaml_cfg(config_path)
+    data = _settings(cfg.state_dir)
+    try:
+        if payload:
+            n = normalizer(payload, data.get(key))
+            if not n.get("enabled", True):
+                return {"ok": False, "message": "이 채널이 '사용 안 함'으로 되어 있습니다"}
+            ccfg = build(n)
+        else:
+            saved = data.get(key)
+            if saved and saved.get("enabled", True):
+                ccfg = build(saved)
+            elif getattr(cfg.notify, "webhook" if key == "webhook" else "itsm"):
+                ccfg = getattr(cfg.notify, "webhook" if key == "webhook" else "itsm")
+            else:
+                return {"ok": False, "message": "저장된 설정이 없습니다"}
+    except st.SettingsError as e:
+        return {"ok": False, "message": "; ".join(e.problems)}
+    try:
+        msg = run(ccfg)
+    except NotifyTestError as e:
+        return {"ok": False, "message": str(e)}
+    return {"ok": True, "message": msg or ok_msg}
+
+
+def webhook_test(config_path: Optional[str], payload: Optional[dict] = None) -> dict:
+    """저장된(또는 입력 중인) 웹훅 설정으로 시험 메시지 1건"""
+    def build(n):
+        return WebhookCfg(None, None, n.get("format", "generic"), bool(n.get("on_success", False)), n.get("url"), n.get("min_severity", "info"))
+
+    def run(c):
+        send_test_webhook(c)
+        return "시험 메시지를 보냈습니다(대화방/채널에서 확인하세요)."
+    return _channel_test(config_path, payload, "webhook", st.normalize_webhook, build, run, "")
+
+
+def itsm_test(config_path: Optional[str], payload: Optional[dict] = None) -> dict:
+    """저장된(또는 입력 중인) 티켓 시스템 설정으로 접속·인증 확인(티켓은 만들지 않음)"""
+    def build(n):
+        return ItsmCfg(n["format"], n["url"], n.get("auth", "basic"), n.get("username"), n.get("password"), None, n.get("token"), None,
+                       n.get("min_severity", "warning"), n.get("project"), n.get("issue_type", "Task"), None, n.get("assignment_group"),
+                       n.get("category"), n.get("resolve_transition_id"), bool(n.get("verify_tls", True)), n.get("ca_file"))
+    return _channel_test(config_path, payload, "itsm", st.normalize_itsm, build, check_itsm, "")
 
 
 # ------------------------------------------------------------------ 배포 승인

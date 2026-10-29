@@ -145,11 +145,53 @@
                         <div class="col-md-6"><label class="form-label" for="m-to">수신 주소 (쉼표 또는 줄바꿈 구분)</label><input class="form-control" id="m-to" placeholder="cert-admin@hnu.kr, ops@hnu.kr"></div>
                         <div class="col-md-6"><label class="form-label" for="m-user">SMTP 계정 (인증 없는 내부 릴레이면 비움)</label><input class="form-control" id="m-user" autocomplete="off"></div>
                         <div class="col-md-6"><label class="form-label" for="m-pass">SMTP 비밀번호</label><input class="form-control" id="m-pass" type="password" autocomplete="new-password"><div class="form-text" id="m-pass-hint">비워 두면 저장된 값을 유지합니다. 화면에는 표시되지 않습니다.</div></div>
+                        <div class="col-md-4"><label class="form-label" for="m-sev">보낼 최소 심각도</label><select class="form-select" id="m-sev"><option value="info">정보 이상 (전부)</option><option value="warning">경고 이상</option><option value="critical">치명만</option></select></div>
                         <div class="col-12"><div class="form-check"><input class="form-check-input" type="checkbox" id="m-success" checked><label class="form-check-label" for="m-success">성공 요약 메일도 보내기 (끄면 실패·조치 필요 알림만)</label></div></div>
                         <div class="col-12 d-flex flex-wrap gap-2 align-items-center">
                             <button class="btn btn-primary" id="btn-mail-save" type="submit"><i class="bi bi-save me-1"></i>저장</button>
                             <button class="btn btn-outline-secondary" id="btn-mail-test" type="button"><i class="bi bi-send me-1"></i>시험 메일 보내기</button>
                             <span id="cd-mail-result" class="small" aria-live="polite"></span></div>
+                    </div></form></div>
+                <div class="card shadow-sm mb-3"><div class="card-header fw-semibold"><i class="bi bi-chat-dots me-1"></i>메신저 웹훅 (Teams·Slack·Mattermost·Google Chat·Discord) <span id="cd-wh-source" class="badge text-bg-secondary ms-2"></span></div>
+                    <form class="card-body" id="cd-wh-form" autocomplete="off"><div class="row g-3">
+                        <div class="col-12"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" id="w-enabled"><label class="form-check-label" for="w-enabled">웹훅 알림 사용</label></div></div>
+                        <div class="col-md-4"><label class="form-label" for="w-format">형식</label><select class="form-select" id="w-format"><option value="teams">Microsoft Teams (Workflows 웹훅)</option><option value="slack">Slack / Mattermost</option><option value="googlechat">Google Chat</option><option value="discord">Discord</option><option value="generic">일반 JSON</option></select></div>
+                        <div class="col-md-8"><label class="form-label" for="w-url">웹훅 주소</label><input class="form-control" id="w-url" type="password" autocomplete="new-password" placeholder="https://…"><div class="form-text" id="w-url-hint">주소 안에 토큰이 들어 있어 비밀로 취급합니다. 비워 두면 저장된 주소를 유지합니다(화면에는 표시되지 않음).</div></div>
+                        <div class="col-md-4"><label class="form-label" for="w-sev">보낼 최소 심각도</label><select class="form-select" id="w-sev"><option value="info">정보 이상 (전부)</option><option value="warning">경고 이상</option><option value="critical">치명만</option></select></div>
+                        <div class="col-md-8 d-flex align-items-end"><div class="form-check"><input class="form-check-input" type="checkbox" id="w-success"><label class="form-check-label" for="w-success">성공 요약도 보내기 (끄면 실패·조치 필요만)</label></div></div>
+                        <div class="col-12 d-flex flex-wrap gap-2 align-items-center">
+                            <button class="btn btn-primary" id="btn-wh-save" type="submit"><i class="bi bi-save me-1"></i>저장</button>
+                            <button class="btn btn-outline-secondary" id="btn-wh-test" type="button"><i class="bi bi-send me-1"></i>시험 메시지 보내기</button>
+                            <span id="cd-wh-result" class="small" aria-live="polite"></span></div>
+                    </div></form></div>
+                <div class="card shadow-sm mb-3"><div class="card-header fw-semibold"><i class="bi bi-ticket-detailed me-1"></i>티켓 시스템 연동 (ServiceNow·Jira·일반) <span id="cd-it-source" class="badge text-bg-secondary ms-2"></span></div>
+                    <form class="card-body" id="cd-it-form" autocomplete="off"><div class="small text-body-secondary mb-3">장애 알림이 처음 생기면 티켓을 만들고, 해소되면 닫습니다. 같은 대상의 열린 티켓이 있으면 새로 만들지 않습니다. <strong>「접속 확인」은 티켓을 만들지 않고</strong> 주소·인증만 확인합니다.</div>
+                        <div class="row g-3">
+                        <div class="col-12"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" id="i-enabled"><label class="form-check-label" for="i-enabled">티켓 연동 사용</label></div></div>
+                        <div class="col-md-4"><label class="form-label" for="i-format">시스템</label><select class="form-select" id="i-format"><option value="servicenow">ServiceNow</option><option value="jira">Jira</option><option value="generic">일반 JSON(웹훅형)</option></select></div>
+                        <div class="col-md-8"><label class="form-label" for="i-url">주소</label><input class="form-control" id="i-url" placeholder="https://company.service-now.com  /  https://jira.hnu.kr"><div class="form-text">ServiceNow·Jira 는 서버 기본 주소, 일반은 티켓을 만드는 POST 주소</div></div>
+                        <div class="col-md-3"><label class="form-label" for="i-auth">인증 방식</label><select class="form-select" id="i-auth"><option value="basic">계정/비밀번호(또는 API 토큰)</option><option value="bearer">Bearer 토큰</option></select></div>
+                        <div class="col-md-3"><label class="form-label" for="i-user">계정</label><input class="form-control" id="i-user" autocomplete="off"></div>
+                        <div class="col-md-3"><label class="form-label" for="i-pass">비밀번호 / API 토큰</label><input class="form-control" id="i-pass" type="password" autocomplete="new-password"></div>
+                        <div class="col-md-3"><label class="form-label" for="i-token">Bearer 토큰</label><input class="form-control" id="i-token" type="password" autocomplete="new-password"></div>
+                        <div class="col-12"><div class="form-text" id="i-secret-hint">비밀번호·토큰을 비워 두면 저장된 값을 유지합니다(화면에는 표시되지 않음).</div></div>
+                        <div class="col-md-3"><label class="form-label" for="i-sev">티켓 최소 심각도</label><select class="form-select" id="i-sev"><option value="info">정보 이상</option><option value="warning">경고 이상</option><option value="critical">치명만</option></select></div>
+                        <div class="col-md-3"><label class="form-label" for="i-project">Jira 프로젝트 키</label><input class="form-control" id="i-project" placeholder="CERT"></div>
+                        <div class="col-md-3"><label class="form-label" for="i-type">Jira 이슈 유형</label><input class="form-control" id="i-type" placeholder="Task"></div>
+                        <div class="col-md-3"><label class="form-label" for="i-transition">Jira 해소 전환 ID</label><input class="form-control" id="i-transition" placeholder="(비우면 댓글만)"></div>
+                        <div class="col-md-4"><label class="form-label" for="i-group">ServiceNow 담당 그룹</label><input class="form-control" id="i-group"></div>
+                        <div class="col-md-4"><label class="form-label" for="i-category">ServiceNow 분류</label><input class="form-control" id="i-category"></div>
+                        <div class="col-md-4"><label class="form-label" for="i-ca">사내 CA 파일 (선택, 절대 경로)</label><input class="form-control" id="i-ca" placeholder="/etc/pki/ca-trust/source/anchors/hnu-ca.pem"></div>
+                        <div class="col-12"><div class="form-check"><input class="form-check-input" type="checkbox" id="i-verify" checked><label class="form-check-label" for="i-verify">서버 인증서 검증 (끄는 것은 시험 환경에서만)</label></div></div>
+                        <div class="col-12 d-flex flex-wrap gap-2 align-items-center">
+                            <button class="btn btn-primary" id="btn-it-save" type="submit"><i class="bi bi-save me-1"></i>저장</button>
+                            <button class="btn btn-outline-secondary" id="btn-it-test" type="button"><i class="bi bi-plug me-1"></i>접속 확인</button>
+                            <span id="cd-it-result" class="small" aria-live="polite"></span></div>
+                    </div></form></div>
+                <div class="card shadow-sm mb-3"><div class="card-header fw-semibold"><i class="bi bi-bell me-1"></i>공통 알림 설정 <span id="cd-nc-source" class="badge text-bg-secondary ms-2"></span></div>
+                    <form class="card-body" id="cd-nc-form"><div class="row g-3 align-items-end">
+                        <div class="col-md-4"><label class="form-label" for="n-repeat">같은 알림 반복 간격 (시간)</label><input class="form-control" id="n-repeat" type="number" min="0" max="720" value="0"><div class="form-text">같은 대상의 같은 장애 알림을 이 시간 안에는 메일·웹훅으로 다시 보내지 않습니다. 0 이면 실행할 때마다 보냅니다. 권장 24.</div></div>
+                        <div class="col-md-8"><button class="btn btn-primary" id="btn-nc-save" type="submit"><i class="bi bi-save me-1"></i>저장</button> <span id="cd-nc-result" class="small" aria-live="polite"></span></div>
                     </div></form></div>
             </div>
         </section>
