@@ -32,16 +32,23 @@ CONFIG_TEMPLATE="manual"
 ENABLE_RENEW_TIMER=0
 DISCOVER_CIDR=""
 REQUIRE_MFA=0
+ENABLE_BACKUP=0
+BACKUP_COPY_DIR=""
 SKIP_UPDATE=0
 SKIP_OS_CHECK=0
 NO_NETWORK_CHECK=0
 DRY_RUN=0
 ASSUME_YES=0
 FORCE=0
+WIZARD=0
+NO_WIZARD=0
 ONLY=""
 
 STEPS=(preflight base docker source monitoring nginx certdeploy admin verify)
-CONFIG_KEYS="HOSTNAME_FQDN TIMEZONE REPO_URL LOCAL_SRC SMTP_SMARTHOST SMTP_FROM MAIL_TO SMTP_USER SMTP_PASSWORD_ENV WEBHOOK_URL_ENV ADMIN_USER ADMIN_CIDR CONFIG_TEMPLATE ENABLE_RENEW_TIMER DISCOVER_CIDR REQUIRE_MFA SMTP_NO_TLS"
+declare -A STEP_TITLE=([preflight]="사전 점검(OS·CPU·보안 설정)" [base]="기본 설정·패키지" [docker]="Docker 설치" [source]="소스 내려받기"
+  [monitoring]="감시 스택(Prometheus·Grafana·Alertmanager) 설정·기동" [nginx]="HTTPS 접속(nginx)·방화벽" [certdeploy]="certdeploy·백업·탐색 설정"
+  [admin]="관리자 화면" [verify]="설치 결과 점검")
+CONFIG_KEYS="HOSTNAME_FQDN TIMEZONE REPO_URL LOCAL_SRC SMTP_SMARTHOST SMTP_FROM MAIL_TO SMTP_USER SMTP_PASSWORD_ENV WEBHOOK_URL_ENV ADMIN_USER ADMIN_CIDR CONFIG_TEMPLATE ENABLE_RENEW_TIMER DISCOVER_CIDR REQUIRE_MFA ENABLE_BACKUP BACKUP_COPY_DIR SMTP_NO_TLS"
 
 usage() {
   cat <<'USAGE'
@@ -61,6 +68,8 @@ Rocky Linux 10 관리 서버 자동 설치 (감시 스택 + certdeploy + 관리�
   --config-template T      certdeploy 설정 예시: manual(기본)|acme|waf-manual|none
   --enable-renew-timer     자동 발급(내장 ACME/lego) 갱신 타이머 설치
   --discover-cidr A,B      인증서 자동 탐색 대역(예: 10.10.0.0/24); 지정하면 주 1회 탐색 타이머 설치
+  --enable-backup          매일 암호화 백업 타이머 설치(백업 비밀번호 자동 생성 → 요약 파일에만 표시)
+  --backup-copy-dir DIR    백업을 추가로 복사할 마운트 폴더(NAS 등; 같은 서버에만 두지 않기 위해 권장)
   --require-mfa            관리자 화면 2단계 인증(TOTP) 강제(미등록 계정은 등록 창만 사용 가능)
   --timezone TZ            기본 Asia/Seoul
   --repo-url URL           소스 저장소(기본 GitHub)
@@ -74,6 +83,7 @@ Rocky Linux 10 관리 서버 자동 설치 (감시 스택 + certdeploy + 관리�
   --skip-update            dnf update 생략
   --skip-os-check          Rocky 10 확인 생략(시험용)
   --no-network-check       외부 접속 사전 점검 생략(프록시·반입 환경)
+  --wizard                 질문에 답하며 설정(터미널에서 필수 옵션 없이 실행하면 자동으로 시작). --no-wizard 로 끔
 USAGE
 }
 
@@ -123,6 +133,8 @@ while [ $# -gt 0 ]; do
     --config-template) CONFIG_TEMPLATE="$2"; shift 2 ;;
     --enable-renew-timer) ENABLE_RENEW_TIMER=1; shift ;;
     --require-mfa) REQUIRE_MFA=1; shift ;;
+    --enable-backup) ENABLE_BACKUP=1; shift ;;
+    --backup-copy-dir) BACKUP_COPY_DIR="$2"; ENABLE_BACKUP=1; shift 2 ;;
     --discover-cidr) DISCOVER_CIDR="$2"; shift 2 ;;
     --timezone) TIMEZONE="$2"; shift 2 ;;
     --repo-url) REPO_URL="$2"; shift 2 ;;
@@ -135,6 +147,8 @@ while [ $# -gt 0 ]; do
     --skip-update) SKIP_UPDATE=1; shift ;;
     --skip-os-check) SKIP_OS_CHECK=1; shift ;;
     --no-network-check) NO_NETWORK_CHECK=1; shift ;;
+    --wizard) WIZARD=1; shift ;;
+    --no-wizard) NO_WIZARD=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "알 수 없는 옵션: $1 (도움말: --help)"; exit 2 ;;
   esac
@@ -142,20 +156,79 @@ done
 
 # 입력 검증(셸·YAML 에 들어가는 값이라 허용 문자를 제한)
 valid() { [[ "$2" =~ $1 ]] || die "$3 형식이 올바르지 않습니다: $2"; }
-[ -z "$HOSTNAME_FQDN" ] || valid '^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$' "$HOSTNAME_FQDN" "호스트명"
-[ -z "$MAIL_TO" ] || valid '^[^@[:space:],]+@[^@[:space:],]+(,[^@[:space:],]+@[^@[:space:],]+)*$' "$MAIL_TO" "수신 주소"
-[ -z "$SMTP_SMARTHOST" ] || valid '^[A-Za-z0-9.-]+:[0-9]{1,5}$' "$SMTP_SMARTHOST" "SMTP 주소(host:port)"
-[ -z "$SMTP_FROM" ] || valid '^[^@[:space:]]+@[^@[:space:]]+$' "$SMTP_FROM" "발신 주소"
-[ -z "$SMTP_USER" ] || valid '^[A-Za-z0-9._@+-]+$' "$SMTP_USER" "SMTP 계정"
-valid '^[a-z_][a-z0-9_-]{2,31}$' "$ADMIN_USER" "관리자 계정"
-[ -z "$DISCOVER_CIDR" ] || valid '^[0-9./,]+$' "$DISCOVER_CIDR" "탐색 대역"
-valid '^[A-Za-z_]+/[A-Za-z_+-]+$' "$TIMEZONE" "시간대"
-[ -z "$ADMIN_CIDR" ] || valid '^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$' "$ADMIN_CIDR" "관리자 PC 대역(CIDR)"
-case "$CONFIG_TEMPLATE" in manual|acme|waf-manual|none) ;; *) die "--config-template 은 manual|acme|waf-manual|none 중 하나" ;; esac
-[ -z "$ONLY" ] || for s in ${ONLY//,/ }; do case " ${STEPS[*]} " in *" $s "*) ;; *) die "알 수 없는 단계: $s" ;; esac; done
-if [ -n "$SMTP_SMARTHOST$SMTP_FROM$MAIL_TO" ] && { [ -z "$SMTP_SMARTHOST" ] || [ -z "$SMTP_FROM" ] || [ -z "$MAIL_TO" ]; }; then
-  die "메일 설정은 --smtp-host, --smtp-from, --mail-to 를 함께 지정해야 합니다(생략하면 설치 후 Alertmanager 설정을 직접 채워야 합니다)"
-fi
+validate_inputs() {
+  [ -z "$HOSTNAME_FQDN" ] || valid '^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$' "$HOSTNAME_FQDN" "호스트명"
+  [ -z "$MAIL_TO" ] || valid '^[^@[:space:],]+@[^@[:space:],]+(,[^@[:space:],]+@[^@[:space:],]+)*$' "$MAIL_TO" "수신 주소"
+  [ -z "$SMTP_SMARTHOST" ] || valid '^[A-Za-z0-9.-]+:[0-9]{1,5}$' "$SMTP_SMARTHOST" "SMTP 주소(host:port)"
+  [ -z "$SMTP_FROM" ] || valid '^[^@[:space:]]+@[^@[:space:]]+$' "$SMTP_FROM" "발신 주소"
+  [ -z "$SMTP_USER" ] || valid '^[A-Za-z0-9._@+-]+$' "$SMTP_USER" "SMTP 계정"
+  valid '^[a-z_][a-z0-9_-]{2,31}$' "$ADMIN_USER" "관리자 계정"
+  [ -z "$BACKUP_COPY_DIR" ] || valid '^/[A-Za-z0-9._/-]+$' "$BACKUP_COPY_DIR" "백업 복사 폴더"
+  [ -z "$DISCOVER_CIDR" ] || valid '^[0-9./,]+$' "$DISCOVER_CIDR" "탐색 대역"
+  valid '^[A-Za-z_]+/[A-Za-z_+-]+$' "$TIMEZONE" "시간대"
+  [ -z "$ADMIN_CIDR" ] || valid '^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$' "$ADMIN_CIDR" "관리자 PC 대역(CIDR)"
+  case "$CONFIG_TEMPLATE" in manual|acme|waf-manual|none) ;; *) die "--config-template 은 manual|acme|waf-manual|none 중 하나" ;; esac
+  [ -z "$ONLY" ] || for s in ${ONLY//,/ }; do case " ${STEPS[*]} " in *" $s "*) ;; *) die "알 수 없는 단계: $s" ;; esac; done
+  if [ -n "$SMTP_SMARTHOST$SMTP_FROM$MAIL_TO" ] && { [ -z "$SMTP_SMARTHOST" ] || [ -z "$SMTP_FROM" ] || [ -z "$MAIL_TO" ]; }; then
+    die "메일 설정은 --smtp-host, --smtp-from, --mail-to 를 함께 지정해야 합니다(생략하면 설치 후 Alertmanager 설정을 직접 채워야 합니다)"
+  fi
+}
+
+# ---------------------------------------------------------------- 마법사·설치 계획
+ask() { # 변수명 질문 [기본값]
+  local var="$1" q="$2" def="${3:-}" ans=""
+  read -r -p "  $q${def:+ [$def]}: " ans || true
+  printf -v "$var" '%s' "${ans:-$def}"
+}
+ask_yn() { # 변수명 질문 기본(Y|N)  → 변수에 1/0
+  local var="$1" q="$2" def="${3:-N}" ans=""
+  read -r -p "  $q [$def]: " ans || true
+  ans="${ans:-$def}"
+  case "$ans" in y|Y|yes|예) printf -v "$var" '%s' 1 ;; *) printf -v "$var" '%s' 0 ;; esac
+}
+wizard() {
+  echo
+  echo "── 설치 마법사 ─────────────────────────────────────────"
+  echo "  엔터만 누르면 [ ] 안의 기본값을 씁니다. 모르는 항목은 비워 두세요 — 설치 후 관리자 화면에서도 설정할 수 있습니다."
+  echo
+  echo "▶ 1) 서버 주소"
+  ask HOSTNAME_FQDN "이 서버의 호스트명(FQDN, 예: mgmt.hnu.kr)" "$HOSTNAME_FQDN"
+  echo "▶ 2) 장애·만료 알림 메일 (권장: 설정)"
+  ask MAIL_TO "알림 받을 메일 주소(여러 명이면 쉼표로, 비우면 나중에 설정)" "$MAIL_TO"
+  if [ -n "$MAIL_TO" ]; then
+    ask SMTP_SMARTHOST "메일 서버 주소:포트(예: smtp.hnu.kr:587)" "$SMTP_SMARTHOST"
+    ask SMTP_FROM "보내는 사람 주소(예: cert-monitor@hnu.kr)" "$SMTP_FROM"
+    ask SMTP_USER "메일 서버 계정(인증이 없는 내부 릴레이면 비움)" "$SMTP_USER"
+    if [ -n "$SMTP_USER" ] && [ -z "${!SMTP_PASSWORD_ENV:-}" ]; then
+      local pw=""
+      read -r -s -p "  메일 서버 비밀번호(화면에 표시되지 않음): " pw || true; echo
+      export "$SMTP_PASSWORD_ENV=$pw"
+    fi
+  fi
+  echo "▶ 3) 보안"
+  ask ADMIN_CIDR "관리자 화면(8443)에 접속할 PC 대역(예: 10.10.0.0/24, 비우면 전체 허용 — 비권장)" "$ADMIN_CIDR"
+  ask_yn REQUIRE_MFA "모든 계정에 2단계 인증(인증 앱)을 필수로 할까요? (y/N)" "N"
+  echo "▶ 4) 백업·탐색·자동 갱신"
+  ask_yn ENABLE_BACKUP "매일 자동 암호화 백업을 켤까요? (권장)" "Y"
+  if [ "$ENABLE_BACKUP" -eq 1 ]; then ask BACKUP_COPY_DIR "백업을 추가로 복사할 폴더(NAS 마운트 등, 비우면 이 서버에만 보관)" "$BACKUP_COPY_DIR"; fi
+  ask DISCOVER_CIDR "미등록 인증서를 찾아볼 서버 대역(예: 10.10.0.0/24, 비우면 사용 안 함)" "$DISCOVER_CIDR"
+  ask_yn ENABLE_RENEW_TIMER "Let's Encrypt 자동 발급·갱신 타이머를 켤까요? (상용 인증서만 쓰면 N)" "N"
+  echo
+}
+print_plan() {
+  local host="${HOSTNAME_FQDN:-$(hostname -f 2>/dev/null || hostname)}"
+  echo
+  echo "── 설치 계획 ───────────────────────────────────────────"
+  printf '  %-14s %s\n' "🖥  서버 주소" "$host  (Grafana https://$host/ · 관리자 화면 https://$host:8443/)"
+  if [ -n "$MAIL_TO" ]; then printf '  %-14s %s\n' "✉️  알림 메일" "$MAIL_TO  ← $SMTP_FROM via $SMTP_SMARTHOST${SMTP_USER:+ (계정 $SMTP_USER)}"; else printf '  %-14s %s\n' "✉️  알림 메일" "미설정 — 설치 후 직접 설정(감시 스택 알림은 설정 전까지 발송되지 않음)"; fi
+  printf '  %-14s %s\n' "🔒 관리자 접속" "${ADMIN_CIDR:-전체 허용(권장하지 않음)} · 2단계 인증 $([ "$REQUIRE_MFA" -eq 1 ] && echo 필수 || echo 선택)"
+  printf '  %-14s %s\n' "💾 백업" "$([ "$ENABLE_BACKUP" -eq 1 ] && echo "매일 02:10 암호화${BACKUP_COPY_DIR:+ → 추가 복사 $BACKUP_COPY_DIR}" || echo "사용 안 함(나중에 켤 수 있음)")"
+  printf '  %-14s %s\n' "🔎 자동 탐색" "${DISCOVER_CIDR:-사용 안 함}"
+  printf '  %-14s %s\n' "🔁 자동 갱신" "$([ "$ENABLE_RENEW_TIMER" -eq 1 ] && echo "Let's Encrypt 타이머 설치" || echo "설치 안 함(상용 인증서 반입 방식)")"
+  printf '  %-14s %s\n' "📦 설정 예시" "certdeploy.yml ← $CONFIG_TEMPLATE 예시(대상 서버는 설치 후 수정)"
+  echo "  소요 시간: 보통 10~20분(패키지·컨테이너 이미지 내려받기). 중간에 실패하면 원인을 고친 뒤 같은 명령을 다시 실행하면 이어서 진행합니다."
+  echo
+}
 
 step_selected() { [ -z "$ONLY" ] || [[ ",$ONLY," == *",$1,"* ]]; }
 
@@ -191,7 +264,7 @@ step_base() {
   [ "$SKIP_UPDATE" -eq 1 ] || run dnf -y update
   [ -z "$HOSTNAME_FQDN" ] || run hostnamectl set-hostname "$HOSTNAME_FQDN"
   run timedatectl set-timezone "$TIMEZONE"
-  run dnf -y install git python3 python3-pip python3-pyyaml openssl bind-utils nginx policycoreutils-python-utils dnf-plugins-core curl tar chrony firewalld
+  run dnf -y install git python3 python3-pip python3-pyyaml openssl openssh-clients bind-utils nginx policycoreutils-python-utils dnf-plugins-core curl tar chrony firewalld
   run systemctl enable --now chronyd
   run systemctl enable --now firewalld
   run firewall-cmd --permanent --add-service=ssh
@@ -300,8 +373,11 @@ wait_ready() {
 step_nginx() {
   local host="${HOSTNAME_FQDN:-$(hostname -f 2>/dev/null || hostname)}" crt=/etc/pki/tls/certs/mgmt.crt key=/etc/pki/tls/private/mgmt.key
   if [ "$DRY_RUN" -eq 1 ] || [ ! -f "$crt" ]; then
-    run openssl req -x509 -newkey rsa:2048 -nodes -keyout "$key" -out "$crt" -days 365 -subj "/CN=$host" -addext "subjectAltName=DNS:$host"
+    run install -d -m 755 "$(dirname "$crt")"
+    run install -d -m 700 "$(dirname "$key")"
+    sh_run "openssl req -x509 -newkey rsa:2048 -nodes -keyout '$key' -out '$crt' -days 365 -subj '/CN=$host' -addext 'subjectAltName=DNS:$host' 2>/dev/null"
     run chmod 600 "$key"
+    sh_run "command -v restorecon >/dev/null 2>&1 && restorecon -R /etc/pki/tls || true"
     warn "임시 자체 서명 인증서입니다 — 브라우저 경고가 뜨며, 정식 인증서로 교체하세요(설치 매뉴얼 6단계)"
   fi
   local f
@@ -366,6 +442,34 @@ step_certdeploy() {
     run systemctl daemon-reload
     run systemctl enable --now certdeploy-discover.timer
   fi
+  if [ "$ENABLE_BACKUP" -eq 1 ]; then
+    run install -d -m 700 -o root -g root /var/backups/certdeploy
+    if [ "$DRY_RUN" -eq 1 ] || [ ! -f /etc/certdeploy/backup.env ]; then
+      if [ "$DRY_RUN" -eq 0 ]; then
+        local bpw
+        bpw="$(gen_pw)"
+        printf 'CERTDEPLOY_BACKUP_PASSPHRASE=%s\n' "$bpw" | write_file /etc/certdeploy/backup.env 0600 root:root
+        printf 'BACKUP_PASSPHRASE=%s\n' "$bpw" >"$STATE_DIR/backup.cred"
+        chmod 600 "$STATE_DIR/backup.cred"
+      else
+        echo "  + (파일 작성) /etc/certdeploy/backup.env mode=0600 (백업 비밀번호 자동 생성)"
+      fi
+    fi
+    if [ "$DRY_RUN" -eq 1 ] || ! grep -q '^backup:' /etc/certdeploy/certdeploy.yml 2>/dev/null; then
+      local copy=""
+      [ -z "$BACKUP_COPY_DIR" ] || copy="  copy_to:\n    - {kind: dir, name: nas, path: $BACKUP_COPY_DIR}\n"
+      if [ "$DRY_RUN" -eq 1 ]; then
+        echo "  + (설정 추가) /etc/certdeploy/certdeploy.yml 에 backup: 항목(passphrase_env=CERTDEPLOY_BACKUP_PASSPHRASE${BACKUP_COPY_DIR:+, 외부 복사 $BACKUP_COPY_DIR})"
+      else
+        # shellcheck disable=SC2059
+        printf "\nbackup:\n  dir: /var/backups/certdeploy\n  passphrase_env: CERTDEPLOY_BACKUP_PASSPHRASE\n$copy" >>/etc/certdeploy/certdeploy.yml
+      fi
+    fi
+    run cp "$SRC_DIR/certdeploy/systemd/certdeploy-backup.service" "$SRC_DIR/certdeploy/systemd/certdeploy-backup.timer" /etc/systemd/system/
+    run systemctl daemon-reload
+    run systemctl enable --now certdeploy-backup.timer
+    [ -z "$BACKUP_COPY_DIR" ] || warn "백업 복사 폴더($BACKUP_COPY_DIR)가 쓰기 가능해야 합니다 — certdeploy-backup.service 의 ReadWritePaths 에도 추가하세요(systemctl edit)"
+  fi
 }
 
 # ---------------------------------------------------------------- 8) 관리자 화면
@@ -388,10 +492,11 @@ step_admin() {
 
 # ---------------------------------------------------------------- 9) 점검과 요약
 CHECK_FAIL=0
+CHECK_ROWS=()
 check() { # 설명 명령...
   local desc="$1"; shift
   if [ "$DRY_RUN" -eq 1 ]; then echo "  + (점검) $desc"; return 0; fi
-  if "$@" >/dev/null 2>&1; then log "  OK    $desc"; else log "  실패  $desc"; CHECK_FAIL=1; fi
+  if "$@" >/dev/null 2>&1; then log "  OK    $desc"; CHECK_ROWS+=("✅ $desc"); else log "  실패  $desc"; CHECK_ROWS+=("❌ $desc"); CHECK_FAIL=1; fi
 }
 
 step_verify() {
@@ -411,29 +516,49 @@ step_verify() {
 
 print_summary() {
   [ "$DRY_RUN" -eq 0 ] || { echo; echo "(dry-run 이므로 요약 파일을 만들지 않았습니다)"; return 0; }
-  local host="${HOSTNAME_FQDN:-$(hostname -f 2>/dev/null || hostname)}" gpw="(이전 설치 때 생성됨 — monitoring/.env 참고)" apw="(이전 설치 때 생성됨 — /etc/certdeploy/admin.env 참고)" pub=""
+  local host="${HOSTNAME_FQDN:-$(hostname -f 2>/dev/null || hostname)}" gpw="(이전 설치 때 생성됨 — monitoring/.env 참고)" apw="(이전 설치 때 생성됨 — /etc/certdeploy/admin.env 참고)" pub="" rows="" r
   [ ! -f "$STATE_DIR/grafana.cred" ] || gpw="$(sed -n 's/^GRAFANA_ADMIN_PASSWORD=//p' "$STATE_DIR/grafana.cred")"
   [ ! -f "$STATE_DIR/admin.cred" ] || apw="$(sed -n 's/^ADMIN_PASSWORD=//p' "$STATE_DIR/admin.cred")"
   [ ! -f /var/lib/certdeploy/.ssh/id_ed25519.pub ] || pub="$(cat /var/lib/certdeploy/.ssh/id_ed25519.pub)"
+  for r in "${CHECK_ROWS[@]:-}"; do [ -z "$r" ] || rows="$rows
+   $r"; done
+  [ -n "$rows" ] || rows="
+   (이번 실행에서는 점검 단계를 건너뛰었습니다)"
+  local bkp=""
+  if [ -f "$STATE_DIR/backup.cred" ]; then
+    bkp="
+ 🔑 백업 비밀번호 (매일 02:10 암호화 백업, /var/backups/certdeploy): $(sed -n 's/^BACKUP_PASSPHRASE=//p' "$STATE_DIR/backup.cred")
+    → 이 비밀번호를 서버 밖(봉인 봉투·금고·비밀번호 관리자)에도 따로 보관하세요. 잃으면 백업을 복구할 수 없습니다."
+  fi
   umask 077
   cat >"$SUMMARY" <<SUM
-=== 관리 서버 설치 요약 ($(date '+%F %T')) — 이 파일에는 비밀번호가 있습니다(권한 600). 확인 후 안전한 곳에 옮기고 삭제하세요 ===
+════════════════════════════════════════════════════════════════
+ ✅ 관리 서버 설치가 끝났습니다 ($(date '+%F %T'))
+ ⚠️  이 파일에는 비밀번호가 있습니다(권한 600). 확인 후 안전한 곳에 옮기고 삭제하세요.
+════════════════════════════════════════════════════════════════
 
-Grafana(감시 대시보드)   https://$host/            계정 admin / 비밀번호 $gpw
-관리자 화면(발급·배포 설정) https://$host:8443/      계정 $ADMIN_USER / 비밀번호 $apw
-  → 로그인 후 「발급·배포 설정」에서 메일 입력·시험, 인증서별 개인키 보호 선택
-임시 자체 서명 인증서를 쓰고 있으므로 브라우저 경고가 뜹니다(정식 인증서로 교체 필요).
+■ 1. 접속 정보 (관리자 PC 의 브라우저에서)
+ 🖥  Grafana(감시 대시보드)      https://$host/          계정 admin / 비밀번호 $gpw
+ 🔧 관리자 화면(설정·운영)       https://$host:8443/     계정 $ADMIN_USER / 비밀번호 $apw
+    임시 자체 서명 인증서라 브라우저 경고가 뜹니다 → 「고급 → 계속」. 나중에 정식 인증서로 교체하세요.
+$bkp
 
-배포용 SSH 공개키(각 대상 서버의 deploy 계정 authorized_keys 에 등록):
+■ 2. 설치 결과 점검$rows
+
+■ 3. 다음 할 일 — 이 순서대로 하세요
+ ① 관리자 화면에 로그인 → 상단 「설정·운영」 → 「시작하기」 체크리스트를 위에서 아래로(메일 시험, 2단계 인증 켜기 등)
+ ② 감시할 서버 목록 등록 → $SRC_DIR/monitoring/prometheus/targets/servers.yml (또는 scripts/csv_to_targets.py)
+ ③ 배포 대상 서버 준비 → 아래 SSH 공개키를 각 대상 서버의 배포 계정 authorized_keys 에 등록(설치 매뉴얼 8단계)
+ ④ /etc/certdeploy/certdeploy.yml 의 targets·경로를 실제 값으로 수정 → 설치 매뉴얼 7-4(known_hosts), 9단계(인증서 준비)
+ ⑤ 시험 시나리오 T-01~T-28 진행(docs/ops/test-scenarios.md) — 막히면 certdeploy diagnose --out 번들을 전달
+
+■ 4. 배포용 SSH 공개키 (대상 서버에 등록)
 $pub
 
-남은 수동 작업 (설치 매뉴얼 docs/ops/vm-install-and-test.md)
- 1. 감시 대상 등록: $SRC_DIR/monitoring/prometheus/targets/servers.yml (또는 scripts/csv_to_targets.py)
- 2. /etc/certdeploy/certdeploy.yml 의 대상(targets)·경로를 실제 값으로 수정 → 대상 서버 준비(8단계) → known_hosts 등록(7-4)
- 3. 인증서 준비(9단계: csr/import 또는 자동 발급 7-3) → 시험 T-01~T-22
- 4. 메일: 관리자 화면에서 시험 메일 확인(설치 시 --smtp-host 를 준 경우 Alertmanager 에는 이미 반영됨)
- 5. 임시 자체 서명 인증서 교체, 8443 허용 대역 확인, 이 요약 파일 삭제
-로그: $LOG
+■ 5. 알아 두세요
+ • 설치 매뉴얼: docs/ops/vm-install-and-test.md   • 설치 로그: $LOG
+ • 이 요약 파일($SUMMARY)은 확인 후 삭제하세요.
+════════════════════════════════════════════════════════════════
 SUM
   echo
   cat "$SUMMARY"
@@ -441,13 +566,19 @@ SUM
 
 # ---------------------------------------------------------------- 실행
 log "관리 서버 자동 설치 시작(dry-run=$DRY_RUN)"
+# 터미널에서 필수 옵션 없이 실행하면 질문으로 채운다(--wizard 로 강제, --no-wizard 로 끔)
+if [ "$NO_WIZARD" -eq 0 ] && { [ "$WIZARD" -eq 1 ] || { [ -t 0 ] && [ "$ASSUME_YES" -eq 0 ] && [ "$DRY_RUN" -eq 0 ] && [ -z "$ONLY" ] && { [ -z "$HOSTNAME_FQDN" ] || [ -z "$MAIL_TO" ]; }; }; }; then
+  wizard
+fi
+validate_inputs
+print_plan
 if [ "$DRY_RUN" -eq 0 ]; then
   [ "$(id -u)" -eq 0 ] || die "root 로 실행하세요(sudo bash $0 ...)"
   mkdir -p "$STATE_DIR" "$(dirname "$LOG")"
   chmod 700 "$STATE_DIR"
   if [ "$ASSUME_YES" -eq 0 ]; then
-    read -r -p "이 서버에 감시 스택·certdeploy·nginx 를 설치합니다. 계속할까요? [y/N] " ans
-    case "$ans" in y|Y|yes) ;; *) echo "중단했습니다."; exit 1 ;; esac
+    read -r -p "위 계획대로 설치할까요? [y/N] " ans
+    case "$ans" in y|Y|yes) ;; *) echo "중단했습니다. (옵션을 바꿔 다시 실행하세요)"; exit 1 ;; esac
   fi
 fi
 
@@ -459,7 +590,7 @@ for s in "${STEPS[@]}"; do
     log "[$n/$total] $s — 이미 완료(건너뜀, 다시 하려면 --force)"
     continue
   fi
-  log "[$n/$total] $s"
+  log "[$n/$total] $s · ${STEP_TITLE[$s]}"
   "step_$s"
   [ "$DRY_RUN" -eq 1 ] || touch "$STATE_DIR/$s.done"
 done

@@ -76,7 +76,7 @@ groups:
         labels: {severity: warning}
         annotations:
           summary: "배포 승인 대기 1일 초과: {{ $labels.cert }}"
-          description: "{{ $labels.cert }} 인증서 갱신본의 배포 승인이 하루 넘게 대기 중입니다. 관리자 화면 '발급·배포 설정' 또는 `certdeploy approve` 로 승인/반려하세요."
+          description: "{{ $labels.cert }} 인증서 갱신본의 배포 승인이 하루 넘게 대기 중입니다. 관리자 화면 '설정·운영' 또는 `certdeploy approve` 로 승인/반려하세요."
 
       - alert: CertDeployApprovalPendingLong
         expr: certdeploy_approval_pending > 0 and (time() - certdeploy_approval_pending_since_timestamp_seconds) > 86400 * 3
@@ -120,3 +120,38 @@ groups:
         annotations:
           summary: "인증서 자동 탐색이 열흘 넘게 실행되지 않음"
           description: "주 1회 실행되는 certdeploy-discover.timer 가 멈췄을 수 있습니다."
+
+  # 관리 서버 백업(certdeploy backup-run 이 Pushgateway 로 보내는 지표)
+  - name: certbackup
+    rules:
+      - alert: CertBackupFailed
+        expr: certdeploy_backup_ok == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "관리 서버 백업 실패"
+          description: "마지막 백업이 실패했거나 외부 복사에 실패했습니다. `certdeploy backup-status` 와 `journalctl -u certdeploy-backup` 를 확인하세요."
+
+      - alert: CertBackupStale
+        expr: time() - certdeploy_backup_last_success_timestamp_seconds > 86400 * 2
+        for: 30m
+        labels: {severity: critical}
+        annotations:
+          summary: "관리 서버 백업이 이틀 넘게 성공하지 못함"
+          description: "마지막 성공 이후 {{ $value | humanizeDuration }} 지났습니다. 백업 타이머(certdeploy-backup.timer)와 저장 공간·외부 대상을 확인하세요."
+
+      - alert: CertBackupNotRunning
+        expr: time() - certdeploy_backup_last_run_timestamp_seconds > 86400 * 3
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: "관리 서버 백업이 사흘 넘게 실행되지 않음"
+          description: "백업 타이머가 멈췄을 수 있습니다(systemctl list-timers)."
+
+      - alert: CertBackupPartial
+        expr: certdeploy_backup_partial == 1
+        for: 1h
+        labels: {severity: warning}
+        annotations:
+          summary: "백업에서 읽지 못해 빠진 항목이 있음"
+          description: "일부 파일을 읽지 못했습니다(권한·경로). `certdeploy backup-status` 와 백업 서비스 로그를 확인하세요."

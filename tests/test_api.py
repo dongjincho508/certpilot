@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -11,7 +11,7 @@ PW = "Str0ng!Passw0rd"
 
 @pytest.fixture
 def ctx(tmp_path, sandbox):
-    clock = {"now": datetime(2026, 10, 28, 12, 0, 0)}
+    clock = {"now": datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)}      # 시험 인증서(conftest.NOW 기준)와 같은 시각 기준 — 고정 날짜는 시간이 지나면 어긋난다
     app = create_app(
         {"DATA_DIR": str(tmp_path / "data"), "ADMIN_USER": "root1", "ADMIN_PASSWORD": PW,
          "SECURE_COOKIE": False, "max_failures": 3},

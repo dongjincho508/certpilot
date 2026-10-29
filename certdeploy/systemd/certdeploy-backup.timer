@@ -1,0 +1,11 @@
+# /etc/systemd/system/certdeploy-backup.timer — 매일 새벽(부하가 적은 시간)
+[Unit]
+Description=certdeploy 관리 서버 백업 주기
+
+[Timer]
+OnCalendar=*-*-* 02:10:00
+RandomizedDelaySec=15m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

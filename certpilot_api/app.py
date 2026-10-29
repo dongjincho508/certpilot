@@ -405,7 +405,7 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
     def audit_verify():
         return jsonify(audit.verify_integrity())
 
-    # ---------------------------------------------------------------- 발급·배포 설정 (관리자) — certdeploy 와 같은 서버에서 쓰는 설정 화면
+    # ---------------------------------------------------------------- 설정·운영 (관리자) — certdeploy 와 같은 서버에서 쓰는 설정 화면
     def cd_call(fn, *a, **k):
         if not cfg.get("CERTDEPLOY_CONFIG"):
             return _err("certdeploy", "이 서버에는 certdeploy 연동이 설정되어 있지 않습니다(환경변수 CERTDEPLOY_CONFIG). 설치 매뉴얼의 '관리자 화면' 절을 참고하세요.", 409)
@@ -434,6 +434,12 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
         audit.write({"event_type": "certdeploy_settings_update", "description": ", ".join(r["changed"]) or "(변경 없음)",
                      "details": {"actor": g.user["username"], "changed": r["changed"], "messages": r["messages"]}})     # 비밀번호·암호는 기록하지 않는다
         return jsonify(r)
+
+    @app.get("/certdeploy/backup")
+    @require(ADMIN)
+    def cd_backup():
+        r = cd_call(lambda m: m.backup_overview(cfg.get("CERTDEPLOY_CONFIG")))
+        return r if isinstance(r, tuple) else jsonify(r)
 
     @app.get("/certdeploy/approvals")
     @require(ADMIN)

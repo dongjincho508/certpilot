@@ -168,3 +168,22 @@ def test_generated_files_are_gitignored():
 def test_docs_mention_install_script():
     d = (ROOT / "docs/ops/vm-install-and-test.md").read_text()
     assert "install-mgmt-server.sh" in d and "rocky10-mgmt.ks.example" in d
+
+
+def test_wizard_collects_answers_and_prints_plan():
+    answers = "mgmt.hnu.kr\na@hnu.kr,b@hnu.kr\nsmtp.hnu.kr:587\ncert@hnu.kr\n\n10.10.0.0/24\ny\ny\n/mnt/nas/cd\n10.20.0.0/24\nn\n"
+    r = subprocess.run(["bash", str(SCRIPT), "--dry-run", "--skip-os-check", "--wizard", "--only", "certdeploy"], input=answers, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    for want in ("설치 마법사", "설치 계획", "mgmt.hnu.kr", "a@hnu.kr,b@hnu.kr", "10.10.0.0/24", "2단계 인증 필수", "추가 복사 /mnt/nas/cd", "10.20.0.0/24"):
+        assert want in r.stdout, want
+    assert "certdeploy-backup.timer" in r.stdout and "certdeploy-discover.timer" in r.stdout
+
+
+def test_wizard_rejects_bad_answers():
+    r = subprocess.run(["bash", str(SCRIPT), "--dry-run", "--skip-os-check", "--wizard"], input="bad host name!\n\n\n\n\n\n\n\n\n\n", capture_output=True, text=True, timeout=60)
+    assert r.returncode != 0 and "형식이 올바르지 않습니다" in r.stdout
+
+
+def test_plan_is_printed_without_wizard_too():
+    r = sh(DRY)
+    assert "설치 계획" in r.stdout and "mgmt.hnu.kr" in r.stdout

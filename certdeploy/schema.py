@@ -61,6 +61,15 @@ def _approval() -> dict:
         "ttl_hours": {"type": "integer", "minimum": 1, "maximum": 720}, "self_approval": _B}}
 
 
+def _backup() -> dict:
+    target = {"type": "object", "required": ["kind", "path"], "properties": {"kind": {"enum": ["dir", "ssh"]}, "name": _S, "path": _PATH, "host": _S,
+                                                                          "user": _S, "port": _I, "key_file": _PATH, "known_hosts": _PATH}}
+    return {"type": "object", "additionalProperties": False, "properties": {
+        "dir": _PATH, "passphrase_env": _S, "passphrase_file": _PATH, "keep_daily": _I, "keep_weekly": _I, "keep_monthly": _I, "verify": _B,
+        "etc_dir": _PATH, "admin_data_dir": _PATH, "monitoring_dir": _PATH, "nginx_files": {"type": "array", "items": _PATH},
+        "include": {"type": "array", "items": _PATH}, "exclude": {"type": "array", "items": _S}, "copy_to": {"type": "array", "items": target}}}
+
+
 def config_schema() -> dict:
     target = _target()
     certset = {"type": "object", "properties": {"name": _S, "certificate": {"type": "object", "properties": {
@@ -72,7 +81,7 @@ def config_schema() -> dict:
         "smtp": {"type": "object", "required": ["host", "from", "to"]},
         "webhook": {"type": "object", "properties": {"url_env": _S, "url_file": _PATH, "format": {"enum": list(WEBHOOK_FORMATS)}, "on_success": _B}}}}
     return {"$schema": "https://json-schema.org/draft/2020-12/schema", "title": "certdeploy 설정", "type": "object",
-            "properties": {"state_dir": _PATH, "audit_log": _PATH, "approval": _approval(), "options": _options(), "notify": notify, "defaults": {"type": "object"},
+            "properties": {"state_dir": _PATH, "audit_log": _PATH, "approval": _approval(), "backup": _backup(), "options": _options(), "notify": notify, "defaults": {"type": "object"},
                            "lego": {"type": "object", "properties": {"binary": _S, "email": _S, "dns_provider": _S, "domains": {"type": "array", "items": _S},
                                                                     "path": _PATH, "env_file": _PATH, "renew_days": _I, "server": _S, "dns_resolvers": {"type": "array", "items": _S}}},
                            "acme": _acme(), "certificate": certset["properties"]["certificate"], "targets": {"type": "array", "items": target},

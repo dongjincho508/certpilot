@@ -1,7 +1,7 @@
 # 수동 구매 인증서(와일드카드 등) + 자동 배포용 설정 — DNS(Infoblox)·lego 연동 없음. **도메인별로 인증서를 나눈 구성**
 # 복사:  sudo cp certdeploy/certdeploy.manual.example.yml /etc/certdeploy/certdeploy.yml
 # 흐름:  certdeploy --cert hnu csr → CA 제출 → certdeploy --cert hnu import --deploy   (docs/ops/certdeploy.md 5-1, docs/ops/vm-install-and-test.md)
-# 비밀번호·토큰은 이 파일에 쓰지 않는다. 메일·개인키 보호 암호는 관리자 화면(발급·배포 설정)에서 입력하거나 /etc/certdeploy/env 의 환경변수로 둔다.
+# 비밀번호·토큰은 이 파일에 쓰지 않는다. 메일·개인키 보호 암호는 관리자 화면(설정·운영)에서 입력하거나 /etc/certdeploy/env 의 환경변수로 둔다.
 
 state_dir: /var/lib/certdeploy
 audit_log: /var/lib/certdeploy/audit            # 변조 탐지 해시 체인 감사 로그(검증: certdeploy verify-audit)
@@ -10,7 +10,7 @@ audit_log: /var/lib/certdeploy/audit            # 변조 탐지 해시 체인 �
 notify:
   alertmanager_url: http://127.0.0.1:9093
   pushgateway_url: http://127.0.0.1:9091
-  # 메일(우선 채널): **관리자 화면 > 발급·배포 설정 > 메일 알림**에서 입력하면 아래보다 우선한다(화면 없이 쓰려면 이 줄을 켠다)
+  # 메일(우선 채널): **관리자 화면 > 설정·운영 > 메일 알림**에서 입력하면 아래보다 우선한다(화면 없이 쓰려면 이 줄을 켠다)
   # smtp: {host: smtp.hnu.kr, port: 587, starttls: true, from: cert-deploy@hnu.kr, to: [cert-admin@hnu.kr], username: cert-deploy, password_env: SMTP_PASSWORD, on_success: true}
   # webhook: {url_env: CERTDEPLOY_WEBHOOK_URL, format: teams}      # Teams 는 이후 추가
 

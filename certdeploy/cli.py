@@ -11,7 +11,7 @@ import yaml
 
 from certpilot_core import diag as cpdiag, trace
 
-from . import __version__, acme, approval, diagnose as dg
+from . import __version__, acme, approval, backup as backup_mod, backupjob, diagnose as dg
 from .dnsprov import DnsProviderError, build_provider
 from .dnsquery import DnsError, system_resolvers
 from .backup import BackupError, create_backup, restore_backup
@@ -244,7 +244,7 @@ def _approval_gate(cs, bundle, d, only, force, dry_run, action, emergency):
     if g.created and not dry_run:
         d.notifier.fire(f"approval:{cs.name}", f"인증서 배포 승인 요청: {cs.name}",
                         f"새 인증서(일련번호 {req['serial']}, 만료 {req['not_after'][:10]})를 {', '.join(names)} 에 배포하려면 승인 {req['needed']}명이 필요합니다.\n"
-                        f"관리자 화면 '발급·배포 설정' 에서 승인하거나 `certdeploy approve {req['id']} --by 이름` 을 실행하세요. 유효 {policy['ttl_hours']}시간.", "warning")
+                        f"관리자 화면 '설정·운영' 에서 승인하거나 `certdeploy approve {req['id']} --by 이름` 을 실행하세요. 유효 {policy['ttl_hours']}시간.", "warning")
         _approval_audit(cs, "approval_requested", req, {"actor": req["requested_by"]})
     if not dry_run:
         _push_approval_metrics(cs)
@@ -910,6 +910,142 @@ def restore(src, dest, passphrase_env):
     except BackupError as e:
         raise click.ClickException(str(e))
     click.echo(f"복원 완료: {dest} ← {', '.join(names)}")
+
+
+# ------------------------------------------------------------------ 백업 자동화
+def _backup_cfg(obj):
+    cfg = _cfg(obj)
+    if not cfg.backup:
+        raise click.ClickException("설정 파일에 backup: 항목이 없습니다 — certdeploy.example.yml 의 backup 예시를 참고하세요")
+    return cfg, cfg.backup
+
+
+def _backup_pw(b):
+    try:
+        return backupjob.passphrase_of(b)
+    except BackupError as e:
+        raise click.ClickException(str(e))
+
+
+@main.command("backup-run")
+@click.option("--quiet", is_flag=True, help="성공 시 출력 최소화(타이머용)")
+@click.pass_obj
+def backup_run(obj, quiet):
+    """관리 서버 전체(설정·상태·관리자 DB·감시 비밀·nginx)를 암호화 백업하고 검증·외부 복사·보관 정리·알림까지 수행한다."""
+    cfg, b = _backup_cfg(obj)
+    res = backupjob.run_backup(cfg, obj["config"], b, _backup_pw(b))
+    state_dir = cfg.state_dir
+    try:
+        backupjob.save_status(state_dir, res)
+    except OSError as e:
+        click.echo(f"주의: 상태 기록 실패({type(e).__name__})", err=True)
+    n = cfg.notify
+    if n.pushgateway_url:
+        pw = os.environ.get(n.pushgateway_password_env or "") if n.pushgateway_password_env else None
+        push_metrics(n.pushgateway_url, "backup", backupjob.metrics_text(res), n.pushgateway_user, pw)
+    notifier = build_notifier(n)
+    if not res.ok:
+        notifier.fire("backup", "백업 실패", f"{res.error}\n파일: {res.name}\n외부 복사: " + ", ".join(f"{c['name']}={'성공' if c['ok'] else '실패(' + c['error'] + ')'}" for c in res.copies), "critical")
+    elif res.partial:
+        notifier.fire("backup", "백업 일부 누락", "읽지 못해 빠진 항목:\n" + "\n".join(res.skipped[:20]), "warning")
+    else:
+        notifier.resolve("backup")
+    if res.ok and not (quiet and not res.partial):
+        click.echo(f"백업 완료: {os.path.join(b['dir'], res.name)} ({res.size:,} bytes, 항목 {res.members}개, {res.duration_s}초)")
+        for c in res.copies:
+            click.echo(f"  외부 복사 {c['name']} → {c['label']}")
+        if res.pruned:
+            click.echo(f"  오래된 백업 {len(res.pruned)}개 정리")
+    if res.partial:
+        click.echo(f"경고: 읽지 못해 빠진 항목 {len(res.skipped)}개 — " + "; ".join(res.skipped[:5]), err=True)
+    if not res.ok:
+        click.echo(f"백업 실패: {res.error}", err=True)
+        for c in res.copies:
+            if not c["ok"]:
+                click.echo(f"  외부 복사 실패 {c['name']}: {c['error']}", err=True)
+    sys.exit(0 if res.ok else 1)
+
+
+@main.command("backup-list")
+@click.pass_obj
+def backup_list(obj):
+    """로컬 보관 위치의 백업 목록."""
+    cfg, b = _backup_cfg(obj)
+    rows = backupjob.list_backups(b)
+    for r in rows:
+        click.echo(f"{r['name']}  {r['size']:>12,} bytes  {r['created']}")
+    click.echo(f"총 {len(rows)}개 ({b['dir']})" if rows else f"백업이 없습니다 ({b['dir']})")
+
+
+@main.command("backup-status")
+@click.option("--max-age-hours", default=36, show_default=True, help="마지막 성공이 이보다 오래되면 종료 코드 1")
+@click.pass_obj
+def backup_status(obj, max_age_hours):
+    """마지막 백업 실행 결과(성공 여부·크기·외부 복사·경과 시간)."""
+    cfg, b = _backup_cfg(obj)
+    st = backupjob.load_status(cfg.state_dir)
+    if not st:
+        click.echo("백업 기록이 없습니다 — certdeploy backup-run 을 실행하세요")
+        sys.exit(1)
+    age = backupjob.age_hours(st)
+    click.echo(f"마지막 실행: {st['finished']} ({age:.1f}시간 전)  결과: {'성공' if st['ok'] else '실패'}{' (일부 누락)' if st.get('partial') else ''}  파일: {st['name']} ({st['size']:,} bytes)")
+    for c in st.get("copies", []):
+        click.echo(f"  외부 복사 {c['name']}: {'성공' if c['ok'] else '실패 — ' + c['error']}")
+    if st.get("error"):
+        click.echo(f"  오류: {st['error']}")
+    sys.exit(0 if st["ok"] and age is not None and age <= max_age_hours else 1)
+
+
+@main.command("backup-verify")
+@click.option("--file", "path", type=click.Path(exists=True, dir_okay=False), help="검증할 백업 파일(기본: 가장 최근 로컬 백업)")
+@click.option("--deep", is_flag=True, help="임시 폴더에 풀어 인증서·키 짝과 DB 무결성까지 확인(끝나면 삭제)")
+@click.pass_obj
+def backup_verify(obj, path, deep):
+    """백업이 실제로 복원 가능한지 확인한다(비밀번호로 복호화, 항목 목록, --deep 은 내용 점검)."""
+    cfg, b = _backup_cfg(obj)
+    if not path:
+        rows = backupjob.list_backups(b)
+        if not rows:
+            raise click.ClickException("검증할 백업이 없습니다")
+        path = os.path.join(b["dir"], rows[0]["name"])
+    pw = _backup_pw(b)
+    try:
+        blob = open(path, "rb").read()
+        members = backup_mod.list_members(blob, pw)
+        click.echo(f"복호화·목록 확인 OK: {path} (항목 {len(members)}개)")
+        if deep:
+            rep = backupjob.deep_verify(blob, pw)
+            for c in rep["certs"]:
+                click.echo(f"  인증서 {c['name']}: {'OK' if c['ok'] else '실패'} {c.get('serial', '') or c.get('note', '') or c.get('error', '')}")
+            for d in rep["databases"]:
+                click.echo(f"  DB {d['name']}: {'무결성 OK' if d['ok'] else '오류'}")
+            for p_ in rep["problems"]:
+                click.echo(f"문제: {p_}", err=True)
+            sys.exit(1 if rep["problems"] else 0)
+    except (BackupError, OSError) as e:
+        click.echo(f"검증 실패: {e}", err=True)
+        sys.exit(1)
+
+
+@main.command("backup-restore")
+@click.option("--file", "path", required=True, type=click.Path(exists=True, dir_okay=False))
+@click.option("--root", default="/", show_default=True, help="복구 대상 루트(시험·점검용으로 다른 폴더 지정 가능)")
+@click.option("--apply", "apply_", is_flag=True, help="실제로 되돌린다(기본은 계획만 출력). 기존 파일은 .pre-restore-<시각> 로 옮겨 둔다")
+@click.pass_obj
+def backup_restore(obj, path, root, apply_):
+    """백업을 원래 위치에 되돌린다(새 VM 복구용). 먼저 계획을 확인한 뒤 --apply."""
+    cfg, b = _backup_cfg(obj)
+    pw = _backup_pw(b)
+    try:
+        plan = backupjob.restore_apply(open(path, "rb").read(), pw, root, dry_run=not apply_)
+    except (BackupError, OSError, ValueError) as e:
+        raise click.ClickException(f"복구 실패: {e}")
+    for r in plan:
+        click.echo(f"{'복구함' if apply_ else '복구 예정'}: {r['archive']} → {r['dest']} (소유자 {r['owner']}){' [기존 파일은 .pre-restore 로 이동]' if r['exists'] else ''}")
+    if not apply_:
+        click.echo("\n계획만 출력했습니다. 적용하려면 --apply 를 붙이세요. 적용 후 서비스 재시작과 확인 절차는 설치 매뉴얼 10-4 를 따르세요.")
+    else:
+        click.echo("\n복구 완료. 서비스를 재시작하고 `certdeploy validate`, `certdeploy status` 로 확인하세요.")
 
 
 @main.command()

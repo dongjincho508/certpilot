@@ -274,9 +274,9 @@ $CD deploy --target waf-main
 $CD confirm --target waf-main
 ```
 
-### T-22 관리자 화면(발급·배포 설정) — 메일 입력·시험 / 인증서별 개인키 보호 선택
+### T-22 관리자 화면(설정·운영) — 메일 입력·시험 / 인증서별 개인키 보호 선택
 - **사전조건**: 설치 매뉴얼 7-5 완료(`certdeploy-admin` 실행, nginx 8443), 인증서(`hnu`, `hannam`) 중 하나 이상이 이미 설치되어 있으면 키 변환까지 확인 가능
-- **절차**: ① 브라우저로 `https://<관리 서버>:8443` 로그인(관리자) → 「발급·배포 설정」 ② **메일**: SMTP 입력 → [시험 메일 보내기] → 수신함 확인 → [저장] ③ **개인키 보호**: `hnu` 를 「사용」+암호(12자 이상)로 [적용] → `hannam` 은 「사용 안 함」 유지 ④ CLI 확인
+- **절차**: ① 브라우저로 `https://<관리 서버>:8443` 로그인(관리자) → 「설정·운영」 ② **메일**: SMTP 입력 → [시험 메일 보내기] → 수신함 확인 → [저장] ③ **개인키 보호**: `hnu` 를 「사용」+암호(12자 이상)로 [적용] → `hannam` 은 「사용 안 함」 유지 ④ CLI 확인
 ```bash
 $CD --cert hnu validate
 ```
@@ -284,7 +284,7 @@ $CD --cert hnu validate
 $CD --cert hnu deploy --force --target hnu-web-canary
 ```
 - **기대**: 시험 메일이 도착하고, 실패 시 화면에 원인(연결 거부·로그인 실패·TLS 오류…)이 표시됨. 저장 후 `validate` 출력에 `관리자 화면(settings.json) 적용: 메일 · 개인키 보호(hnu)`. `hnu` 키 파일이 암호화(`BEGIN ENCRYPTED PRIVATE KEY`)되고 같은 폴더에 평문 `.bak-` 사본이 **남지 않으며**, 배포는 환경변수 없이 성공(대상 서버의 키는 평문). `hannam` 키는 평문 그대로. 「사용 안 함」으로 되돌리면 평문으로 복원. 감사 로그에 `certdeploy_settings_update` 가 기록되지만 비밀번호·암호는 없음
-- **권한 확인**: 운영자(operator) 계정으로 로그인하면 「발급·배포 설정」 탭이 보이지 않고, API 직접 호출은 403
+- **권한 확인**: 운영자(operator) 계정으로 로그인하면 「설정·운영」 탭이 보이지 않고, API 직접 호출은 403
 - **증거**: 화면 캡처(비밀번호 가림), `validate` 출력, `ls -l /var/lib/certdeploy/hnu/managed/`
 - **실패 시**: `journalctl -u certdeploy-admin -n 50`, 화면의 오류 메시지·요청 ID, `$CD diagnose --out`
 
@@ -323,6 +323,13 @@ $CD --cert hnu deploy --force --target hnu-web-canary
 - **증거**: 채널 메시지 캡처, 티켓 번호·상태, `cat /var/lib/certdeploy/tickets.json`
 - **실패 시**: 화면의 분류된 오류(인증 실패/권한 없음/주소 없음/TLS), 티켓 생성이 거부되면 해당 시스템의 필수 필드·워크플로 규칙 확인 후 알려 주세요(`$CD diagnose --out`)
 
+### T-28 백업 자동화 — 백업·검증·외부 복사·보관 정리·복구 훈련
+- **사전조건**: 설치 매뉴얼 10-4 완료(`backup:` 설정, `backup.env`, 타이머), 외부 대상(NAS 마운트 또는 SSH 서버) 1곳, 시험용 새 VM 또는 `--root` 임시 폴더
+- **절차**: ① `backup-run` → 「백업 완료」, `ls -l /var/backups/certdeploy` (권한 600, `.manifest.json` 함께), 외부 대상에도 같은 파일 ② `backup-verify --deep` → 복호화·인증서/키 짝·DB 무결성 OK ③ 잘못된 비밀번호로 `backup-verify` → 실패 ④ `systemctl list-timers | grep backup`, `systemctl start certdeploy-backup.service` → `journalctl -u certdeploy-backup` 정상 ⑤ 외부 대상을 일부러 쓰기 불가로 만들고 실행 → 종료 코드 1, 알림 도착, 로컬 백업은 유지 ⑥ 며칠 운영 후(또는 `keep_daily` 를 줄여) 오래된 백업이 정리되고 최근 1개는 항상 남는지 ⑦ **복구 훈련**: 백업 파일로 `backup-restore --root /tmp/restore-test`(계획) → `--apply` → 복원된 파일(`settings.json`, `certpilot.db`, `mfa.key`, `alertmanager/secrets`)이 원본과 같은지, 새 VM 에서는 서비스 기동과 `validate`·`status` 정상 ⑧ 관리자 화면 「관리 서버 백업」 카드에 결과가 보이는지
+- **기대**: 위 동작대로. 백업 파일 안에 평문 비밀이 없음(`strings 파일 | grep -i password` 결과 없음). 실패·누락 시 알림, 1일 이상 성공이 없으면 경고/치명 알림
+- **증거**: `backup-status` 출력, 외부 대상 `ls -l`, 복구 후 `validate`/`status` 출력, 알림 캡처
+- **실패 시**: `journalctl -u certdeploy-backup -n 100`, 「일부 누락」이면 빠진 경로(권한·SELinux), 외부 복사 실패 메시지(경로·권한·known_hosts), `$CD diagnose --out`
+
 ---
 ## 결과 기록표
 | ID | 일시 | 수행자 | 합격(O/X) | 증거 파일/링크 | 비고(실패 시 번들 경로) |
@@ -355,3 +362,4 @@ $CD --cert hnu deploy --force --target hnu-web-canary
 | T-25 | | | | | |
 | T-26 | | | | | |
 | T-27 | | | | | |
+| T-28 | | | | | |
