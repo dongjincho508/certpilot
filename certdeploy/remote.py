@@ -33,7 +33,7 @@ def ensure_dir_exists(t: Transport, dest: str) -> None:
     _must(t.run(f"test -d {q(parent)}"), f"대상 디렉터리 확인({parent})")
 
 
-def install_file(t: Transport, dest: str, data: bytes, mode: str, ts: str, restorecon: bool = True) -> Installed:
+def install_file(t: Transport, dest: str, data: bytes, mode: str, ts: str, restorecon: bool = True, owner: str = None) -> Installed:
     """dest 를 data 로 교체한다. 기존 파일은 `<dest>.bak-<ts>` 로 보존(소유자·권한 유지)."""
     if not mode.isdigit() or len(mode) not in (3, 4):
         raise RemoteError(f"파일 모드가 올바르지 않습니다: {mode}")
@@ -43,8 +43,10 @@ def install_file(t: Transport, dest: str, data: bytes, mode: str, ts: str, resto
     try:
         _must(t.run(f"umask 077 && cat > {q(tmp)}", stdin=data), "임시 파일 쓰기")
         steps = [f"chmod {mode} {q(tmp)}",
-                 f"{{ [ ! -e {q(dest)} ] || chown --reference={q(dest)} {q(tmp)} 2>/dev/null || true; }}",
-                 f"mv -f {q(tmp)} {q(dest)}"]
+                 f"{{ [ ! -e {q(dest)} ] || chown --reference={q(dest)} {q(tmp)} 2>/dev/null || true; }}"]
+        if owner:        # 설정으로 지정한 소유자가 기존 파일의 소유자보다 우선(실패하면 배포 실패 — 서비스 계정이 못 읽는 키를 두지 않는다)
+            steps.append(f"chown {q(owner)} {q(tmp)}")
+        steps.append(f"mv -f {q(tmp)} {q(dest)}")
         if restorecon:
             steps.append(f"{{ command -v restorecon >/dev/null 2>&1 && restorecon -F {q(dest)} 2>/dev/null || true; }}")
         _must(t.run(" && ".join(steps)), "파일 교체")

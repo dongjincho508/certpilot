@@ -354,7 +354,8 @@ sudo dnf -y install policycoreutils-python-utils && sudo semanage fcontext -a -t
 ```
 Apache 설정은 먼저 **수동으로** `SSLCertificateFile /etc/ssl/univ/fullchain.pem`, `SSLCertificateKeyFile /etc/ssl/univ/privkey.pem` 을 가리키게 바꾸고(처음 한 번 현재 인증서를 그 경로에 복사) `apachectl configtest` 통과를 확인한다.
 **Ubuntu/Debian 대상**: 서비스 이름이 `apache2` 이므로 sudoers·`reload_cmd` 의 `httpd` 를 `apache2` 로 바꾼다.
-**Tomcat / WebtoB·JEUS / Node.js**: 키스토어 경로·형식·재로드(재기동) 명령은 **제품 문서와 현재 설정으로 확인**해 `targets` 에 반영한다(`reload_cmd` 는 sudoers 에 해당 명령만 허용).
+**Tomcat / Node.js**: 키스토어 경로·형식·재로드(재기동) 명령은 **제품 문서와 현재 설정으로 확인**해 `targets` 에 반영한다(`reload_cmd` 는 sudoers 에 해당 명령만 허용).
+**WebtoB / JEUS**: 전용 유형 `type: webtob`·`type: jeus`(설정 예시 `certdeploy.webtob-jeus.example.yml`, 시험 T-26). 현재 `http.m`(`*SSL` 절)·JEUS 도메인 설정에서 **인증서/키스토어 경로, 실행 계정, 패스프레이즈 사용 여부, 재기동 명령**을 확인해 채운다. 배포용 계정은 `sudo` 로 파일 교체와 그 재기동 명령만 허용하고, 파일은 `owner`(WebtoB/JEUS 실행 계정)가 읽을 수 있어야 한다. 경로를 바꾸면 `http.m`/JEUS 설정도 바뀌므로 **기존 경로를 그대로 쓴다**.
 **웹방화벽(모니터랩)**: API/CLI 가 확인되기 전에는 **옵션 C(사람이 교체)** 로 시작한다 — 설정은 `certdeploy.waf-manual.example.yml`, 시험은 T-21. API 문서가 오면 옵션 A(`http_api`, T-18)로 전환. 선택 가이드·확인 질문은 [호환성 가이드](compatibility.md).
 **IIS(Windows)**: 아래 8-1 로 Windows 를 준비하면 `type: iis` 로 자동 배포된다(설정 예시 `certdeploy.iis.example.yml`, 시험 T-25). SSH 를 열 수 없는 Windows 는 `type: manual` 로 PFX 를 준비해 두고 [deploy-iis.ps1](../../certdeploy/deploy-iis.ps1)(초안)로 직접 교체한다.
 

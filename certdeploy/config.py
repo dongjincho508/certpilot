@@ -290,7 +290,7 @@ def _parse_target(raw, defaults, label_prefix, problems, seen) -> Optional[Targe
         _abs(f.dest, f"{label} 파일 경로", problems)
     check = raw.get("check_cmd", default_check(raw))
     reload_cmd = raw.get("reload_cmd", default_reload(raw))
-    if raw["type"] in ("nodejs", "tomcat", "generic") and "reload_cmd" not in raw:
+    if raw["type"] in ("nodejs", "tomcat", "webtob", "jeus", "generic") and "reload_cmd" not in raw:
         problems.append(f"{label}: reload_cmd 가 필요합니다(없으면 'none' 으로 명시)")
     if str(reload_cmd).lower() == "none":
         reload_cmd = None

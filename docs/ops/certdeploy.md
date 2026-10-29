@@ -22,7 +22,11 @@
 | `nginx` | 위와 동일 | `nginx -t` / `systemctl reload nginx` |
 | `nodejs` | 위와 동일 | 없음 / **`reload_cmd` 필수** |
 | `tomcat` | `format: pkcs12\|jks\|pem` (키스토어는 `keystore_path`+`password_env`) | 없음 / **`reload_cmd` 필수** |
-| `generic` | `files:` 목록(content: cert/fullchain/chain/key/pkcs12/jks) — **WebtoB·JEUS 등** | `check_cmd`·`reload_cmd` 직접 지정 |
+| `webtob` | `cert_path`, `key_path`, 선택 `chain_path`·`owner`·`cert_content`, 개인키 패스프레이즈를 쓰면 `password_env`(+`key_format`) | `reload_cmd` 필수(`check_cmd` 선택) — 아래 WebtoB/JEUS 절 |
+| `jeus` | `keystore_path`, `format: jks\|pkcs12`, `password_env`, `alias`, `owner` | `reload_cmd` 필수 |
+| `generic` | `files:` 목록(content: cert/fullchain/chain/key/key_encrypted/key_encrypted_traditional/pkcs12/jks, 항목별 `owner`) — 그 밖의 제품 | `check_cmd`·`reload_cmd` 직접 지정 |
+
+**WebtoB / JEUS** (설정 예시 `certdeploy.webtob-jeus.example.yml`, 시험 T-26): 파일 형식·권한·소유자·패스프레이즈 키 생성·롤백은 자동화하지만 **재기동 명령은 제품 문서로 확인해 직접 적는다**(추측한 기본값을 두지 않음). 공개 설치 가이드 기준으로 WebtoB 는 `http.m` 의 `*SSL` 절이 가리키는 PEM 파일(개인키·서버 인증서·체인)을 바꾸고 `wscfl -i http.m` 컴파일 후 `wsdown`→`wsboot` 로 재기동하며, 개인키에 패스프레이즈가 있으면 `wsboot` 에서 입력을 요구한다(`PassPhraseDialog` 로 자동화 가능하나 보안 검토 필요). JEUS 는 SSL 리스너가 읽는 키스토어(JKS 등)와 설정의 `keypass` 가 있고, **재기동 없이 적용되는지는 확인하지 못했다** → `reload_cmd` 를 제품 문서로 정하고 모르면 `none` 으로 두고 수동 재기동. 참고: [SecureSign WebtoB 가이드](https://www.sslcert.co.kr/guides/Install/TmaxSoft-WebtoB-SSL-Certificate-Install), [써트코리아 WebtoB 가이드](https://kb.certkorea.co.kr/knowledgebase/webtob-%EC%9B%B9%ED%88%AC%EB%B9%84-ssl-%EC%84%A4%EC%B9%98-%EA%B0%80%EC%9D%B4%EB%93%9C/), [SecureSign JEUS 가이드](https://www.sslcert.co.kr/guides/TmaxSoft-JEUS-SSL-Certificate-Install), [JEUS 보안 관리 매뉴얼](https://www.tmaxsoft.com/upload/nas/technet/technet/upload/download/online/jeus/pver-20211006-000001/domain/chapter_domain_security.html) — 모두 버전이 다를 수 있다.
 
 IIS(Windows)는 `type: iis`(SSH+PowerShell, 에이전트 없음)로 자동 배포한다 — 설정 예시 `certdeploy.iis.example.yml`, 서버 준비는 설치 매뉴얼 8-1. **실제 Windows 에서는 미검증**(시험 T-25). SSH 를 열 수 없으면 `type: manual` + [`deploy-iis.ps1`](../../certdeploy/deploy-iis.ps1) 초안.
 

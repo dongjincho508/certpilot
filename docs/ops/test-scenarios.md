@@ -133,7 +133,7 @@ $CD check
 | Apache | `configtest` 통과, `reload` 후 새 일련번호 서빙 |
 | Nginx | `nginx -t` 통과 |
 | Tomcat | 키스토어(PKCS12/JKS) 교체 후 **재로드 방식**(재시작 필요 여부) 확인 — `reload_cmd` 에 반영 |
-| WebtoB/JEUS | 인증서 형식, 재기동 명령 확인(제품 문서) |
+| WebtoB/JEUS | `type: webtob`/`jeus` 자동 배포(T-26), 재기동 명령은 제품 문서로 확인 |
 | IIS | `type: iis` 자동 배포(T-25) 또는 `deploy-iis.ps1` 수동 교체 후 서빙 일련번호 확인 |
 | Node.js | 프로세스 재시작/리로드 방식 |
 - **공통 확인**: `$CD status`, 외부에서 `openssl s_client` 일련번호
@@ -309,6 +309,13 @@ $CD --cert hnu deploy --force --target hnu-web-canary
 - **증거**: preflight/deploy 출력, 브라우저 인증서 정보, `certutil -store My` 출력
 - **실패 시**: 출력의 `IIS 바인딩 실패: …` 메시지, Windows `C:\ProgramData\ssh\logs\sshd.log`, PowerShell 7 이면 `powershell: pwsh` 설정, `$CD diagnose --out`
 
+### T-26 WebtoB / JEUS 자동 배포
+- **사전조건**: 시험용 WebtoB·JEUS 인스턴스(운영과 분리 권장), 설정에 `type: webtob`/`jeus`(`certdeploy.webtob-jeus.example.yml` 참고), 현재 설정의 경로·실행 계정·재기동 명령 확인, 배포용 계정의 sudoers 제한 설정(8단계)
+- **절차**: ① `$CD preflight --target sso-webtob` (접속·디렉터리 쓰기·현재 TLS) ② `$CD plan` 으로 파일·소유자·명령 확인 ③ `$CD deploy --target sso-webtob` → 서버에서 파일 권한·소유자(`ls -l`) 확인, 새 인증서 일련번호 서빙 확인 ④ 개인키 패스프레이즈를 쓰는 경우: 재기동이 입력 대기로 멈추지 않는지 확인 ⑤ 재기동 명령을 일부러 틀리게 설정해 실패 시 **이전 파일로 롤백**되고 서비스가 정상인지 확인 ⑥ JEUS: 키스토어 비밀번호가 JEUS 설정의 keypass 와 같은지, 별칭(alias)이 기존과 같은지 확인, 재기동 필요 여부 확인
+- **기대**: 위 동작대로. 배포 직후 WebtoB/JEUS 가 새 파일을 읽어 정상 기동, 실패 시 이전 인증서로 복구
+- **증거**: `ls -l` 결과, 서빙 일련번호, 재기동 로그(WebtoB `wsboot` 출력, JEUS 서버 로그)
+- **실패 시**: 기동 로그의 SSL 오류(키 불일치·패스프레이즈·권한·별칭), `$CD diagnose --out`. 제품 버전별 차이는 해당 버전 매뉴얼로 확인
+
 ---
 ## 결과 기록표
 | ID | 일시 | 수행자 | 합격(O/X) | 증거 파일/링크 | 비고(실패 시 번들 경로) |
@@ -339,3 +346,4 @@ $CD --cert hnu deploy --force --target hnu-web-canary
 | T-23 | | | | | |
 | T-24 | | | | | |
 | T-25 | | | | | |
+| T-26 | | | | | |

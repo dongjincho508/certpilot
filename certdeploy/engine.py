@@ -14,12 +14,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, List, Optional
 
+from cryptography.hazmat.primitives import serialization
+
 from certpilot_core import trace
 
 from . import apideploy, iisdeploy, remote
 from .bundle import Bundle, BundleError
 from .config import Config, Target
-from .handlers import FileSpec
+from .handlers import PASSWORD_KINDS, FileSpec
 from .notify import NullNotifier
 from .state import State
 from .transport import LocalTransport, SSHTransport, Transport, TransportError
@@ -86,7 +88,7 @@ class Deployer:
             if t.verify and not self.bundle.covers(t.verify.sni or t.verify.host):
                 problems.append(f"{t.name}: 인증서 SAN 이 {t.verify.sni or t.verify.host} 를 포함하지 않습니다")
             for f in t.files:
-                if f.content in ("pkcs12", "jks"):
+                if f.content in PASSWORD_KINDS:
                     try:
                         ok = bool(self._password(f))
                     except DeployFailure as e:
@@ -117,7 +119,7 @@ class Deployer:
                 lines.append(f"    확인: {('%s:%d' % (t.verify.host, t.verify.port)) if t.verify else '없음(TLS 확인을 하지 않음)'}")
                 continue
             for f in t.files:
-                lines.append(f"    파일 {f.dest}  ← {f.content} ({f.mode})")
+                lines.append(f"    파일 {f.dest}  ← {f.content} ({f.mode}" + (f", 소유자 {f.owner}" if f.owner else "") + ")")
             lines.append(f"    점검: {t.check_cmd or '없음'}")
             lines.append(f"    재로드: {t.reload_cmd or '없음'}")
             lines.append(f"    확인: {('%s:%d' % (t.verify.host, t.verify.port)) if t.verify else '없음(TLS 확인을 하지 않음)'}")
@@ -151,6 +153,12 @@ class Deployer:
         pw = self._password(f)
         if not pw:
             raise DeployFailure(f"키스토어 비밀번호를 얻을 수 없습니다({f.password_env or f.password_file})")
+        if f.content in ("key_encrypted", "key_encrypted_traditional"):
+            fmt = serialization.PrivateFormat.TraditionalOpenSSL if f.content.endswith("traditional") else serialization.PrivateFormat.PKCS8
+            try:
+                return b.key.private_bytes(serialization.Encoding.PEM, fmt, serialization.BestAvailableEncryption(pw.encode()))
+            except (ValueError, TypeError) as e:
+                raise DeployFailure(f"개인키를 암호화할 수 없습니다: {e}")
         try:
             return b.pkcs12(pw, f.alias, f.legacy_pkcs12) if f.content == "pkcs12" else b.jks(pw, f.alias)
         except BundleError as e:
@@ -530,10 +538,13 @@ class Deployer:
             once()
 
     def _install_all(self, t, transport, ts, installed):
+        for f in t.files:                      # 비밀번호가 필요한 파일은 하나라도 없으면 아무 것도 설치하지 않는다(일부만 바뀐 상태 방지)
+            if f.content in PASSWORD_KINDS and not self._password(f):
+                raise DeployFailure(f"키스토어 비밀번호를 얻을 수 없습니다({f.password_env or f.password_file}) — 변경 없이 중단")
         for f in t.files:
             data = self._content(f)
             with trace.span("deploy", "install_file", dest=f.dest, mode=f.mode, bytes=len(data)):
-                installed.append(remote.install_file(transport, f.dest, data, f.mode, ts))
+                installed.append(remote.install_file(transport, f.dest, data, f.mode, ts, owner=f.owner))
             del data     # 키 내용을 오래 들고 있지 않는다
 
     @staticmethod
