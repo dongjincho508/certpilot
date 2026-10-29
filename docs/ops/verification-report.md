@@ -104,6 +104,7 @@
 | `tests/test_certdeploy_ssh.py` | 5 | SSH 전송(프로세스 내 서버) |
 | `tests/test_cli.py` | 5 | certpilot-cli |
 | `tests/test_tls_probe.py` | 3 | TLS 프로브 |
+| `tests/test_install_scripts.py` | 31 | 자동 설치 스크립트(문법·shellcheck·dry-run 무변경·입력 검증·비밀 미출력)·Alertmanager 렌더링(amtool)·Kickstart(ksvalidator RHEL10). **실제 Rocky 10 실행은 미검증** |
 | `tests/test_pipeline_e2e.py` | 1 | 전 과정 시나리오(등록→발급→배포→지표→실패 주입→진단→복구) |
 
 ## 6. 재현 방법

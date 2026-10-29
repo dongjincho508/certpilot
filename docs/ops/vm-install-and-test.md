@@ -8,6 +8,29 @@
 
 > 📋 설치 전에 정할 것·모을 정보·요청 문구는 **[VM 구성 전 준비 체크리스트](pre-vm-checklist.md)**, 검증 현황은 [검증 보고서](verification-report.md).
 
+## 자동 설치 (Rocky 설치 후 2~9단계를 한 번에) — 선택
+Rocky Linux 10 을 설치하고(1단계) 네트워크가 되면, **2~7-5단계의 대부분을 스크립트 한 번으로** 진행할 수 있다. 수동 단계로 하고 싶으면 이 절을 건너뛰고 아래 2단계부터 따라 한다.
+
+| 방법 | 언제 | 비고 |
+|---|---|---|
+| **A. 설치 스크립트 `scripts/install-mgmt-server.sh` (권장)** | OS 설치 후 한 번 실행 | 단계별 재실행 가능, 비밀번호 자동 생성, `--dry-run` 지원 |
+| B. Kickstart `scripts/kickstart/rocky10-mgmt.ks.example` | OS 설치까지 무인화(VM 여러 대·재구축) | `ksvalidator -v RHEL10` 문법 검증됨. 설치 후 A 를 이어 실행 |
+| C. VMware 템플릿/스냅샷 | 장애 복구·동일 구성 복제 | A 완료 직후 스냅샷을 떠 두면 재설치 불필요 |
+| D. Ansible | 관리 서버가 여러 대로 늘 때 | 지금은 과함(1대 구성) — 필요해지면 스크립트의 단계를 그대로 옮기면 됨 |
+
+```bash
+sudo dnf -y install git && sudo git clone https://github.com/dongjincho508/certpilot.git /opt/cert-monitor/src
+cd /opt/cert-monitor/src
+sudo bash scripts/install-mgmt-server.sh --dry-run --yes --hostname mgmt.hnu.kr --mail-to cert-admin@hnu.kr --smtp-host smtp.hnu.kr:587 --smtp-from cert-monitor@hnu.kr
+```
+먼저 `--dry-run` 으로 할 일만 확인한 뒤, 같은 명령에서 `--dry-run` 을 빼고 실행한다. SMTP 계정이 필요하면 `--smtp-user ID` 를 주고 비밀번호는 **환경변수로** 전달한다(`sudo SMTP_PASSWORD='...' bash scripts/...`; 명령 이력에 남지 않게 입력 후 `history -d` 또는 설치 후 `alertmanager/secrets/smtp_password` 에 직접 입력). 관리자 PC 대역만 8443 을 허용하려면 `--admin-cidr 10.10.0.0/24`.
+
+- 실행 내용: 사전 점검(OS·SELinux·CPU·외부 접속) → 기본 설정/패키지 → Docker → 소스 → 감시 스택(설정 검증 후 기동) → nginx(임시 자체 서명 인증서)+방화벽 → certdeploy → 관리자 화면 → 점검.
+- 끝나면 화면과 `/root/cert-install-summary.txt`(권한 600)에 접속 주소·**자동 생성된 Grafana/관리자 비밀번호**·배포용 SSH 공개키·남은 수동 작업이 나온다. 확인 후 안전한 곳에 옮기고 파일을 삭제한다.
+- 실패하면 원인을 고치고 **같은 명령을 다시** 실행한다(끝난 단계는 건너뜀, 강제로 다시 하려면 `--force`, 일부만 하려면 `--only monitoring,nginx`). 로그는 `/var/log/cert-install.log`.
+- 스크립트가 하지 **않는** 일(수동): 감시 대상 서버 목록, `certdeploy.yml` 의 실제 대상·경로, 대상 서버 준비(8단계), 인증서 발급·반입(9단계), 정식 HTTPS 인증서 교체, 메일 시험.
+- 한계: 이 스크립트는 문법·`shellcheck`·`--dry-run`(무변경)·설정 생성(Alertmanager `amtool` 검증)까지만 시험했고 **실제 Rocky 10 에서는 아직 실행해 보지 못했다**. 막히면 출력과 로그를 알려 달라.
+
 ## 구성
 ```
  관리자 PC ──HTTPS 443/8443──▶ [관리 서버 Rocky 10]
@@ -153,8 +176,9 @@ cd /opt/cert-monitor/src/monitoring && cp .env.example .env && chmod 600 .env
 
 **알림 비밀 값**
 ```bash
-cp -r alertmanager/secrets.example alertmanager/secrets && chmod 700 alertmanager/secrets && chmod 600 alertmanager/secrets/*
+cp -r alertmanager/secrets.example alertmanager/secrets && chmod 700 alertmanager/secrets && chmod 600 alertmanager/secrets/* && sudo chown -R 65534:65534 alertmanager/secrets
 ```
+(Alertmanager 컨테이너는 `nobody`(uid 65534)로 실행되므로 소유자를 맞춰야 읽을 수 있다 — 위 `chown`. 이후 이 파일을 고칠 때는 `sudo -e` 로 편집.)
 - `alertmanager/secrets/smtp_password`: SMTP 비밀번호 한 줄(인증 없는 릴레이면 `alertmanager.yml` 의 `smtp_auth_username`/`smtp_auth_password_file` 삭제)
 - `alertmanager/secrets/webhook_url`: Teams 웹훅 URL 한 줄(미사용이면 `alertmanager.yml` 의 `ops-critical` 에서 `webhook_configs` 삭제)
 - `alertmanager/alertmanager.yml` 의 `TODO` 3곳: `smtp_smarthost`, `smtp_from`, 수신자 `to`
