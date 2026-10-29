@@ -323,6 +323,13 @@ $CD --cert hnu deploy --force --target hnu-web-canary
 - **증거**: 채널 메시지 캡처, 티켓 번호·상태, `cat /var/lib/certdeploy/tickets.json`
 - **실패 시**: 화면의 분류된 오류(인증 실패/권한 없음/주소 없음/TLS), 티켓 생성이 거부되면 해당 시스템의 필수 필드·워크플로 규칙 확인 후 알려 주세요(`$CD diagnose --out`)
 
+### T-28 백업 자동화 — 백업·검증·외부 복사·보관 정리·복구 훈련
+- **사전조건**: 설치 매뉴얼 10-4 완료(`backup:` 설정, `backup.env`, 타이머), 외부 대상(NAS 마운트 또는 SSH 서버) 1곳, 시험용 새 VM 또는 `--root` 임시 폴더
+- **절차**: ① `backup-run` → 「백업 완료」, `ls -l /var/backups/certdeploy` (권한 600, `.manifest.json` 함께), 외부 대상에도 같은 파일 ② `backup-verify --deep` → 복호화·인증서/키 짝·DB 무결성 OK ③ 잘못된 비밀번호로 `backup-verify` → 실패 ④ `systemctl list-timers | grep backup`, `systemctl start certdeploy-backup.service` → `journalctl -u certdeploy-backup` 정상 ⑤ 외부 대상을 일부러 쓰기 불가로 만들고 실행 → 종료 코드 1, 알림 도착, 로컬 백업은 유지 ⑥ 며칠 운영 후(또는 `keep_daily` 를 줄여) 오래된 백업이 정리되고 최근 1개는 항상 남는지 ⑦ **복구 훈련**: 백업 파일로 `backup-restore --root /tmp/restore-test`(계획) → `--apply` → 복원된 파일(`settings.json`, `certpilot.db`, `mfa.key`, `alertmanager/secrets`)이 원본과 같은지, 새 VM 에서는 서비스 기동과 `validate`·`status` 정상 ⑧ 관리자 화면 「관리 서버 백업」 카드에 결과가 보이는지
+- **기대**: 위 동작대로. 백업 파일 안에 평문 비밀이 없음(`strings 파일 | grep -i password` 결과 없음). 실패·누락 시 알림, 1일 이상 성공이 없으면 경고/치명 알림
+- **증거**: `backup-status` 출력, 외부 대상 `ls -l`, 복구 후 `validate`/`status` 출력, 알림 캡처
+- **실패 시**: `journalctl -u certdeploy-backup -n 100`, 「일부 누락」이면 빠진 경로(권한·SELinux), 외부 복사 실패 메시지(경로·권한·known_hosts), `$CD diagnose --out`
+
 ---
 ## 결과 기록표
 | ID | 일시 | 수행자 | 합격(O/X) | 증거 파일/링크 | 비고(실패 시 번들 경로) |
@@ -355,3 +362,4 @@ $CD --cert hnu deploy --force --target hnu-web-canary
 | T-25 | | | | | |
 | T-26 | | | | | |
 | T-27 | | | | | |
+| T-28 | | | | | |

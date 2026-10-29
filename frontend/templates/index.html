@@ -135,6 +135,9 @@
                 <div class="card shadow-sm mb-3" id="cd-approvals-card" hidden><div class="card-header fw-semibold"><i class="bi bi-patch-check me-1"></i>배포 승인</div>
                     <div class="card-body"><div class="small text-body-secondary mb-3">승인 정책이 켜진 인증서는 갱신본을 서버에 배포하기 전에 담당자 승인이 필요합니다. 승인은 <strong>그 인증서에만</strong> 유효하며 기한이 지나면 만료됩니다. 승인 후 배포는 다음 갱신 점검 때 자동으로, 또는 서버에서 <code>certdeploy deploy</code> 로 즉시 반영됩니다.</div>
                         <div id="cd-approvals" class="vstack gap-3"></div></div></div>
+                <div class="card shadow-sm mb-3" id="cd-backup-card" hidden><div class="card-header fw-semibold"><i class="bi bi-hdd-network me-1"></i>관리 서버 백업 <span id="cd-bk-badge" class="badge ms-2"></span></div>
+                    <div class="card-body"><div class="small text-body-secondary mb-3">매일 자동으로 설정·상태·관리자 DB·감시 비밀·nginx 를 <strong>암호화</strong>해 백업하고, 복호화로 검증한 뒤 외부 대상에도 복사합니다. 설정과 지금 실행은 서버에서 합니다(<code>certdeploy backup-run</code>, 설치 매뉴얼 10-4). <strong>백업 비밀번호는 서버 밖에도 따로 보관</strong>하세요 — 잃으면 복구할 수 없습니다.</div>
+                        <div id="cd-bk-body" class="small"></div></div></div>
                 <div class="card shadow-sm mb-3"><div class="card-header fw-semibold"><i class="bi bi-envelope me-1"></i>메일 알림 <span id="cd-mail-source" class="badge text-bg-secondary ms-2"></span></div>
                     <form class="card-body" id="cd-mail-form" autocomplete="off"><div class="row g-3">
                         <div class="col-12"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" id="m-enabled" checked><label class="form-check-label" for="m-enabled">메일 알림 사용</label></div></div>

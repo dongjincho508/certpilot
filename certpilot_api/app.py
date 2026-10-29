@@ -435,6 +435,12 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
                      "details": {"actor": g.user["username"], "changed": r["changed"], "messages": r["messages"]}})     # 비밀번호·암호는 기록하지 않는다
         return jsonify(r)
 
+    @app.get("/certdeploy/backup")
+    @require(ADMIN)
+    def cd_backup():
+        r = cd_call(lambda m: m.backup_overview(cfg.get("CERTDEPLOY_CONFIG")))
+        return r if isinstance(r, tuple) else jsonify(r)
+
     @app.get("/certdeploy/approvals")
     @require(ADMIN)
     def cd_approvals():

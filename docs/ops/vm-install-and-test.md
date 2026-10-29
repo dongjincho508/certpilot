@@ -438,7 +438,7 @@ $CD check
   서빙 인증서와 기록이 다르면 `$CD plan` 후 `$CD deploy` 로 맞춘다(이미 같은 인증서면 건너뛴다). Prometheus 이력은 되돌린 시점 이후 구간이 비는 것이 정상이다
 - VM 전체 백업과 별개로 아래 **애플리케이션 백업**(암호화)을 유지한다. VM 이 깨져도 이것만 있으면 새 VM 에서 복원된다
 
-**백업**(개인키 포함 → 암호화, 안전한 곳에 보관)
+**백업**(개인키 포함 → 암호화, 안전한 곳에 보관) — 매일 자동 백업은 위 10-4 가 담당하고, 아래는 certdeploy 상태만 즉시 따로 받는 수동 방법이다
 ```bash
 export BACKUP_PW='<12자 이상 비밀번호>' && $CD backup --out /home/certadmin/certdeploy-$(date +%F).cdbk --passphrase-env BACKUP_PW
 ```
@@ -510,6 +510,55 @@ sudo -u certdeploy /opt/certdeploy/venv/bin/certdeploy -c /etc/certdeploy/certde
 - **Teams**: 「Workflows」의 웹훅 주소를 사용한다(구형 Office 365 커넥터 웹훅은 종료됨). 카드 형식은 환경에 따라 달라질 수 있어 시험 메시지로 확인한다.
 - **YAML 로도 설정 가능**(비밀은 환경변수 이름으로): `certdeploy.example.yml` 의 `notify:` 항목 참고. 화면 값이 있으면 YAML 보다 우선한다.
 - 한계: 가짜 서버로 요청 형식·인증 헤더·중복 방지·해소 흐름을 시험했다. **실제 ServiceNow/Jira/Teams 와는 미검증**(필수 필드·워크플로 정책이 인스턴스마다 달라 티켓 생성이 거부될 수 있음 → 시험 T-27). 문자(SMS)·카카오톡은 지원하지 않는다.
+
+## 10-4. 백업 자동화 (관리 서버 전체, 매일 암호화·검증·외부 복사)
+개인키·SMTP 비밀번호·관리자 DB·2단계 인증 키가 이 서버에만 있으므로, **서버가 사라져도 새 VM 에서 복구**할 수 있도록 매일 자동 백업한다. `certdeploy backup-run` 이 한 번에 다음을 한다: ① 수집 ② AES-256-GCM 암호화(scrypt) ③ **복호화로 검증** ④ 로컬 저장(권한 600) + 외부 대상 복사 ⑤ 오래된 백업 정리 ⑥ 상태·지표 기록과 실패 알림.
+
+**백업되는 것**(읽을 수 없거나 없는 항목은 건너뛰고 「일부 누락」으로 경고): `/etc/certdeploy`(설정·`env`·`admin.env`·`backup.env` 전부; 백업 비밀번호가 백업 안에도 있지만 비밀번호 없이는 열 수 없으므로 서버 밖 보관본이 필수), 상태 디렉터리(개인키·`settings.json`·승인·티켓·ACME 계정·SSH 키), 관리자 DB(**SQLite 백업 API 로 일관된 스냅샷**)·`mfa.key`·감사 로그, 감시 스택에서 서버에만 있는 파일(`.env`, `alertmanager/secrets`, `alertmanager.local.yml`, `docker-compose.override.yml`, `targets/servers.yml`), nginx 설정과 임시/정식 TLS 키. **제외**: 추적 로그·잠금 파일(`trace.jsonl`, `lock` 등). Prometheus 시계열·Grafana 데이터는 포함하지 않는다(저장소 코드에서 재구성 가능, 이력은 필요 시 위 「감시 이력 백업」).
+
+**설정** (`/etc/certdeploy/certdeploy.yml` 에 추가 — 설치 스크립트 `--enable-backup [--backup-copy-dir /mnt/nas/certdeploy]` 가 자동으로 해 준다):
+```yaml
+backup:
+  dir: /var/backups/certdeploy
+  passphrase_env: CERTDEPLOY_BACKUP_PASSPHRASE     # 비밀번호는 아래 backup.env 에만 둔다
+  keep_daily: 7        # 최근 7일은 매일 1개
+  keep_weekly: 4       # 최근 4주는 주 1개
+  keep_monthly: 6      # 최근 6개월은 월 1개 (가장 최근 1개는 항상 보존)
+  copy_to:             # 같은 서버에만 두면 서버 장애 때 함께 사라진다 → 외부 대상 권장
+    - {kind: dir, name: nas, path: /mnt/nas/certdeploy}                       # 마운트된 NAS/공유 폴더
+    # - {kind: ssh, name: offsite, host: backup.univ.example, user: bk, key_file: /var/lib/certdeploy/.ssh/id_ed25519, known_hosts: /var/lib/certdeploy/.ssh/known_hosts, path: /srv/backup/certdeploy}
+```
+백업 비밀번호와 타이머 설치(백업은 root 로 실행 — 감시 비밀·nginx 키를 읽어야 하므로):
+```bash
+sudo install -m 600 -o root -g root /dev/null /etc/certdeploy/backup.env && sudoedit /etc/certdeploy/backup.env
+```
+파일 내용 한 줄: `CERTDEPLOY_BACKUP_PASSPHRASE=<12자 이상 강한 비밀번호>`. **이 비밀번호는 서버 밖(금고·봉인 봉투·비밀번호 관리자)에도 따로 보관** — 서버에만 있으면 서버와 함께 사라지고, 잃으면 백업을 복호화할 수 없다.
+```bash
+sudo install -d -m 700 /var/backups/certdeploy && sudo cp /opt/cert-monitor/src/certdeploy/systemd/certdeploy-backup.service /opt/cert-monitor/src/certdeploy/systemd/certdeploy-backup.timer /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now certdeploy-backup.timer
+```
+외부 대상이 마운트 폴더이면 `sudo systemctl edit certdeploy-backup.service` 로 `[Service]` 아래 `ReadWritePaths=/var/backups/certdeploy /var/lib/certdeploy /mnt/nas/certdeploy` 를 지정한다.
+
+**지금 실행·확인**:
+```bash
+sudo -E env $(sudo cat /etc/certdeploy/backup.env) /opt/certdeploy/venv/bin/certdeploy -c /etc/certdeploy/certdeploy.yml backup-run
+```
+```bash
+sudo -E env $(sudo cat /etc/certdeploy/backup.env) /opt/certdeploy/venv/bin/certdeploy -c /etc/certdeploy/certdeploy.yml backup-status
+```
+`backup-list`(목록), `backup-verify [--file X] [--deep]`(복호화·목록 확인, `--deep` 은 임시 폴더에 풀어 인증서·키 짝과 DB 무결성까지 확인 후 삭제). 관리자 화면 「발급·배포 설정」의 「관리 서버 백업」 카드에서 마지막 결과·외부 복사·최근 백업을 볼 수 있다(읽기 전용).
+
+**감시·알림**: 실패 즉시 `CertBackupFailed`(치명), 이틀 넘게 성공 없음 `CertBackupStale`(치명), 사흘 넘게 실행 안 됨 `CertBackupNotRunning`, 일부 누락 `CertBackupPartial`. 설정된 메일·웹훅·티켓으로도 알린다.
+
+**복구 (새 VM)**: ① 새 Rocky 에 자동 설치 스크립트(또는 수동 2~7단계)로 같은 구성 설치 ② 백업 파일과 비밀번호를 가져온다(외부 대상 또는 안전한 반출본) ③ 먼저 **계획만** 확인:
+```bash
+sudo -E env CERTDEPLOY_BACKUP_PASSPHRASE='<백업 비밀번호>' /opt/certdeploy/venv/bin/certdeploy -c /etc/certdeploy/certdeploy.yml backup-restore --file /root/certdeploy-20261029-021000.cdbk
+```
+④ 이상이 없으면 `--apply` 를 붙여 원래 위치에 되돌린다(기존 파일은 `.pre-restore-<시각>` 로 옮겨 둠, 소유자는 manifest 의 계정 이름으로 복원). 설정 파일(`backup:` 포함)이 아직 없는 새 VM 이면 `-c` 로 지정할 최소 설정이 필요하므로, 먼저 `certdeploy.example.yml` 을 복사해 `backup:` 항목만 넣은 임시 설정을 쓴다 ⑤ 서비스 재시작과 확인:
+```bash
+sudo systemctl restart certdeploy-admin && cd /opt/cert-monitor/src/monitoring && sudo docker compose up -d && /opt/certdeploy/venv/bin/certdeploy -c /etc/certdeploy/certdeploy.yml validate
+```
+⑥ `status` 로 실제 서빙 인증서와 기록을 대조하고(어긋나면 `plan` 후 `deploy`), 관리자 화면 로그인(2단계 인증 포함)과 메일 시험을 확인한다. **복구 훈련을 분기마다 1회** 새 VM(또는 `--root /tmp/restore-test`)에서 해 본다 — 복구해 보지 않은 백업은 백업이 아니다.
+- 한계: 로컬 폴더·SSH 대상(로컬 명령 실행으로 대체 시험)으로 시험했다. NAS 마운트·실제 SSH 서버·복구 후 서비스 기동은 VM 시험 T-28 에서 확인한다. 대용량(수 GB)에서는 메모리에 한 번에 올리므로 현재 규모(수 MB)를 전제로 한다.
 
 ## 11. 시험·버그 수집
 시험은 [테스트 시나리오](test-scenarios.md) T-01~T-22 순서로 수행하고 결과표를 채운다. 문제가 생기면:

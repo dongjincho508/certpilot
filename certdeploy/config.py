@@ -162,6 +162,7 @@ class Config:
     notify: NotifyCfg = field(default_factory=NotifyCfg)
     audit_dir: Optional[str] = None
     applied: List[str] = field(default_factory=list)      # 관리자 화면(settings.json)에서 적용된 항목
+    backup: Optional[dict] = None                         # 백업 자동화 설정(backupjob.parse_backup 로 검증됨)
 
     def __getattr__(self, name):
         """인증서가 하나일 때 cfg.targets, cfg.cert_file 같은 접근을 그 인증서로 위임(하위 호환)."""
@@ -498,6 +499,8 @@ def parse_config(data: dict) -> Config:
         problems.append("defaults 는 매핑이어야 합니다")
         defaults = {}
 
+    from .backupjob import parse_backup
+    backup = parse_backup(data.get("backup"), problems)
     certs: List[CertSet] = []
     if data.get("certificates"):
         if data.get("targets") or data.get("certificate") or data.get("lego") or data.get("acme"):
@@ -521,7 +524,7 @@ def parse_config(data: dict) -> Config:
     if problems:
         raise ConfigError(problems)
     notify.state_dir = state_dir
-    return Config(state_dir, certs, options, notify, audit_dir)
+    return Config(state_dir, certs, options, notify, audit_dir, backup=backup)
 
 
 def load_config(path: str) -> Config:
@@ -538,4 +541,6 @@ def load_config(path: str) -> Config:
         cfg.applied = _st.apply(cfg, _st.load(cfg.state_dir))
     except _st.SettingsError as e:
         raise ConfigError([str(e)])
+    except (KeyError, TypeError, ValueError) as e:       # 손으로 고친 settings.json 의 필수 항목 누락 등
+        raise ConfigError([f"관리자 화면 설정 파일(settings.json) 내용이 올바르지 않습니다: {type(e).__name__} {e}"])
     return cfg

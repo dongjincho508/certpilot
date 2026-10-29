@@ -1,0 +1,22 @@
+# /etc/systemd/system/certdeploy-backup.service — 관리 서버 전체 암호화 백업(설정·상태·관리자 DB·감시 비밀·nginx)
+# 감시 비밀(alertmanager secrets)·nginx 키 등을 읽어야 하므로 root 로 실행한다. 백업 비밀번호는 /etc/certdeploy/backup.env (root 소유, 권한 600):
+#   CERTDEPLOY_BACKUP_PASSPHRASE=<12자 이상, 서버 밖에도 별도 봉인 보관>
+[Unit]
+Description=certdeploy: 관리 서버 암호화 백업
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile=/etc/certdeploy/backup.env
+ExecStart=/opt/certdeploy/venv/bin/certdeploy -c /etc/certdeploy/certdeploy.yml backup-run --quiet
+TimeoutStartSec=60min
+Nice=10
+IOSchedulingClass=idle
+# 하드닝: 읽기 전용 시스템, 백업 폴더와 상태 폴더만 쓰기 허용(외부 복사 대상이 마운트 폴더이면 ReadWritePaths 에 추가)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/backups/certdeploy /var/lib/certdeploy

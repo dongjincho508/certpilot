@@ -10,7 +10,7 @@ from typing import Optional
 
 import yaml
 
-from . import approval, settings as st
+from . import approval, backupjob, settings as st
 from .bundle import BundleError, load_bundle
 from .config import ConfigError, parse_config
 from .manual import ManualError, convert_key_file, rekey_file
@@ -255,6 +255,22 @@ def itsm_test(config_path: Optional[str], payload: Optional[dict] = None) -> dic
                        n.get("min_severity", "warning"), n.get("project"), n.get("issue_type", "Task"), None, n.get("assignment_group"),
                        n.get("category"), n.get("resolve_transition_id"), bool(n.get("verify_tls", True)), n.get("ca_file"))
     return _channel_test(config_path, payload, "itsm", st.normalize_itsm, build, check_itsm, "")
+
+
+# ------------------------------------------------------------------ 백업 현황
+def backup_overview(config_path: Optional[str]) -> dict:
+    """백업 설정 요약·마지막 실행 결과·최근 백업 목록(읽기 전용; 비밀번호·경로의 비밀은 나오지 않는다)"""
+    cfg = _yaml_cfg(config_path)
+    b = cfg.backup
+    if not b:
+        return {"configured": False}
+    st_ = backupjob.load_status(cfg.state_dir)
+    age = backupjob.age_hours(st_) if st_ else None
+    return {"configured": True, "dir": b["dir"], "keep": {"daily": b["keep_daily"], "weekly": b["keep_weekly"], "monthly": b["keep_monthly"]},
+            "verify": b["verify"], "copy_to": [{"name": t["name"], "kind": t["kind"], "path": t["path"], **({"host": t["host"]} if t["kind"] == "ssh" else {})} for t in b["copy_to"]],
+            "last": ({k: st_.get(k) for k in ("ok", "name", "size", "members", "partial", "skipped", "copies", "error", "finished", "duration_s", "verified")} if st_ else None),
+            "age_hours": round(age, 1) if age is not None else None, "stale": bool(st_ is None or age is None or age > 36 or not st_.get("ok")),
+            "backups": backupjob.list_backups(b)[:15]}
 
 
 # ------------------------------------------------------------------ 배포 승인

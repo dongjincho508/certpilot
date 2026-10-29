@@ -130,3 +130,13 @@ targets:
 
 # ---- DNS 연동 없이 수동 구매 인증서를 쓸 때: 위 lego 블록을 지우고 certificate/targets 만 두면 된다.
 #      발급: certdeploy csr → CA 제출 → certdeploy import --deploy  (docs/ops/certdeploy.md 5-1)
+
+# 관리 서버 전체 암호화 백업(매일 타이머). 설치 매뉴얼 10-4. 비밀번호는 /etc/certdeploy/backup.env 에만 둔다(서버 밖에도 별도 보관).
+# backup:
+#   dir: /var/backups/certdeploy
+#   passphrase_env: CERTDEPLOY_BACKUP_PASSPHRASE
+#   keep_daily: 7
+#   keep_weekly: 4
+#   keep_monthly: 6
+#   copy_to:
+#     - {kind: dir, name: nas, path: /mnt/nas/certdeploy}

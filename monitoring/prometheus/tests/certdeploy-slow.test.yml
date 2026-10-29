@@ -141,3 +141,32 @@ tests:
       - eval_time: 110h
         alertname: CertDeployApprovalPending
         exp_alerts: []
+
+  - name: 백업 - 실패는 즉시 치명, 이틀 넘게 성공 없으면 치명, 성공하면 해소
+    interval: 1h
+    input_series:
+      - series: 'certdeploy_backup_ok{cert="backup"}'
+        values: '1x10 0x20 1x80'
+      - series: 'certdeploy_backup_last_success_timestamp_seconds{cert="backup"}'
+        values: '0x120'
+    alert_rule_test:
+      - eval_time: 5h
+        alertname: CertBackupFailed
+        exp_alerts: []
+      - eval_time: 15h
+        alertname: CertBackupFailed
+        exp_alerts:
+          - exp_labels: {severity: critical, cert: backup}
+            exp_annotations:
+              summary: "관리 서버 백업 실패"
+              description: "마지막 백업이 실패했거나 외부 복사에 실패했습니다. `certdeploy backup-status` 와 `journalctl -u certdeploy-backup` 를 확인하세요."
+      - eval_time: 60h
+        alertname: CertBackupStale
+        exp_alerts:
+          - exp_labels: {severity: critical, cert: backup}
+            exp_annotations:
+              summary: "관리 서버 백업이 이틀 넘게 성공하지 못함"
+              description: "마지막 성공 이후 2d 12h 0m 0s 지났습니다. 백업 타이머(certdeploy-backup.timer)와 저장 공간·외부 대상을 확인하세요."
+      - eval_time: 45h
+        alertname: CertBackupFailed
+        exp_alerts: []

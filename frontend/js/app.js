@@ -429,6 +429,24 @@ function wireChannels() {
   $('btn-it-test').addEventListener('click', () => { chResult('cd-it-result', true, '접속을 확인하는 중…'); guarded(() => busy($('btn-it-test'), async () => { const r = await api('/certdeploy/itsm-test', 'POST', itPayload()); chResult('cd-it-result', r.ok, r.message); })); });
   $('cd-nc-form').addEventListener('submit', (e) => { e.preventDefault(); guarded(() => busy($('btn-nc-save'), async () => { await api('/certdeploy/settings', 'PUT', { notify_common: { repeat_hours: Number($('n-repeat').value || 0) } }); chResult('cd-nc-result', true, '저장했습니다.'); toast('공통 알림 설정을 저장했습니다.'); await loadCd(); })); });
 }
+async function loadBackup() {
+  const b = await api('/certdeploy/backup');
+  $('cd-backup-card').hidden = false;
+  const box = $('cd-bk-body'); box.replaceChildren();
+  const badge = $('cd-bk-badge');
+  if (!b.configured) { badge.className = 'badge text-bg-secondary ms-2'; badge.textContent = '설정 안 됨'; box.append(el('div', '설정 파일에 backup: 항목이 없습니다. 설치 매뉴얼 10-4 의 예시를 추가하세요.', 'text-warning')); return; }
+  const l = b.last;
+  badge.className = `badge ms-2 ${l && l.ok && !b.stale ? 'text-bg-success' : 'text-bg-danger'}`;
+  badge.textContent = !l ? '백업 기록 없음' : (b.stale ? (l.ok ? '오래됨' : '실패') : (l.partial ? '일부 누락' : '정상'));
+  const row = (k, v) => { const d = el('div', null, 'mb-1'); d.append(el('strong', k + ' '), document.createTextNode(v)); box.append(d); };
+  row('마지막 실행', l ? `${l.finished.slice(0, 16).replace('T', ' ')} (${b.age_hours}시간 전) · ${l.ok ? '성공' : '실패'} · ${(l.size / 1048576).toFixed(2)} MB · 항목 ${l.members}개${l.verified ? ' · 복호화 검증됨' : ''}` : '없음 — 서버에서 certdeploy backup-run 을 실행하세요');
+  if (l && l.error) row('오류', l.error);
+  if (l && l.partial) row('빠진 항목', l.skipped.slice(0, 5).join('; '));
+  (l ? l.copies : []).forEach((c) => row(`외부 복사 ${c.name}`, c.ok ? '성공' : `실패 — ${c.error}`));
+  row('보관 위치', `${b.dir} · 매일 ${b.keep.daily}개, 주 ${b.keep.weekly}개, 월 ${b.keep.monthly}개 유지`);
+  row('외부 대상', b.copy_to.length ? b.copy_to.map((t) => `${t.name}(${t.kind === 'ssh' ? t.host + ':' : ''}${t.path})`).join(', ') : '없음 — 같은 서버에만 있으면 서버 장애 때 함께 사라집니다');
+  if (b.backups.length) row('최근 백업', b.backups.slice(0, 5).map((x) => `${x.name} (${(x.size / 1048576).toFixed(1)}MB)`).join(' · '));
+}
 const APPROVAL_LABEL = { pending: '승인 대기', approved: '승인됨(배포 대기)', applied: '배포 완료', rejected: '반려', expired: '만료', superseded: '새 인증서로 대체', bypassed: '긴급 우회' };
 async function loadApprovals() {
   const { certificates } = await api('/certdeploy/approvals');

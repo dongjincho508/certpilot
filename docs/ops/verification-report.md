@@ -111,6 +111,7 @@
 | `tests/test_iis.py` | 32 | Windows IIS 배포(설정 검증·주입 방지, 스크립트 생성·비밀 비노출, 배포·멱등·부분 실패 복구·롤백·preflight, 가짜 Windows). **실제 PowerShell/Windows 실행은 미검증** |
 | `tests/test_webtob_jeus.py` | 21 | WebtoB/JEUS 유형(설정 검증, 암호화 개인키 2형식, 소유자, PKCS12 키스토어, 재로드 실패 롤백, 비밀번호 누락 시 무변경). **실제 WebtoB/JEUS 제품과 재기동 명령은 미검증** |
 | `tests/test_notify_channels.py` | 35 | 알림 확장(웹훅 5형식·심각도 필터·반복 억제, ServiceNow/Jira/일반 티켓 생성·중복 방지·해소·실패 재시도, YAML 검증, 관리자 화면 저장/마스킹/시험, 감사 로그 비밀 비노출). **실제 ServiceNow/Jira/Teams 는 미검증** |
+| `tests/test_backup_auto.py` | 35 | 백업 자동화(설정 검증, 수집·SQLite 스냅샷·제외·누락 보고, 암호화·변조 검출, GFS 보관 정리, 폴더/SSH 외부 복사와 실패 격리, 지표·상태, CLI, 심층 검증, 복구 계획/적용, 악성 아카이브 거부, 관리자 화면). **실제 NAS·SSH 서버·새 VM 복구는 미검증** |
 | `tests/test_pipeline_e2e.py` | 1 | 전 과정 시나리오(등록→발급→배포→지표→실패 주입→진단→복구) |
 
 ## 6. 재현 방법

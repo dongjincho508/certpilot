@@ -32,6 +32,8 @@ CONFIG_TEMPLATE="manual"
 ENABLE_RENEW_TIMER=0
 DISCOVER_CIDR=""
 REQUIRE_MFA=0
+ENABLE_BACKUP=0
+BACKUP_COPY_DIR=""
 SKIP_UPDATE=0
 SKIP_OS_CHECK=0
 NO_NETWORK_CHECK=0
@@ -41,7 +43,7 @@ FORCE=0
 ONLY=""
 
 STEPS=(preflight base docker source monitoring nginx certdeploy admin verify)
-CONFIG_KEYS="HOSTNAME_FQDN TIMEZONE REPO_URL LOCAL_SRC SMTP_SMARTHOST SMTP_FROM MAIL_TO SMTP_USER SMTP_PASSWORD_ENV WEBHOOK_URL_ENV ADMIN_USER ADMIN_CIDR CONFIG_TEMPLATE ENABLE_RENEW_TIMER DISCOVER_CIDR REQUIRE_MFA SMTP_NO_TLS"
+CONFIG_KEYS="HOSTNAME_FQDN TIMEZONE REPO_URL LOCAL_SRC SMTP_SMARTHOST SMTP_FROM MAIL_TO SMTP_USER SMTP_PASSWORD_ENV WEBHOOK_URL_ENV ADMIN_USER ADMIN_CIDR CONFIG_TEMPLATE ENABLE_RENEW_TIMER DISCOVER_CIDR REQUIRE_MFA ENABLE_BACKUP BACKUP_COPY_DIR SMTP_NO_TLS"
 
 usage() {
   cat <<'USAGE'
@@ -61,6 +63,8 @@ Rocky Linux 10 관리 서버 자동 설치 (감시 스택 + certdeploy + 관리�
   --config-template T      certdeploy 설정 예시: manual(기본)|acme|waf-manual|none
   --enable-renew-timer     자동 발급(내장 ACME/lego) 갱신 타이머 설치
   --discover-cidr A,B      인증서 자동 탐색 대역(예: 10.10.0.0/24); 지정하면 주 1회 탐색 타이머 설치
+  --enable-backup          매일 암호화 백업 타이머 설치(백업 비밀번호 자동 생성 → 요약 파일에만 표시)
+  --backup-copy-dir DIR    백업을 추가로 복사할 마운트 폴더(NAS 등; 같은 서버에만 두지 않기 위해 권장)
   --require-mfa            관리자 화면 2단계 인증(TOTP) 강제(미등록 계정은 등록 창만 사용 가능)
   --timezone TZ            기본 Asia/Seoul
   --repo-url URL           소스 저장소(기본 GitHub)
@@ -123,6 +127,8 @@ while [ $# -gt 0 ]; do
     --config-template) CONFIG_TEMPLATE="$2"; shift 2 ;;
     --enable-renew-timer) ENABLE_RENEW_TIMER=1; shift ;;
     --require-mfa) REQUIRE_MFA=1; shift ;;
+    --enable-backup) ENABLE_BACKUP=1; shift ;;
+    --backup-copy-dir) BACKUP_COPY_DIR="$2"; ENABLE_BACKUP=1; shift 2 ;;
     --discover-cidr) DISCOVER_CIDR="$2"; shift 2 ;;
     --timezone) TIMEZONE="$2"; shift 2 ;;
     --repo-url) REPO_URL="$2"; shift 2 ;;
@@ -148,6 +154,7 @@ valid() { [[ "$2" =~ $1 ]] || die "$3 형식이 올바르지 않습니다: $2"; 
 [ -z "$SMTP_FROM" ] || valid '^[^@[:space:]]+@[^@[:space:]]+$' "$SMTP_FROM" "발신 주소"
 [ -z "$SMTP_USER" ] || valid '^[A-Za-z0-9._@+-]+$' "$SMTP_USER" "SMTP 계정"
 valid '^[a-z_][a-z0-9_-]{2,31}$' "$ADMIN_USER" "관리자 계정"
+[ -z "$BACKUP_COPY_DIR" ] || valid '^/[A-Za-z0-9._/-]+$' "$BACKUP_COPY_DIR" "백업 복사 폴더"
 [ -z "$DISCOVER_CIDR" ] || valid '^[0-9./,]+$' "$DISCOVER_CIDR" "탐색 대역"
 valid '^[A-Za-z_]+/[A-Za-z_+-]+$' "$TIMEZONE" "시간대"
 [ -z "$ADMIN_CIDR" ] || valid '^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$' "$ADMIN_CIDR" "관리자 PC 대역(CIDR)"
@@ -366,6 +373,34 @@ step_certdeploy() {
     run systemctl daemon-reload
     run systemctl enable --now certdeploy-discover.timer
   fi
+  if [ "$ENABLE_BACKUP" -eq 1 ]; then
+    run install -d -m 700 -o root -g root /var/backups/certdeploy
+    if [ "$DRY_RUN" -eq 1 ] || [ ! -f /etc/certdeploy/backup.env ]; then
+      if [ "$DRY_RUN" -eq 0 ]; then
+        local bpw
+        bpw="$(gen_pw)"
+        printf 'CERTDEPLOY_BACKUP_PASSPHRASE=%s\n' "$bpw" | write_file /etc/certdeploy/backup.env 0600 root:root
+        printf 'BACKUP_PASSPHRASE=%s\n' "$bpw" >"$STATE_DIR/backup.cred"
+        chmod 600 "$STATE_DIR/backup.cred"
+      else
+        echo "  + (파일 작성) /etc/certdeploy/backup.env mode=0600 (백업 비밀번호 자동 생성)"
+      fi
+    fi
+    if [ "$DRY_RUN" -eq 1 ] || ! grep -q '^backup:' /etc/certdeploy/certdeploy.yml 2>/dev/null; then
+      local copy=""
+      [ -z "$BACKUP_COPY_DIR" ] || copy="  copy_to:\n    - {kind: dir, name: nas, path: $BACKUP_COPY_DIR}\n"
+      if [ "$DRY_RUN" -eq 1 ]; then
+        echo "  + (설정 추가) /etc/certdeploy/certdeploy.yml 에 backup: 항목(passphrase_env=CERTDEPLOY_BACKUP_PASSPHRASE${BACKUP_COPY_DIR:+, 외부 복사 $BACKUP_COPY_DIR})"
+      else
+        # shellcheck disable=SC2059
+        printf "\nbackup:\n  dir: /var/backups/certdeploy\n  passphrase_env: CERTDEPLOY_BACKUP_PASSPHRASE\n$copy" >>/etc/certdeploy/certdeploy.yml
+      fi
+    fi
+    run cp "$SRC_DIR/certdeploy/systemd/certdeploy-backup.service" "$SRC_DIR/certdeploy/systemd/certdeploy-backup.timer" /etc/systemd/system/
+    run systemctl daemon-reload
+    run systemctl enable --now certdeploy-backup.timer
+    [ -z "$BACKUP_COPY_DIR" ] || warn "백업 복사 폴더($BACKUP_COPY_DIR)가 쓰기 가능해야 합니다 — certdeploy-backup.service 의 ReadWritePaths 에도 추가하세요(systemctl edit)"
+  fi
 }
 
 # ---------------------------------------------------------------- 8) 관리자 화면
@@ -415,6 +450,12 @@ print_summary() {
   [ ! -f "$STATE_DIR/grafana.cred" ] || gpw="$(sed -n 's/^GRAFANA_ADMIN_PASSWORD=//p' "$STATE_DIR/grafana.cred")"
   [ ! -f "$STATE_DIR/admin.cred" ] || apw="$(sed -n 's/^ADMIN_PASSWORD=//p' "$STATE_DIR/admin.cred")"
   [ ! -f /var/lib/certdeploy/.ssh/id_ed25519.pub ] || pub="$(cat /var/lib/certdeploy/.ssh/id_ed25519.pub)"
+  local bkp=""
+  if [ -f "$STATE_DIR/backup.cred" ]; then
+    bkp="
+백업 비밀번호(매일 02:10 암호화 백업, /var/backups/certdeploy): $(sed -n 's/^BACKUP_PASSPHRASE=//p' "$STATE_DIR/backup.cred")
+  → 이 비밀번호를 서버 밖(봉인 봉투·금고·비밀번호 관리자)에도 따로 보관하세요. 잃으면 백업을 복구할 수 없습니다."
+  fi
   umask 077
   cat >"$SUMMARY" <<SUM
 === 관리 서버 설치 요약 ($(date '+%F %T')) — 이 파일에는 비밀번호가 있습니다(권한 600). 확인 후 안전한 곳에 옮기고 삭제하세요 ===
@@ -426,6 +467,7 @@ Grafana(감시 대시보드)   https://$host/            계정 admin / 비밀�
 
 배포용 SSH 공개키(각 대상 서버의 deploy 계정 authorized_keys 에 등록):
 $pub
+$bkp
 
 남은 수동 작업 (설치 매뉴얼 docs/ops/vm-install-and-test.md)
  1. 감시 대상 등록: $SRC_DIR/monitoring/prometheus/targets/servers.yml (또는 scripts/csv_to_targets.py)
