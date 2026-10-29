@@ -1,6 +1,8 @@
 # 관리 서버 설치·테스트 매뉴얼 (Rocky Linux 10.x, 명령어 상세)
 
 **관리 서버 1대**(Rocky Linux 10.x)에 *감시 스택*(Prometheus·ssl_exporter·Alertmanager·Grafana·Pushgateway)과 *발급·배포 도구*(`certdeploy`)를 함께 구성한다. 인증서는 **도메인별로 나눠**(`hnu`, `hannam`) 관리하고, 발급은 상용 CA 와일드카드를 **수동으로 추가**(`csr`→`import`)하거나 Let's Encrypt **자동 발급**(7-3, DNS 연동/수동 TXT) 중에서 고르며, 배포는 자동화한다. 메일 알림과 인증서별 개인키 보호(암호 사용/사용 안 함)는 **관리자 화면**(7-5)에서 입력·선택한다.
+> 🚀 **처음이면 [원스톱 시작 가이드](quickstart.md)부터** 보세요(설치 마법사·첫날 체크리스트·운영 주기표·증상별 조치). 이 문서는 그 뒤에서 **각 단계를 상세 명령으로 풀어 쓴 매뉴얼**입니다. 설치 스크립트가 2~7단계를 대신하므로, 스크립트를 쓴다면 8단계(대상 서버 준비)부터 직접 하면 됩니다.
+
 각 명령은 위에서 아래로 순서대로 실행한다. 시험 절차는 [테스트 시나리오](test-scenarios.md), 문제 수집은 [디버깅 가이드](debugging.md).
 
 > ⚠️ **현재 RapidSSL 와일드카드는 2026-11-12 08:59(KST) 만료**다. 이 시스템의 시험 완료를 기다리지 말고, 만료 전 교체는 기존 절차([교체 체크리스트](cert-rotation-checklist.md))로 진행한다. 교체본으로 8~9단계를 처음 실사용해도 된다(실패하면 자동 롤백).
@@ -20,16 +22,21 @@ Rocky Linux 10 을 설치하고(1단계) 네트워크가 되면, **2~7-5단계�
 
 ```bash
 sudo dnf -y install git && sudo git clone https://github.com/dongjincho508/certpilot.git /opt/cert-monitor/src
-cd /opt/cert-monitor/src
-sudo bash scripts/install-mgmt-server.sh --dry-run --yes --hostname mgmt.hnu.kr --mail-to cert-admin@hnu.kr --smtp-host smtp.hnu.kr:587 --smtp-from cert-monitor@hnu.kr
 ```
-먼저 `--dry-run` 으로 할 일만 확인한 뒤, 같은 명령에서 `--dry-run` 을 빼고 실행한다. SMTP 계정이 필요하면 `--smtp-user ID` 를 주고 비밀번호는 **환경변수로** 전달한다(`sudo SMTP_PASSWORD='...' bash scripts/...`; 명령 이력에 남지 않게 입력 후 `history -d` 또는 설치 후 `alertmanager/secrets/smtp_password` 에 직접 입력). 관리자 PC 대역만 8443 을 허용하려면 `--admin-cidr 10.10.0.0/24`.
+```bash
+cd /opt/cert-monitor/src && sudo bash scripts/install-mgmt-server.sh
+```
+옵션 없이 실행하면 **설치 마법사**가 서버 이름·알림 메일·관리자 PC 대역·2단계 인증·백업·자동 탐색 등을 차례로 물어보고(엔터=기본값, 모르면 비움), **설치 계획 표**를 보여 준 뒤 `y` 에 시작한다. 모든 값을 한 번에 주려면(재현·반복 설치용):
+```bash
+sudo SMTP_PASSWORD='…' bash scripts/install-mgmt-server.sh --yes --hostname mgmt.hnu.kr --mail-to cert-admin@hnu.kr --smtp-host smtp.hnu.kr:587 --smtp-from cert-monitor@hnu.kr --smtp-user svc-cert --admin-cidr 10.10.0.0/24 --enable-backup --backup-copy-dir /mnt/nas/certdeploy --require-mfa
+```
+`--dry-run` 은 아무 것도 바꾸지 않고 할 일만 보여 준다. SMTP 비밀번호는 **환경변수**(`SMTP_PASSWORD`)로 전달하고, 입력한 명령이 이력에 남지 않게 주의한다(마법사는 입력이 화면에 보이지 않음). 관리자 PC 대역만 8443 을 허용하려면 `--admin-cidr`.
 
 - 실행 내용: 사전 점검(OS·SELinux·CPU·외부 접속) → 기본 설정/패키지 → Docker → 소스 → 감시 스택(설정 검증 후 기동) → nginx(임시 자체 서명 인증서)+방화벽 → certdeploy → 관리자 화면 → 점검.
-- 끝나면 화면과 `/root/cert-install-summary.txt`(권한 600)에 접속 주소·**자동 생성된 Grafana/관리자 비밀번호**·배포용 SSH 공개키·남은 수동 작업이 나온다. 확인 후 안전한 곳에 옮기고 파일을 삭제한다.
+- 끝나면 화면과 `/root/cert-install-summary.txt`(권한 600)에 **접속 정보(자동 생성 비밀번호)·설치 결과 점검표(✅/❌)·다음 할 일 5단계·배포용 SSH 공개키**가 나온다. 확인 후 안전한 곳에 옮기고 파일을 삭제한다.
 - 실패하면 원인을 고치고 **같은 명령을 다시** 실행한다(끝난 단계는 건너뜀, 강제로 다시 하려면 `--force`, 일부만 하려면 `--only monitoring,nginx`). 로그는 `/var/log/cert-install.log`.
 - 스크립트가 하지 **않는** 일(수동): 감시 대상 서버 목록, `certdeploy.yml` 의 실제 대상·경로, 대상 서버 준비(8단계), 인증서 발급·반입(9단계), 정식 HTTPS 인증서 교체, 메일 시험.
-- 한계: 이 스크립트는 문법·`shellcheck`·`--dry-run`(무변경)·설정 생성(Alertmanager `amtool` 검증)까지만 시험했고 **실제 Rocky 10 에서는 아직 실행해 보지 못했다**. 막히면 출력과 로그를 알려 달라.
+- 시험 범위: 스크립트는 `shellcheck`·`--dry-run`뿐 아니라, **가짜 시스템 명령(dnf·systemctl·docker 등)을 끼운 격리 환경에서 끝까지 실제 실행**해 검증했다(비밀번호 생성·권한, 설정 파일 생성, 재실행·중단 후 재개, 설치된 설정으로 백업 실행, 관리자 화면 기동·로그인·2단계 인증 강제). 실제 `dnf`·Docker 이미지 내려받기·방화벽·SELinux 동작은 **실제 Rocky 10 에서 처음 확인**된다. 막히면 출력과 `/var/log/cert-install.log` 를 알려 달라.
 
 ## 구성
 ```
@@ -43,7 +50,7 @@ sudo bash scripts/install-mgmt-server.sh --dry-run --yes --hostname mgmt.hnu.kr 
 개인키는 관리 서버의 `certdeploy` 계정만 접근한다. 관리자 계정(`certadmin`)은 개인키를 읽을 수 없게 둔다(권한 700/600).
 
 ## 예상 화면 (설치 후 이렇게 보인다)
-> 아래는 **시험 환경에서 만든 예상 화면**이다. 관리 서버에서 보는 화면은 **① Grafana 대시보드 ② 터미널 `certdeploy` 출력 ③ 알림(메일) ④ 관리자 화면(발급·배포 설정)** 이다. (Render 에 올린 CertPilot 앱은 사용하지 않는다 — ④ 는 같은 코드를 관리 서버에 설치한 설정 화면이다.)
+> 아래는 **시험 환경에서 만든 예상 화면**이다. 관리 서버에서 보는 화면은 **① Grafana 대시보드 ② 터미널 `certdeploy` 출력 ③ 알림(메일) ④ 관리자 화면(설정·운영)** 이다. (Render 에 올린 CertPilot 앱은 사용하지 않는다 — ④ 는 같은 코드를 관리 서버에 설치한 설정 화면이다.)
 
 **① Grafana 「인증서 현황」** — 시험용 TLS 서버 5대와 가상 certdeploy 지표를 *실제* Prometheus·ssl_exporter 로 수집해 대시보드 JSON 의 쿼리를 그대로 실행한 결과(Grafana 자체는 이 환경에서 실행하지 못해 레이아웃을 재현했으므로 실제 모양과 다소 다를 수 있음). 상단 카드(감시 대상·조회 실패·30일 이내 만료·만료됨), 만료 임박 순 표, 같은 인증서를 쓰는 서버 수, 와일드카드 사용 현황, certdeploy 배포 상태·마지막 성공 이후 경과·연속 발급 실패.
 ![Grafana 인증서 현황(예상)](images/grafana-expected.png)
@@ -53,8 +60,11 @@ sudo bash scripts/install-mgmt-server.sh --dry-run --yes --hostname mgmt.hnu.kr 
 
 **③ 알림** — 배포 실패·DNS TXT 등록 필요·수동 교체 필요·만료 임박 알림이 메일(우선)로 전달되고, 해소되면 복구 알림이 온다(T-02, T-19 에서 확인).
 
-**④ 관리자 화면 「발급·배포 설정」** — 인증서(도메인)별 현황(일련번호·만료·대상별 마지막 실행)과 **개인키 보호 사용/사용 안 함 선택**(적용하면 키 파일이 바로 변환됨), **메일 알림 입력·저장·시험 메일**. 아래는 시험 서버(가짜 SMTP)에서 실제로 동작시킨 화면이다.
-![관리자 화면(예상)](images/admin-screen.png)
+**④ 관리자 화면 「설정·운영」** — 4개 탭: **시작하기·요약**(설정 체크리스트·지금 확인할 일·운영 주기표) / **인증서·승인**(개인키 보호 선택, 배포 승인) / **알림**(메일·메신저·티켓, 반복 간격) / **백업**(마지막 결과·외부 복사·복구 순서). 아래는 샘플 데이터로 *실제 브라우저(Chromium)* 에서 띄운 화면이다(값은 예시).
+![시작하기·요약](images/ui-home.png)
+![알림](images/ui-notify.png)
+![인증서·승인](images/ui-certs.png)
+![백업](images/ui-backup.png)
 
 ## 0. 준비물 (설치 전)
 - [ ] VM: 4 vCPU / 8 GB / 디스크 100 GB 이상(`/var` 40 GB 이상). **CPU 는 x86-64-v3 지원**(VM 설정에서 호스트 CPU 통과) — 아니면 Rocky 10 이 설치·부팅되지 않는다
@@ -161,7 +171,7 @@ printf '{ "log-driver": "json-file", "log-opts": { "max-size": "20m", "max-file"
 
 ## 4. 소스 배치
 ```bash
-sudo dnf -y install git python3 python3-pip python3-pyyaml openssl bind-utils
+sudo dnf -y install git python3 python3-pip python3-pyyaml openssl openssh-clients bind-utils
 ```
 ```bash
 sudo mkdir -p /opt/cert-monitor && sudo chown certadmin: /opt/cert-monitor && git clone https://github.com/dongjincho508/certpilot.git /opt/cert-monitor/src
@@ -258,7 +268,7 @@ sudo cp /opt/cert-monitor/src/certdeploy/certdeploy.manual.example.yml /etc/cert
 ```bash
 echo 'TOMCAT_KS_PASS=<비밀번호>' | sudo tee /etc/certdeploy/env >/dev/null && sudo chown certdeploy:certdeploy /etc/certdeploy/env && sudo chmod 600 /etc/certdeploy/env
 ```
-**알림은 메일 우선 — 입력은 관리자 화면에서**: SMTP 서버·수신자·계정·비밀번호는 **7-5 의 관리자 화면 > 발급·배포 설정 > 메일 알림**에서 입력·저장하고 [시험 메일 보내기]로 확인한다(화면 값이 설정 파일보다 우선하며 `/var/lib/certdeploy/settings.json` 에 권한 600 으로 저장됨). 화면 없이 쓰려면 설정의 `notify.smtp` 와 `/etc/certdeploy/env` 의 `SMTP_PASSWORD` 를 쓴다. Alertmanager(감시 알림)의 메일 설정은 5단계. CLI 로도 시험할 수 있다(아래 `$CD` 정의 뒤):
+**알림은 메일 우선 — 입력은 관리자 화면에서**: SMTP 서버·수신자·계정·비밀번호는 **7-5 의 관리자 화면 > 설정·운영 > 메일 알림**에서 입력·저장하고 [시험 메일 보내기]로 확인한다(화면 값이 설정 파일보다 우선하며 `/var/lib/certdeploy/settings.json` 에 권한 600 으로 저장됨). 화면 없이 쓰려면 설정의 `notify.smtp` 와 `/etc/certdeploy/env` 의 `SMTP_PASSWORD` 를 쓴다. Alertmanager(감시 알림)의 메일 설정은 5단계. CLI 로도 시험할 수 있다(아래 `$CD` 정의 뒤):
 ```bash
 $CD notify-test
 ```
@@ -299,7 +309,7 @@ sudo -u certdeploy sh -c 'ssh-keyscan -t ed25519 www1.univ.example >> /var/lib/c
 sudo -u certdeploy ssh-keygen -lf /var/lib/certdeploy/.ssh/known_hosts
 ```
 
-### 7-5. 관리자 화면(발급·배포 설정) 설치
+### 7-5. 관리자 화면(설정·운영) 설치
 메일 입력과 인증서별 개인키 보호 선택을 웹 화면에서 하기 위한 설정 화면이다(CertPilot 웹 코드를 관리 서버에 설치 — Render 의 것과 별개). **7-4 까지 끝난 뒤** 진행한다. 로그인·권한(관리자)·감사 로그는 CertPilot 기능을 그대로 쓰고, 화면은 `certdeploy` 설정 파일 위치(`CERTDEPLOY_CONFIG`)를 통해 같은 서버의 인증서·상태를 읽는다.
 ```bash
 sudo install -d -m 700 -o certdeploy -g certdeploy /var/lib/certdeploy-admin
@@ -331,7 +341,7 @@ sudo cp /opt/cert-monitor/src/monitoring/nginx/certdeploy-admin.conf.example /et
 ```bash
 sudo nginx -t && sudo systemctl reload nginx && sudo firewall-cmd --permanent --add-port=8443/tcp && sudo firewall-cmd --reload
 ```
-브라우저로 `https://mgmt.univ.example:8443` → 위 관리자 계정으로 로그인 → 상단 **「발급·배포 설정」**:
+브라우저로 `https://mgmt.univ.example:8443` → 위 관리자 계정으로 로그인 → 상단 **「설정·운영」**:
 1. **메일 알림**: SMTP 서버·포트·STARTTLS·발신/수신 주소(쉼표 구분)·계정·비밀번호 입력 → [시험 메일 보내기]로 도착 확인 → [저장]. 실패하면 원인(연결 거부·로그인 실패·TLS 오류 등)이 화면에 표시된다
 2. **개인키 보호**: 인증서(`hnu`, `hannam`)마다 「사용(암호로 보호)」/「사용 안 함」 선택 → 사용이면 암호(12자 이상) 입력 → [적용]. **암호는 별도로 안전하게 보관**(2인 이상, 봉인) — 잃으면 키를 복구할 수 없다
 3. 화면 값은 `/var/lib/certdeploy/settings.json`(0600)에 저장되어 `certdeploy` CLI·타이머가 자동 적용한다. 확인: `$CD validate`(출력에 "관리자 화면(settings.json) 적용" 표시)
@@ -481,7 +491,7 @@ approval:
   self_approval: false  # 요청한 사람이 직접 승인 가능한지(수동 deploy 실행자 기준; 타이머가 만든 요청은 해당 없음)
 ```
 - **동작**: 갱신 타이머(또는 `deploy`)가 새 인증서를 발견하면 배포하지 않고 **승인 요청**을 만든다(메일·Alertmanager 알림, 종료 코드 5 = 대기 중, 오류 아님). 승인이 모이면 다음 점검 때 자동 배포되거나 `certdeploy deploy` 로 즉시 배포된다.
-- **승인 방법**: 관리자 화면 「발급·배포 설정」→「배포 승인」의 승인/반려 버튼(승인자는 로그인한 관리자 계정), 또는 서버에서:
+- **승인 방법**: 관리자 화면 「설정·운영」→「배포 승인」의 승인/반려 버튼(승인자는 로그인한 관리자 계정), 또는 서버에서:
 ```bash
 sudo -u certdeploy /opt/certdeploy/venv/bin/certdeploy -c /etc/certdeploy/certdeploy.yml approvals
 ```
@@ -495,7 +505,7 @@ sudo -u certdeploy /opt/certdeploy/venv/bin/certdeploy -c /etc/certdeploy/certde
 - 한계: 로컬 대상·TLS 확인이 없는 환경에서만 시험했다. 실제 SSH 대상·WAF 배포와의 조합은 VM 시험 T-24 에서 확인한다.
 
 ## 10-3. 알림 채널 확장 — 메신저 웹훅·티켓 시스템 (관리자 화면에서 설정)
-메일 외에 **메신저 웹훅**과 **티켓 시스템**으로도 장애를 알릴 수 있다. 관리자 화면 「발급·배포 설정」에서 입력하고 시험할 수 있으며(설정 파일 수정 불필요), 입력한 값은 `settings.json`(권한 600)에 저장되어 CLI·타이머가 자동으로 읽는다. 주소(토큰)·비밀번호는 화면과 응답, 감사 로그에 나타나지 않는다(저장 여부만 표시).
+메일 외에 **메신저 웹훅**과 **티켓 시스템**으로도 장애를 알릴 수 있다. 관리자 화면 「설정·운영」에서 입력하고 시험할 수 있으며(설정 파일 수정 불필요), 입력한 값은 `settings.json`(권한 600)에 저장되어 CLI·타이머가 자동으로 읽는다. 주소(토큰)·비밀번호는 화면과 응답, 감사 로그에 나타나지 않는다(저장 여부만 표시).
 
 | 채널 | 지원 형식 | 시험 버튼 |
 |---|---|---|
@@ -545,7 +555,7 @@ sudo -E env $(sudo cat /etc/certdeploy/backup.env) /opt/certdeploy/venv/bin/cert
 ```bash
 sudo -E env $(sudo cat /etc/certdeploy/backup.env) /opt/certdeploy/venv/bin/certdeploy -c /etc/certdeploy/certdeploy.yml backup-status
 ```
-`backup-list`(목록), `backup-verify [--file X] [--deep]`(복호화·목록 확인, `--deep` 은 임시 폴더에 풀어 인증서·키 짝과 DB 무결성까지 확인 후 삭제). 관리자 화면 「발급·배포 설정」의 「관리 서버 백업」 카드에서 마지막 결과·외부 복사·최근 백업을 볼 수 있다(읽기 전용).
+`backup-list`(목록), `backup-verify [--file X] [--deep]`(복호화·목록 확인, `--deep` 은 임시 폴더에 풀어 인증서·키 짝과 DB 무결성까지 확인 후 삭제). 관리자 화면 「설정·운영」의 「관리 서버 백업」 카드에서 마지막 결과·외부 복사·최근 백업을 볼 수 있다(읽기 전용).
 
 **감시·알림**: 실패 즉시 `CertBackupFailed`(치명), 이틀 넘게 성공 없음 `CertBackupStale`(치명), 사흘 넘게 실행 안 됨 `CertBackupNotRunning`, 일부 누락 `CertBackupPartial`. 설정된 메일·웹훅·티켓으로도 알린다.
 
@@ -561,7 +571,7 @@ sudo systemctl restart certdeploy-admin && cd /opt/cert-monitor/src/monitoring &
 - 한계: 로컬 폴더·SSH 대상(로컬 명령 실행으로 대체 시험)으로 시험했다. NAS 마운트·실제 SSH 서버·복구 후 서비스 기동은 VM 시험 T-28 에서 확인한다. 대용량(수 GB)에서는 메모리에 한 번에 올리므로 현재 규모(수 MB)를 전제로 한다.
 
 ## 11. 시험·버그 수집
-시험은 [테스트 시나리오](test-scenarios.md) T-01~T-22 순서로 수행하고 결과표를 채운다. 문제가 생기면:
+시험은 [테스트 시나리오](test-scenarios.md) T-01~T-28 순서로 수행하고 결과표를 채운다. 문제가 생기면:
 ```bash
 $CD diagnose --out /tmp/diag.json
 ```
@@ -585,7 +595,7 @@ $CD diagnose --out /tmp/diag.json
 - [ ] 5개 컨테이너 실행, 재부팅 후 자동 복구, nginx HTTPS 로 Grafana 접속
 - [ ] 관리자 화면(8443) 로그인, 메일 시험 도착, 인증서별 개인키 보호 선택 적용(7-5)
 - [ ] 등록 대상 전부 Prometheus `up`, 대시보드에 인증서 표시, 테스트 알림 수신
-- [ ] T-01~T-22 합격 · 결과표 보관
+- [ ] T-01~T-28 합격 · 결과표 보관
 - [ ] VMware: EVC/CPU 호환성 확인, VMware Tools 시간 동기화 끔, 스냅샷 없음(작업 시에만), VM 콘솔·스냅샷·백업 접근 인원 최소화, 디스크 암호화 방식(LUKS 또는 vSphere 암호화) 결정·암호 봉인 보관
 - [ ] 개인키 권한 600, `certdeploy` 계정 외 접근 불가, 백업본 암호화 보관·복원 시험 완료
 - [ ] 알림 수신자·야간/휴일 담당 확정, 갱신 달력 등록(수동 방식: 현재 약 200일, **2027-03-15 부터 100일, 2029-03-15 부터 47일** → 자동 발급 전환 계획)

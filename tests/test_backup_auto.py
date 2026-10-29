@@ -121,7 +121,7 @@ def test_run_backup_contents_and_encryption(box):
     assert oct(path.stat().st_mode & 0o777) == "0o600" and r.name == "certdeploy-20261029-021000.cdbk"
     blob = path.read_bytes()
     names = {m["name"] for m in bk.list_members(blob, PW)}
-    for want in ("manifest.json", "etc/certdeploy/env", "etc/certdeploy/admin.env", "state/default/settings.json", "state/default/managed/hnu.key",
+    for want in ("manifest.json", "etc/certdeploy/env", "etc/certdeploy/admin.env", "state/settings.json", "state/managed/hnu.key",
                  "admin-data/certpilot.db", "admin-data/mfa.key", "monitoring/.env", "monitoring/alertmanager/secrets/smtp_password",
                  "monitoring/prometheus/targets/servers.yml", "nginx/" + str(box.tmp / "nginx/grafana.conf").lstrip("/").replace("/", "__")):
         assert want in names, want
@@ -400,3 +400,31 @@ def test_malformed_settings_json_gives_clear_error(box):
     (box.state / "settings.json").write_text('{"mail": {"password": "p"}}')
     with pytest.raises(ConfigError, match="settings.json"):
         load_config(str(box.cfgfile))
+
+
+def test_multi_cert_config_backs_up_global_state_once(tmp_path, monkeypatch):
+    """인증서가 여러 개일 때: 전역 상태 폴더(settings.json·.ssh)와 인증서별 폴더가 모두, 한 번씩 들어가고, 아직 발급 전이어도 검증이 통과한다."""
+    monkeypatch.setenv("BK_PASS", PW)
+    b = Box(tmp_path)
+    (b.state / ".ssh").mkdir()
+    (b.state / ".ssh/id_ed25519").write_text("PRIVATE")
+    b.cfgdoc.pop("certificate"), b.cfgdoc.pop("targets")
+    b.cfgdoc["certificates"] = [{"name": n, "certificate": {"cert_file": str(b.cert), "key_file": str(b.key)},
+                                 "targets": [{"name": "w", "type": "apache", "cert_path": "/c", "key_path": "/k"}]} for n in ("hnu", "hannam")]
+    (b.state / "hnu").mkdir()
+    (b.state / "hnu/state.json").write_text("{}")
+    r = b.run()
+    assert r.ok and r.verified, r.error
+    names = [m["name"] for m in bk.list_members((b.back / r.name).read_bytes(), PW)]
+    assert "state/settings.json" in names and "state/.ssh/id_ed25519" in names and "state/hnu/state.json" in names
+    assert len(names) == len(set(names))                                          # 중복 없음
+
+
+def test_backup_dir_inside_state_dir_is_not_recursed(tmp_path, monkeypatch):
+    monkeypatch.setenv("BK_PASS", PW)
+    b = Box(tmp_path)
+    b.b["dir"] = str(b.state / "backups")
+    first = b.run()
+    second = b.run(now=NOW + timedelta(days=1))
+    names = [m["name"] for m in bk.list_members((b.state / "backups" / second.name).read_bytes(), PW)]
+    assert first.ok and second.ok and not any("backups" in n for n in names)

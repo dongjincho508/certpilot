@@ -2,7 +2,7 @@
 
 > **프로젝트 방향 (2026-10-28)**: 인증서 만료 감시는 오픈소스 **Prometheus + ssl_exporter + Grafana**, 인증서 발급·자동 배포는 **`certdeploy`**(Let's Encrypt DNS-01 자동 발급 또는 상용 인증서 수동 가져오기, 웹서버·웹방화벽 자동 배포·롤백)로 Rocky Linux 관리 서버 1대에서 운영합니다. 아래의 CertPilot 앱(SSH 파일 조회·감사 로그)은 **보류·미사용**이며 Render 구성은 그대로 둡니다.
 >
-> **📚 문서 목차는 [docs/README.md](docs/README.md)** — 먼저 볼 것: [VM 구성 전 준비 체크리스트](docs/ops/pre-vm-checklist.md) → [설치·테스트 매뉴얼](docs/ops/vm-install-and-test.md) → [테스트 시나리오](docs/ops/test-scenarios.md). 상태와 미검증 범위: [검증 보고서](docs/ops/verification-report.md). 자동 발급: [auto-issue](docs/ops/auto-issue.md), DNS·웹방화벽 호환성: [compatibility](docs/ops/compatibility.md), 문제 추적: [debugging](docs/ops/debugging.md). **메일·개인키 보호 설정은 관리자 화면**([설치 매뉴얼 7-5](docs/ops/vm-install-and-test.md)).
+> **🚀 처음이면 [원스톱 시작 가이드](docs/ops/quickstart.md)** (설치 마법사 → 첫날 체크리스트 → 운영 주기표). **📚 문서 목차는 [docs/README.md](docs/README.md)** — 먼저 볼 것: [VM 구성 전 준비 체크리스트](docs/ops/pre-vm-checklist.md) → [설치·테스트 매뉴얼](docs/ops/vm-install-and-test.md) → [테스트 시나리오](docs/ops/test-scenarios.md). 상태와 미검증 범위: [검증 보고서](docs/ops/verification-report.md). 자동 발급: [auto-issue](docs/ops/auto-issue.md), DNS·웹방화벽 호환성: [compatibility](docs/ops/compatibility.md), 문제 추적: [debugging](docs/ops/debugging.md). **메일·개인키 보호 설정은 관리자 화면**([설치 매뉴얼 7-5](docs/ops/vm-install-and-test.md)).
 
 Linux 서버에 설치된 SSL/TLS 인증서를 **SSH(디스크 파일)와 TLS 포트(실행 중 서비스)** 로 조회하고, 만료 위험을 한 화면에서 보여주는 MVP.
 

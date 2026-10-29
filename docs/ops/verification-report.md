@@ -48,7 +48,7 @@
 | **수동 교체 대상 `type: manual`**(WAF 옵션 C): 교체용 파일(PEM/PFX) 준비·메일 안내·독촉 승격·서빙 확인으로 자동 완료·`confirm`·개인키 사본 삭제, 지표·알림 규칙(1일/3일)·Grafana 패널 | ✅ `test_certdeploy_options.py`(수동 교체 9개) + promtool 규칙 단위 시험 | ⬜ **T-21** (모니터랩 화면에서 실제 교체) |
 | **개인키 저장 방식 선택**: `key_encryption: none/passphrase` — import·csr·내장 ACME(대기 키 포함) 저장본 암호화, 배포 때만 복호화, `key-encrypt`/`key-decrypt` 전환·백업, 설정↔실제 상태 불일치 점검 | ✅ `test_certdeploy_options.py`(암호화 8개) | ⬜ **T-20** (재부팅·타이머 환경에서 암호 공급) |
 | 알림 시험 `notify-test`(메일 우선 설정), 전송 실패 진단 이벤트 | ✅ | ⬜ **T-02a** (실제 SMTP 수신) |
-| **관리자 화면(발급·배포 설정)**: 메일 입력·저장·시험 메일(원인 분류), 인증서별 개인키 보호 사용/사용 안 함 선택·즉시 변환(평문 사본 검증 후 삭제)·암호 변경, 현황(만료·대상 상태), 관리자 전용·감사 기록(비밀 제외), 설정 화면 값이 CLI·타이머에 자동 적용 | ✅ `test_certdeploy_admin.py`(가짜 SMTP 서버로 실제 메일 전송·인증 실패·수신 거부 확인, 키 변환·롤백 안전) + 실제 브라우저 조작 확인 | ⬜ **T-22** (systemd·nginx 8443 구성, 실제 SMTP) |
+| **관리자 화면(설정·운영)**: 메일 입력·저장·시험 메일(원인 분류), 인증서별 개인키 보호 사용/사용 안 함 선택·즉시 변환(평문 사본 검증 후 삭제)·암호 변경, 현황(만료·대상 상태), 관리자 전용·감사 기록(비밀 제외), 설정 화면 값이 CLI·타이머에 자동 적용 | ✅ `test_certdeploy_admin.py`(가짜 SMTP 서버로 실제 메일 전송·인증 실패·수신 거부 확인, 키 변환·롤백 안전) + 실제 브라우저 조작 확인 | ⬜ **T-22** (systemd·nginx 8443 구성, 실제 SMTP) |
 | `check`(Nagios 형식 종료 코드), `schema`, `diagnose`, `trace`, `--debug` | ✅ `test_prevm_checks.py`, `test_debug_tools.py` | ⬜ T-19 |
 
 ### 보안 설계 (코드로 확인된 것)
@@ -112,6 +112,9 @@
 | `tests/test_webtob_jeus.py` | 21 | WebtoB/JEUS 유형(설정 검증, 암호화 개인키 2형식, 소유자, PKCS12 키스토어, 재로드 실패 롤백, 비밀번호 누락 시 무변경). **실제 WebtoB/JEUS 제품과 재기동 명령은 미검증** |
 | `tests/test_notify_channels.py` | 35 | 알림 확장(웹훅 5형식·심각도 필터·반복 억제, ServiceNow/Jira/일반 티켓 생성·중복 방지·해소·실패 재시도, YAML 검증, 관리자 화면 저장/마스킹/시험, 감사 로그 비밀 비노출). **실제 ServiceNow/Jira/Teams 는 미검증** |
 | `tests/test_backup_auto.py` | 35 | 백업 자동화(설정 검증, 수집·SQLite 스냅샷·제외·누락 보고, 암호화·변조 검출, GFS 보관 정리, 폴더/SSH 외부 복사와 실패 격리, 지표·상태, CLI, 심층 검증, 복구 계획/적용, 악성 아카이브 거부, 관리자 화면). **실제 NAS·SSH 서버·새 VM 복구는 미검증** |
+| `tests/test_installer_real.py` (+`installer_harness.sh`, `installer_verify.py`) | 5 | **설치 스크립트 실제 실행**(가짜 dnf·systemctl·docker 등만 끼운 overlay 격리 환경): 전체 설치→비밀번호·권한·설정 생성→설치된 설정으로 백업 실행→관리자 화면 기동·로그인·2단계 인증 강제, 재실행(비밀번호 유지)·중단 후 재개·최소 설치·OS 불일치 거부. 이 시험으로 임시 인증서 폴더 누락, 다중 인증서 백업 누락 등 버그를 찾아 수정. **실제 dnf·이미지 내려받기·방화벽·SELinux 는 미검증** |
+| `tests/test_ui_cd.py` (+`ui_cd_smoke.js`) | 1 | 설정·운영 화면을 **실제 브라우저(Chromium)** 로 확인(체크리스트·탭·이동 버튼·모바일 폭 가로 넘침 없음·한글 감사 라벨). node/playwright 없으면 건너뜀 |
+| `tests/test_docs_ux.py` | 5 | 시작 가이드가 모든 화면 탭·설치 단계·마법사 질문을 설명하는지, 문서 링크·이미지 유효, 시험 번호(T-01~T-28) 일치 |
 | `tests/test_pipeline_e2e.py` | 1 | 전 과정 시나리오(등록→발급→배포→지표→실패 주입→진단→복구) |
 
 ## 6. 재현 방법

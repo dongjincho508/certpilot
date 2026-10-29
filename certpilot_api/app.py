@@ -405,7 +405,7 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
     def audit_verify():
         return jsonify(audit.verify_integrity())
 
-    # ---------------------------------------------------------------- 발급·배포 설정 (관리자) — certdeploy 와 같은 서버에서 쓰는 설정 화면
+    # ---------------------------------------------------------------- 설정·운영 (관리자) — certdeploy 와 같은 서버에서 쓰는 설정 화면
     def cd_call(fn, *a, **k):
         if not cfg.get("CERTDEPLOY_CONFIG"):
             return _err("certdeploy", "이 서버에는 certdeploy 연동이 설정되어 있지 않습니다(환경변수 CERTDEPLOY_CONFIG). 설치 매뉴얼의 '관리자 화면' 절을 참고하세요.", 409)

@@ -127,7 +127,7 @@ tests:
           - exp_labels: {severity: warning, cert: hnu}
             exp_annotations:
               summary: "배포 승인 대기 1일 초과: hnu"
-              description: "hnu 인증서 갱신본의 배포 승인이 하루 넘게 대기 중입니다. 관리자 화면 '발급·배포 설정' 또는 `certdeploy approve` 로 승인/반려하세요."
+              description: "hnu 인증서 갱신본의 배포 승인이 하루 넘게 대기 중입니다. 관리자 화면 '설정·운영' 또는 `certdeploy approve` 로 승인/반려하세요."
       - eval_time: 26h
         alertname: CertDeployApprovalPendingLong
         exp_alerts: []

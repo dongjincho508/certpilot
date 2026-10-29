@@ -244,7 +244,7 @@ def _approval_gate(cs, bundle, d, only, force, dry_run, action, emergency):
     if g.created and not dry_run:
         d.notifier.fire(f"approval:{cs.name}", f"인증서 배포 승인 요청: {cs.name}",
                         f"새 인증서(일련번호 {req['serial']}, 만료 {req['not_after'][:10]})를 {', '.join(names)} 에 배포하려면 승인 {req['needed']}명이 필요합니다.\n"
-                        f"관리자 화면 '발급·배포 설정' 에서 승인하거나 `certdeploy approve {req['id']} --by 이름` 을 실행하세요. 유효 {policy['ttl_hours']}시간.", "warning")
+                        f"관리자 화면 '설정·운영' 에서 승인하거나 `certdeploy approve {req['id']} --by 이름` 을 실행하세요. 유효 {policy['ttl_hours']}시간.", "warning")
         _approval_audit(cs, "approval_requested", req, {"actor": req["requested_by"]})
     if not dry_run:
         _push_approval_metrics(cs)

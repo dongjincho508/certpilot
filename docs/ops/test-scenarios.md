@@ -274,9 +274,9 @@ $CD deploy --target waf-main
 $CD confirm --target waf-main
 ```
 
-### T-22 관리자 화면(발급·배포 설정) — 메일 입력·시험 / 인증서별 개인키 보호 선택
+### T-22 관리자 화면(설정·운영) — 메일 입력·시험 / 인증서별 개인키 보호 선택
 - **사전조건**: 설치 매뉴얼 7-5 완료(`certdeploy-admin` 실행, nginx 8443), 인증서(`hnu`, `hannam`) 중 하나 이상이 이미 설치되어 있으면 키 변환까지 확인 가능
-- **절차**: ① 브라우저로 `https://<관리 서버>:8443` 로그인(관리자) → 「발급·배포 설정」 ② **메일**: SMTP 입력 → [시험 메일 보내기] → 수신함 확인 → [저장] ③ **개인키 보호**: `hnu` 를 「사용」+암호(12자 이상)로 [적용] → `hannam` 은 「사용 안 함」 유지 ④ CLI 확인
+- **절차**: ① 브라우저로 `https://<관리 서버>:8443` 로그인(관리자) → 「설정·운영」 ② **메일**: SMTP 입력 → [시험 메일 보내기] → 수신함 확인 → [저장] ③ **개인키 보호**: `hnu` 를 「사용」+암호(12자 이상)로 [적용] → `hannam` 은 「사용 안 함」 유지 ④ CLI 확인
 ```bash
 $CD --cert hnu validate
 ```
@@ -284,7 +284,7 @@ $CD --cert hnu validate
 $CD --cert hnu deploy --force --target hnu-web-canary
 ```
 - **기대**: 시험 메일이 도착하고, 실패 시 화면에 원인(연결 거부·로그인 실패·TLS 오류…)이 표시됨. 저장 후 `validate` 출력에 `관리자 화면(settings.json) 적용: 메일 · 개인키 보호(hnu)`. `hnu` 키 파일이 암호화(`BEGIN ENCRYPTED PRIVATE KEY`)되고 같은 폴더에 평문 `.bak-` 사본이 **남지 않으며**, 배포는 환경변수 없이 성공(대상 서버의 키는 평문). `hannam` 키는 평문 그대로. 「사용 안 함」으로 되돌리면 평문으로 복원. 감사 로그에 `certdeploy_settings_update` 가 기록되지만 비밀번호·암호는 없음
-- **권한 확인**: 운영자(operator) 계정으로 로그인하면 「발급·배포 설정」 탭이 보이지 않고, API 직접 호출은 403
+- **권한 확인**: 운영자(operator) 계정으로 로그인하면 「설정·운영」 탭이 보이지 않고, API 직접 호출은 403
 - **증거**: 화면 캡처(비밀번호 가림), `validate` 출력, `ls -l /var/lib/certdeploy/hnu/managed/`
 - **실패 시**: `journalctl -u certdeploy-admin -n 50`, 화면의 오류 메시지·요청 ID, `$CD diagnose --out`
 

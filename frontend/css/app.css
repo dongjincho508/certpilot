@@ -42,3 +42,14 @@ body { font-family: var(--cp-font); }
 [data-bs-theme="dark"] .btn-outline-primary { color: #6ea8fe !important; border-color: #6ea8fe !important; background: transparent; }
 [data-bs-theme="dark"] .btn-outline-primary:hover { color: #000 !important; background: #6ea8fe; }
 [data-bs-theme="dark"] .btn-outline-secondary { color: #ced4da; border-color: #6c757d; }
+
+/* 설정·운영 화면 */
+.cd-subnav .nav-link { border: 1px solid var(--bs-border-color); color: var(--bs-body-color); }
+.cd-subnav .nav-link.active { color: #fff; border-color: var(--bs-primary); }
+.cd-check td, .cd-check th { vertical-align: middle; }
+.cd-flow .badge { font-weight: 500; padding: .5rem .7rem; }
+[data-bs-theme="dark"] .cd-subnav .nav-link.active { background: #3b82f6; border-color: #3b82f6; }
+.card-header[role="button"] { cursor: pointer; user-select: none; }
+.card-header[role="button"][aria-expanded="true"] .bi-chevron-down { transform: rotate(180deg); }
+.card-header[role="button"] .bi-chevron-down { transition: transform .15s ease; }
+@media (max-width: 575px) { .cd-subnav .nav-link { padding: .4rem .6rem; font-size: .9rem; } }

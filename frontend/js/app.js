@@ -91,6 +91,7 @@ function showLogin() {
 }
 function showView(name) {
   ['dashboard', 'audit', 'users', 'debug', 'cd'].forEach((v) => { $(`view-${v}`).hidden = v !== name; });
+  $('view-mfagate').hidden = true;
   document.querySelectorAll('#main-tabs .nav-link').forEach((a) => a.classList.toggle('active', a.dataset.view === name));
   if (name === 'dashboard') guarded(loadServers);
   if (name === 'audit') guarded(loadAudit);
@@ -98,12 +99,19 @@ function showView(name) {
   if (name === 'debug') guarded(loadDebug);
   if (name === 'cd') guarded(loadCd);
 }
-function enter(user) {
+async function enter(user) {
   me = user; $('login-view').hidden = true; $('app-view').hidden = false;
   $('whoami').textContent = `${user.username} · ${user.role === 'admin' ? '관리자' : '운영자'}`;
   document.querySelectorAll('.admin-only').forEach((e) => { e.hidden = user.role !== 'admin'; });
+  let gate = null;
+  try { gate = await api('/auth/mfa'); } catch { /* 조회 실패 시 일반 화면으로 */ }
+  if (gate && gate.required && !gate.enabled) {          // 보안 정책: 등록 전에는 다른 화면을 열지 않는다(요청이 모두 거부되므로)
+    ['dashboard', 'audit', 'users', 'debug', 'cd'].forEach((v) => { $(`view-${v}`).hidden = true; });
+    $('view-mfagate').hidden = false;
+    return;
+  }
+  $('view-mfagate').hidden = true;
   showView('dashboard');
-  api('/auth/mfa').then((m) => { if (m.required && !m.enabled) { toast('보안 정책상 2단계 인증을 먼저 등록해야 합니다.', 'warning'); openMfa(); } }).catch(() => {});
 }
 
 // ---------------------------------------------------------------- 현황
@@ -339,13 +347,30 @@ async function probeServer() {
   await guarded(() => busy($('btn-probe'), async () => renderProbe(await api('/servers/probe', 'POST', data))));
 }
 
+const EVENT_LABEL = {
+  login: ['bi-box-arrow-in-right', '로그인'], login_failed: ['bi-shield-exclamation', '로그인 실패'], password_change: ['bi-key', '비밀번호 변경'],
+  admin_password_reset: ['bi-key-fill', '관리자 비밀번호 복구'], user_add: ['bi-person-plus', '사용자 추가'], user_delete: ['bi-person-dash', '사용자 삭제'],
+  user_unlock: ['bi-unlock', '계정 잠금 해제'], mfa_enable: ['bi-shield-lock', '2단계 인증 켬'], mfa_disable: ['bi-shield-slash', '2단계 인증 끔'],
+  mfa_reset: ['bi-shield-x', '2단계 인증 초기화'], server_add: ['bi-plus-circle', '서버 등록'], server_delete: ['bi-trash', '서버 삭제'],
+  server_probe: ['bi-plug', '서버 연결 시험'], scan: ['bi-search', '전체 조회'], export_csv: ['bi-filetype-csv', 'CSV 내보내기'],
+  debug_bundle: ['bi-download', '진단 번들 받음'], hostkey_reset: ['bi-fingerprint', 'SSH 호스트 키 초기화'], security_hostkey_changed: ['bi-exclamation-octagon', '호스트 키 변경 감지'],
+  certdeploy_settings_update: ['bi-sliders', '설정 변경'], certdeploy_mail_test: ['bi-envelope-check', '메일 시험'], certdeploy_webhook_test: ['bi-chat-dots', '웹훅 시험'],
+  certdeploy_itsm_test: ['bi-ticket-detailed', '티켓 연동 확인'], approval_requested: ['bi-hourglass-split', '배포 승인 요청'], approval_approved: ['bi-patch-check', '배포 승인'],
+  approval_rejected: ['bi-patch-minus', '배포 반려'], approval_applied: ['bi-rocket-takeoff', '승인 후 배포'], approval_bypass: ['bi-lightning-charge', '승인 없이 긴급 배포'],
+};
+function eventCell(type) {
+  const lab = EVENT_LABEL[type] || (type.startsWith('deploy_') ? ['bi-rocket-takeoff', `배포 ${type.slice(7)}`] : ['bi-dot', type]);
+  const c = document.createElement('div'); c.append(icon(lab[0]), el('span', ` ${lab[1]}`, 'fw-semibold'));
+  if (lab[1] !== type) c.append(el('div', type, 'small text-body-secondary mono'));
+  return c;
+}
 async function loadAudit() {
   const { logs } = await api('/audit-logs?limit=200');
   const tb = $('audit-body'); tb.replaceChildren();
   const sec = (t) => t.startsWith('security') || t === 'login_failed' || t.startsWith('mfa_');
   logs.forEach((l) => {
     const tr = document.createElement('tr'); if (sec(l.event_type)) tr.className = 'table-danger';
-    const ev = el('code', l.event_type);
+    const ev = eventCell(l.event_type);
     tr.append(cell(l.timestamp.slice(0, 19) + 'Z', 'small text-nowrap'), cell(ev), cell((l.details || {}).actor), cell(l.description));
     tb.append(tr);
   });
@@ -377,7 +402,7 @@ async function loadDebug() {
   });
   if (!ev.events.length) { const tr = document.createElement('tr'); const td = el('td', '이벤트가 없습니다. 연결 테스트·조회를 실행해 보세요.', 'text-center text-body-secondary py-4'); td.colSpan = 5; tr.append(td); tb.append(tr); }
 }
-// ---------------------------------------------------------------- 발급·배포 설정(certdeploy)
+// ---------------------------------------------------------------- 설정·운영(certdeploy)
 let cdOverview = null;
 function fmtDays(d) { return d == null ? '-' : `${Math.floor(d)}일`; }
 async function loadCd() {
@@ -394,7 +419,125 @@ async function loadCd() {
   const box = $('cd-certs'); box.replaceChildren();
   o.certificates.forEach((c) => box.append(certCard(c)));
   fillChannels(o);
-  await loadApprovals();
+  const [ap, bk, mfa] = await Promise.all([loadApprovals(), loadBackup(), api('/auth/mfa').catch(() => null)]);
+  cdCache = { o, ap, bk, mfa };
+  renderCd();
+}
+// ---- 설정·운영: 탭, 체크리스트, 채널 요약 (사용자 입장의 '무엇부터 해야 하나' 안내)
+let cdCache = null, cdTabName = 'home';
+function cdTab(name) {
+  cdTabName = name;
+  document.querySelectorAll('[data-cd-pane]').forEach((p) => { p.hidden = p.dataset.cdPane !== name; });
+  document.querySelectorAll('#cd-tabs .nav-link').forEach((b) => b.classList.toggle('active', b.dataset.cdTab === name));
+}
+function cdGo(tab, targetId) {
+  cdTab(tab);
+  const c = targetId ? $(targetId) : null;
+  if (c && c.classList.contains('collapse')) bootstrap.Collapse.getOrCreateInstance(c, { toggle: false }).show();
+  (c || $('view-cd')).scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+const ST = { ok: ['bi-check-circle-fill', 'text-success', '정상'], warn: ['bi-exclamation-triangle-fill', 'text-warning', '확인 필요'], bad: ['bi-x-octagon-fill', 'text-danger', '문제'], opt: ['bi-circle', 'text-secondary', '선택'] };
+function stIcon(s) { const i = icon(ST[s][0]); i.classList.add(ST[s][1], 'fs-5'); i.title = ST[s][2]; i.setAttribute('aria-label', ST[s][2]); return i; }
+function sevText(s) { return ({ info: '전부(정보 이상)', warning: '경고 이상', critical: '치명만' })[s] || '전부(정보 이상)'; }
+function cdChecklist(c) {
+  const { o, ap, bk, mfa } = c, rows = [];
+  const certs = o.certificates || [];
+  const low = certs.filter((x) => x.cert && x.cert.days_left < 30), broken = certs.filter((x) => x.cert_error);
+  rows.push({ s: broken.length ? 'bad' : (low.length ? 'warn' : 'ok'), req: true, name: '인증서 파일이 정상이고 만료까지 여유가 있다',
+    text: broken.length ? `읽을 수 없음: ${broken.map((x) => x.name).join(', ')}` : (certs.map((x) => `${x.name} ${x.cert ? `만료까지 ${Math.floor(x.cert.days_left)}일` : '-'}`).join(' · ') || '등록된 인증서 없음'), go: ['certs', 'cd-certs'] });
+  rows.push({ s: 'ok', req: false, name: '개인키 보호 방식을 골랐다 (암호 사용 / 사용 안 함)', text: certs.map((x) => `${x.name}: ${x.key_encryption === 'passphrase' ? '암호 사용' : '사용 안 함'}`).join(' · ') || '-', go: ['certs', 'cd-certs'] });
+  const m = o.mail;
+  rows.push({ s: m && m.enabled !== false ? 'ok' : 'warn', req: true, name: '장애 알림을 받을 메일을 설정했다', text: m && m.enabled !== false ? `${m.host} → ${(m.to || []).join(', ')}` : '아직 없음 — 장애가 나도 아무도 모를 수 있습니다', go: ['notify', 'cd-mail-collapse'] });
+  const ch = [o.webhook && o.webhook.enabled !== false ? '메신저' : null, o.itsm && o.itsm.enabled !== false ? '티켓' : null].filter(Boolean);
+  rows.push({ s: ch.length ? 'ok' : 'opt', req: false, name: '메신저·티켓 알림 (선택)', text: ch.length ? `${ch.join(', ')} 사용 중` : '사용 안 함 — 메일만으로도 됩니다', go: ['notify', 'cd-wh-collapse'] });
+  const rh = (o.notify_common || {}).repeat_hours || 0;
+  rows.push({ s: rh ? 'ok' : 'opt', req: false, name: '같은 알림 반복 간격 (선택, 권장 24시간)', text: rh ? `${rh}시간` : '매번 보냄 — 같은 장애 알림이 계속 쌓일 수 있습니다', go: ['notify', 'cd-nc-form'] });
+  const pol = (ap || []).filter((x) => x.policy);
+  rows.push({ s: pol.length ? 'ok' : 'opt', req: false, name: '배포 전 승인 단계 (선택)', text: pol.length ? pol.map((x) => `${x.cert}: ${x.policy.approvers}명 승인`).join(' · ') : '사용 안 함 — 갱신본이 자동으로 바로 배포됩니다', go: ['certs', 'cd-certs'] });
+  let bs = 'bad', bt = '백업이 설정되어 있지 않습니다 — 서버가 사라지면 개인키·설정을 복구할 수 없습니다';
+  if (bk && bk.configured) {
+    const l = bk.last;
+    if (!l) { bs = 'warn'; bt = '아직 한 번도 실행되지 않았습니다'; }
+    else if (!l.ok || bk.stale) { bs = 'bad'; bt = l.ok ? `마지막 성공이 ${bk.age_hours}시간 전입니다` : `마지막 백업 실패: ${l.error || ''}`; }
+    else if (!bk.copy_to.length) { bs = 'warn'; bt = '정상이지만 외부 복사 대상이 없습니다 — 같은 서버에만 있으면 함께 사라집니다'; }
+    else { bs = l.partial ? 'warn' : 'ok'; bt = `${bk.age_hours}시간 전 성공 · 외부 ${bk.copy_to.length}곳 복사${l.partial ? ' · 일부 항목 누락' : ''}`; }
+  }
+  rows.push({ s: bs, req: true, name: '매일 자동 백업이 돌고 외부에도 복사된다', text: bt, go: ['backup', 'cd-backup-card'] });
+  rows.push({ s: mfa && mfa.enabled ? 'ok' : 'warn', req: true, name: '내 계정에 2단계 인증을 켰다', text: mfa && mfa.enabled ? `켜짐 (복구 코드 ${mfa.recovery_remaining}개 남음)` : '꺼져 있음 — 「이동」을 누르면 바로 켤 수 있습니다', go: ['__mfa'] });
+  return rows;
+}
+function cdTodo(c, rows) {
+  const items = [];
+  const { o, ap, bk } = c;
+  (ap || []).forEach((x) => x.requests.filter((r) => r.status === 'pending').forEach((r) => items.push({ s: 'warn', text: `배포 승인 대기: ${x.cert} (승인 ${r.approvals.length}/${r.needed})`, go: ['certs', 'cd-approvals-card'] })));
+  (o.certificates || []).forEach((x) => {
+    if (x.cert && x.cert.days_left < 30) items.push({ s: x.cert.days_left < 7 ? 'bad' : 'warn', text: `${x.name} 인증서 만료까지 ${Math.floor(x.cert.days_left)}일`, go: ['certs', 'cd-certs'] });
+    if (x.last_run && x.last_run.ok === false) items.push({ s: 'bad', text: `${x.name} 마지막 배포에 문제가 있었습니다 (${x.last_run.finished_at ? x.last_run.finished_at.slice(0, 16).replace('T', ' ') : ''})`, go: ['certs', 'cd-certs'] });
+  });
+  rows.filter((r) => r.req && r.s !== 'ok' && r.go[1] !== 'cd-certs').forEach((r) => items.push({ s: r.s, text: `${r.name} — ${r.text}`, go: r.go }));
+  return items;
+}
+function goBtn(go) {
+  if (!go) return document.createTextNode('');
+  return btn('이동', 'btn-outline-primary', () => (go[0] === '__mfa' ? openMfa() : cdGo(go[0], go[1])), 'bi-box-arrow-up-right');
+}
+function renderCd() {
+  const c = cdCache; if (!c) return;
+  const rows = cdChecklist(c), todo = cdTodo(c, rows);
+  const days = (c.o.certificates || []).filter((x) => x.cert).map((x) => x.cert.days_left);
+  const minDays = days.length ? Math.floor(Math.min(...days)) : null;
+  const lastRun = (c.o.certificates || []).map((x) => x.last_run).filter(Boolean).sort((a, b) => String(b.finished_at).localeCompare(String(a.finished_at)))[0];
+  const pend = (c.ap || []).reduce((n, x) => n + x.requests.filter((r) => r.status === 'pending').length, 0);
+  const nch = [c.o.mail && c.o.mail.enabled !== false, c.o.webhook && c.o.webhook.enabled !== false, c.o.itsm && c.o.itsm.enabled !== false].filter(Boolean).length;
+  const bkOk = !!(c.bk && c.bk.configured && c.bk.last && c.bk.last.ok && !c.bk.stale);
+  const cards = [
+    ['bi-calendar-event', minDays === null ? 'secondary' : (minDays < 7 ? 'danger' : minDays < 30 ? 'warning' : 'success'), '가장 빠른 만료', minDays === null ? '-' : `${minDays}일`, '인증서 만료까지'],
+    ['bi-rocket-takeoff', !lastRun ? 'secondary' : (lastRun.ok ? 'success' : 'danger'), '마지막 배포', !lastRun ? '기록 없음' : (lastRun.ok ? '성공' : '문제'), lastRun && lastRun.finished_at ? lastRun.finished_at.slice(0, 16).replace('T', ' ') : '아직 배포 전'],
+    ['bi-patch-check', pend ? 'warning' : 'success', '승인 대기', `${pend}건`, pend ? '처리가 필요합니다' : '대기 없음'],
+    ['bi-hdd-network', bkOk ? 'success' : 'danger', '백업', bkOk ? '정상' : (c.bk && c.bk.configured ? '확인' : '없음'), c.bk && c.bk.last ? `${c.bk.age_hours}시간 전` : '기록 없음'],
+    ['bi-bell', nch ? 'success' : 'danger', '켜진 알림 채널', `${nch}개`, '메일·메신저·티켓'],
+  ];
+  const cbox = $('cd-home-cards'); cbox.replaceChildren();
+  cards.forEach(([ic, color, title, value, sub]) => {
+    const col = el('div', null, 'col-6 col-lg'), card = el('div', null, 'card shadow-sm h-100'), body = el('div', null, 'card-body d-flex gap-3 align-items-center');
+    const box = el('div', null, `stat-icon text-bg-${color}`); box.append(icon(ic));
+    const tx = el('div'); tx.append(el('div', title, 'small text-body-secondary'), el('div', value, 'fs-4 fw-bold lh-1 my-1'), el('div', sub, 'small text-body-secondary'));
+    body.append(box, tx); card.append(body); col.append(card); cbox.append(col);
+  });
+  const tl = $('cd-home-todo'); tl.replaceChildren();
+  if (!todo.length) { const li = el('li', null, 'list-group-item text-success'); li.append(icon('bi-check-circle-fill'), document.createTextNode(' 지금 조치할 일이 없습니다.')); tl.append(li); }
+  todo.forEach((i) => { const li = el('li', null, 'list-group-item d-flex align-items-center gap-2'); li.append(stIcon(i.s), el('span', i.text, 'flex-grow-1'), goBtn(i.go)); tl.append(li); });
+  const tb = $('cd-home-checklist'); tb.replaceChildren();
+  rows.forEach((r) => {
+    const tr = document.createElement('tr'); const a = document.createElement('td'); a.append(stIcon(r.s));
+    const n = document.createElement('td'); n.append(el('span', r.name, 'fw-semibold')); if (!r.req) n.append(el('span', ' 선택', 'badge text-bg-light border ms-2'));
+    const st = el('td', r.text, 'small'); const g = el('td', null, 'text-end'); g.append(goBtn(r.go));
+    tr.append(a, n, st, g); tb.append(tr);
+  });
+  const req = rows.filter((r) => r.req), done = req.filter((r) => r.s === 'ok').length;
+  const pr = $('cd-home-progress'); pr.className = `badge ms-auto ${done === req.length ? 'text-bg-success' : 'text-bg-warning'}`; pr.textContent = `필수 ${done}/${req.length} 완료`;
+  const setBadge = (id, text, cls) => { const b = $(id); b.hidden = !text; b.textContent = text || ''; if (cls) b.className = `badge ${cls} ms-1`; };
+  setBadge('cd-badge-home', todo.length ? String(todo.length) : '', 'text-bg-danger');
+  setBadge('cd-badge-certs', pend ? String(pend) : '', 'text-bg-warning');
+  setBadge('cd-badge-backup', bkOk ? '' : '!', 'text-bg-danger');
+  setBadge('cd-badge-notify', nch ? '' : '!', 'text-bg-danger');
+  renderChannelRows(c.o);
+}
+function renderChannelRows(o) {
+  const tb = $('cd-channel-rows'); tb.replaceChildren();
+  const defs = [
+    ['bi-envelope', '메일', o.mail, (m) => (m.to || []).join(', ') || '-', 'cd-mail-collapse'],
+    ['bi-chat-dots', '메신저 웹훅', o.webhook, (w) => `${({ teams: 'Teams', slack: 'Slack/Mattermost', googlechat: 'Google Chat', discord: 'Discord', generic: '일반' })[w.format] || w.format}${w.url_set ? ' (주소 저장됨)' : ''}`, 'cd-wh-collapse'],
+    ['bi-ticket-detailed', '티켓 시스템', o.itsm, (i) => `${({ servicenow: 'ServiceNow', jira: 'Jira', generic: '일반' })[i.format] || i.format} ${i.url || ''}`, 'cd-it-collapse'],
+  ];
+  defs.forEach(([ic, name, v, who, cid]) => {
+    const on = !!(v && v.enabled !== false), tr = document.createElement('tr');
+    const c1 = document.createElement('td'); c1.append(icon(ic), el('span', ` ${name}`, 'fw-semibold'));
+    const c2 = document.createElement('td'); c2.append(el('span', on ? '사용 중' : (v ? '꺼짐' : '미설정'), `badge ${on ? 'text-bg-success' : 'text-bg-secondary'}`));
+    const c3 = el('td', on ? who(v) : '-', 'small'); const c4 = el('td', on ? sevText(v.min_severity) : '-', 'small'); const c5 = el('td', v ? v.source : '-', 'small text-body-secondary');
+    const c6 = el('td', null, 'text-end'); c6.append(btn(on ? '설정 열기' : '설정하기', on ? 'btn-outline-secondary' : 'btn-primary', () => cdGo('notify', cid), 'bi-sliders'));
+    tr.append(c1, c2, c3, c4, c5, c6); tb.append(tr);
+  });
 }
 // ---- 알림 채널(웹훅·티켓·공통)
 function chResult(id, ok, msg) { const s = $(id); s.className = `small fw-semibold ${ok ? 'text-success' : 'text-danger'}`; s.textContent = msg; }
@@ -434,7 +577,7 @@ async function loadBackup() {
   $('cd-backup-card').hidden = false;
   const box = $('cd-bk-body'); box.replaceChildren();
   const badge = $('cd-bk-badge');
-  if (!b.configured) { badge.className = 'badge text-bg-secondary ms-2'; badge.textContent = '설정 안 됨'; box.append(el('div', '설정 파일에 backup: 항목이 없습니다. 설치 매뉴얼 10-4 의 예시를 추가하세요.', 'text-warning')); return; }
+  if (!b.configured) { badge.className = 'badge text-bg-secondary ms-2'; badge.textContent = '설정 안 됨'; box.append(el('div', '설정 파일에 backup: 항목이 없습니다. 설치 매뉴얼 10-4 의 예시를 추가하세요.', 'text-warning')); return b; }
   const l = b.last;
   badge.className = `badge ms-2 ${l && l.ok && !b.stale ? 'text-bg-success' : 'text-bg-danger'}`;
   badge.textContent = !l ? '백업 기록 없음' : (b.stale ? (l.ok ? '오래됨' : '실패') : (l.partial ? '일부 누락' : '정상'));
@@ -446,6 +589,7 @@ async function loadBackup() {
   row('보관 위치', `${b.dir} · 매일 ${b.keep.daily}개, 주 ${b.keep.weekly}개, 월 ${b.keep.monthly}개 유지`);
   row('외부 대상', b.copy_to.length ? b.copy_to.map((t) => `${t.name}(${t.kind === 'ssh' ? t.host + ':' : ''}${t.path})`).join(', ') : '없음 — 같은 서버에만 있으면 서버 장애 때 함께 사라집니다');
   if (b.backups.length) row('최근 백업', b.backups.slice(0, 5).map((x) => `${x.name} (${(x.size / 1048576).toFixed(1)}MB)`).join(' · '));
+  return b;
 }
 const APPROVAL_LABEL = { pending: '승인 대기', approved: '승인됨(배포 대기)', applied: '배포 완료', rejected: '반려', expired: '만료', superseded: '새 인증서로 대체', bypassed: '긴급 우회' };
 async function loadApprovals() {
@@ -475,6 +619,7 @@ async function loadApprovals() {
     });
     box.append(wrap);
   });
+  return certificates;
 }
 function certCard(c) {
   const card = el('div', null, 'border rounded p-3');
@@ -554,6 +699,7 @@ async function mfaEnable() {
   const r = await api('/auth/mfa/enable', 'POST', { code: $('mfa-code').value });
   $('mfa-codes').textContent = r.recovery_codes.join('\n');
   $('mfa-setup').hidden = true; $('mfa-codes-box').hidden = false; toast('2단계 인증을 켰습니다.');
+  if (!$('view-mfagate').hidden) $('mfa-modal').addEventListener('hidden.bs.modal', () => window.location.reload(), { once: true });   // 복구 코드를 저장한 뒤 닫으면 화면을 연다
 }
 async function mfaDisable() {
   await api('/auth/mfa/disable', 'POST', { password: $('mfa-dpw').value, code: $('mfa-dcode').value });
@@ -582,6 +728,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   pwModal = new bootstrap.Modal($('pw-modal'));
   mfaModal = new bootstrap.Modal($('mfa-modal'));
   $('open-mfa').addEventListener('click', (e) => { e.preventDefault(); openMfa(); });
+  $('btn-mfagate-open').addEventListener('click', () => guarded(openMfa));
+  $('btn-mfagate-logout').addEventListener('click', async () => { await api('/auth/logout', 'POST').catch(() => {}); showLogin(); });
   $('mfa-start-form').addEventListener('submit', (e) => { e.preventDefault(); guarded(mfaStart); });
   $('mfa-enable-form').addEventListener('submit', (e) => { e.preventDefault(); guarded(mfaEnable); });
   $('mfa-disable-form').addEventListener('submit', (e) => { e.preventDefault(); guarded(mfaDisable); });
@@ -610,6 +758,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('btn-verify').addEventListener('click', () => guarded(verifyAudit));
   $('cd-mail-form').addEventListener('submit', saveMail);
   wireChannels();
+  document.querySelectorAll('#cd-tabs .nav-link').forEach((b) => b.addEventListener('click', () => cdTab(b.dataset.cdTab)));
   $('btn-mail-test').addEventListener('click', testMail);
   $('btn-cd-refresh').addEventListener('click', () => guarded(loadCd));
   $('btn-dbg-refresh').addEventListener('click', () => guarded(loadDebug));

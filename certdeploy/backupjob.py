@@ -135,8 +135,11 @@ def collect(cfg, config_path: str, b: dict) -> Tuple[Dict[str, str], Dict[str, b
     add("etc/certdeploy", b["etc_dir"])
     if os.path.isfile(config_path) and not config_path.startswith(b["etc_dir"].rstrip("/") + "/"):
         add("etc/certdeploy-config/" + os.path.basename(config_path), config_path)
+    # 전역 상태 폴더 전체(설정 화면 값 settings.json, 배포용 SSH 키, 승인·티켓·알림 기록, 인증서별 하위 폴더). 인증서가 여러 개여도 한 번에 담긴다.
+    add("state", cfg.state_dir)
     for cs in cfg.certs:
-        add(f"state/{cs.name}", cs.state_dir)
+        if not (cs.state_dir == cfg.state_dir or cs.state_dir.startswith(cfg.state_dir.rstrip("/") + "/")):
+            add(f"state-{cs.name}", cs.state_dir)
         if cs.lego:
             add(f"lego/{cs.name}", cs.lego.get("path", "/var/lib/lego"))
     dbdir = b["admin_data_dir"]
@@ -349,13 +352,13 @@ def run_backup(cfg, config_path: str, b: dict, passphrase: str, now: Optional[da
             raise BackupError("백업할 대상이 하나도 없습니다(경로 설정 확인)")
         manifest = {"created_at": now.isoformat(), "host": hostname or socket.gethostname(), "certdeploy": __version__, "origin": origin}
         extra = {**extra, MANIFEST: json.dumps(manifest, ensure_ascii=False, indent=1).encode()}
-        blob = create_backup(sources, passphrase, extra=extra, exclude=b["exclude"], skipped=res.skipped, mtime=now.timestamp())
+        blob = create_backup(sources, passphrase, extra=extra, exclude=[*b["exclude"], b["dir"].rstrip("/")], skipped=res.skipped, mtime=now.timestamp())
         res.size = len(blob)
         if b["verify"]:
             members = list_members(blob, passphrase)
             res.members = len(members)
             names = {m["name"] for m in members}
-            if MANIFEST not in names or not any(n.startswith("state/") for n in names):
+            if MANIFEST not in names or "state" not in names:
                 raise BackupError("검증 실패: 백업에 필수 항목(state, manifest)이 없습니다")
             res.verified = True
         side = json.dumps({"name": res.name, "created_at": now.isoformat(), "size": res.size, "sha256": hashlib.sha256(blob).hexdigest(),
