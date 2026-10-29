@@ -27,7 +27,12 @@ notify:
   # smtp: {host: smtp.univ.example, port: 587, starttls: true, from: cert-deploy@univ.example,
   #        to: [cert-admin@univ.example], username: cert-deploy, password_env: SMTP_PASSWORD, on_success: true}
   # 웹훅(Slack·Mattermost: slack, Teams Workflows: teams, 그 밖: generic). URL 의 토큰은 환경변수/파일에만 둔다.
-  # webhook: {url_env: CERTDEPLOY_WEBHOOK_URL, format: slack, on_success: false}
+  # webhook: {url_env: CERTDEPLOY_WEBHOOK_URL, format: slack, on_success: false, min_severity: info}   # format: slack|teams|googlechat|discord|generic
+  # 티켓 연동(ServiceNow·Jira·일반): 장애가 처음 생기면 티켓 생성, 해소되면 닫음(같은 대상 중복 생성 없음). 비밀은 환경변수로.
+  # itsm: {format: jira, url: https://jira.univ.example, auth: bearer, token_env: JIRA_TOKEN, project: CERT, min_severity: warning}
+  # itsm: {format: servicenow, url: https://univ.service-now.com, auth: basic, username: svc-cert, password_env: SNOW_PASSWORD, assignment_group: 전산실}
+  # 같은 대상의 같은 장애 알림을 N시간 안에는 메일·웹훅으로 다시 보내지 않음(0=항상). 관리자 화면에서도 입력 가능.
+  # repeat_hours: 24
   # 실행 결과 지표 → 감시 스택의 Pushgateway(방화벽으로 이 서버만 허용) 또는 node_exporter textfile
   # pushgateway_url: http://monitor.univ.example:9091
   # metrics_file: /var/lib/node_exporter/textfile/certdeploy.prom

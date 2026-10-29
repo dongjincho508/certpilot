@@ -14,6 +14,10 @@ FILE = "settings.json"
 EMAIL = re.compile(r"^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$")
 HOST = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$")
 MIN_PASSPHRASE = 12
+SEVERITIES = ("info", "warning", "critical")
+WEBHOOK_FORMATS = ("generic", "slack", "teams", "googlechat", "discord")
+ITSM_FORMATS = ("servicenow", "jira", "generic")
+URL_RE = re.compile(r"^https?://[^\s<>\"']+$")
 
 
 class SettingsError(Exception):
@@ -87,8 +91,107 @@ def normalize_mail(m: dict, previous: Optional[dict] = None) -> dict:
     if problems:
         raise SettingsError(problems)
     out.update(host=host, port=port, starttls=bool(m.get("starttls", True)), **{"from": sender}, to=to, username=username or None,
-               password=pw or None, on_success=bool(m.get("on_success", True)))
+               password=pw or None, on_success=bool(m.get("on_success", True)), min_severity=_sev(m.get("min_severity", previous.get("min_severity", "info"))))
     return out
+
+
+def _sev(v) -> str:
+    if v not in SEVERITIES:
+        raise SettingsError("심각도는 info, warning, critical 중 하나여야 합니다")
+    return v
+
+
+def _check_url(u: str, what: str, problems: list) -> None:
+    if not URL_RE.match(u) or len(u) > 2000:
+        problems.append(f"{what} 주소는 http:// 또는 https:// 로 시작하는 올바른 주소여야 합니다")
+
+
+def normalize_webhook(w: dict, previous: Optional[dict] = None) -> dict:
+    """메신저 웹훅(Teams·Slack·Mattermost·Google Chat·Discord·일반). 주소(토큰 포함)가 비어 있으면 기존 값을 유지."""
+    previous = previous or {}
+    problems = []
+    out = {"enabled": bool(w.get("enabled", True))}
+    fmt = w.get("format", previous.get("format", "teams"))
+    if fmt not in WEBHOOK_FORMATS:
+        problems.append("웹훅 형식은 " + ", ".join(WEBHOOK_FORMATS) + " 중 하나여야 합니다")
+    url = str(w.get("url") or "").strip() or previous.get("url") or ""
+    if out["enabled"]:
+        if not url:
+            problems.append("웹훅 주소가 필요합니다")
+        else:
+            _check_url(url, "웹훅", problems)
+    try:
+        sev = _sev(w.get("min_severity", previous.get("min_severity", "info")))
+    except SettingsError as e:
+        problems += e.problems
+        sev = "info"
+    if problems:
+        raise SettingsError(problems)
+    out.update(format=fmt, url=url or None, on_success=bool(w.get("on_success", False)), min_severity=sev)
+    return out
+
+
+def normalize_itsm(i: dict, previous: Optional[dict] = None) -> dict:
+    """티켓 시스템(ServiceNow·Jira·일반). 비밀번호·토큰이 비어 있으면 기존 값을 유지(계정/방식이 바뀌면 재입력)."""
+    previous = previous or {}
+    problems = []
+    out = {"enabled": bool(i.get("enabled", True))}
+    fmt = i.get("format", previous.get("format", "servicenow"))
+    if fmt not in ITSM_FORMATS:
+        problems.append("티켓 형식은 " + ", ".join(ITSM_FORMATS) + " 중 하나여야 합니다")
+    url = str(i.get("url") or "").strip().rstrip("/")
+    auth = i.get("auth", previous.get("auth", "basic"))
+    if auth not in ("basic", "bearer"):
+        problems.append("인증 방식은 basic 또는 bearer 여야 합니다")
+    username = str(i.get("username") or "").strip()
+    pw, token = i.get("password"), i.get("token")
+    if pw in (None, ""):
+        pw = previous.get("password") if (auth == "basic" and username and username == previous.get("username")) else None
+    if token in (None, ""):
+        token = previous.get("token") if auth == "bearer" else None
+    for secret in (pw, token):
+        if secret and ("\n" in secret or "\r" in secret):
+            problems.append("비밀번호·토큰에 줄바꿈을 넣을 수 없습니다")
+    project = str(i.get("project") or "").strip()
+    if out["enabled"]:
+        if not url:
+            problems.append("티켓 시스템 주소가 필요합니다")
+        else:
+            _check_url(url, "티켓 시스템", problems)
+        if auth == "basic" and not (username and pw):
+            problems.append("basic 인증에는 계정과 비밀번호가 필요합니다")
+        if auth == "bearer" and not token:
+            problems.append("bearer 인증에는 토큰이 필요합니다")
+        if fmt == "jira" and not re.match(r"^[A-Z][A-Z0-9_]{1,19}$", project):
+            problems.append("Jira 프로젝트 키(대문자·숫자, 예: CERT)가 필요합니다")
+    for k in ("issue_type", "assignment_group", "category", "resolve_transition_id"):
+        if len(str(i.get(k) or "")) > 100:
+            problems.append(f"{k} 값이 너무 깁니다")
+    try:
+        sev = _sev(i.get("min_severity", previous.get("min_severity", "warning")))
+    except SettingsError as e:
+        problems += e.problems
+        sev = "warning"
+    ca = str(i.get("ca_file") or "").strip()
+    if ca and not ca.startswith("/"):
+        problems.append("CA 파일은 절대 경로여야 합니다")
+    if problems:
+        raise SettingsError(problems)
+    out.update(format=fmt, url=url, auth=auth, username=username or None, password=pw or None, token=token or None, min_severity=sev,
+               project=project or None, issue_type=str(i.get("issue_type") or "Task").strip() or "Task",
+               assignment_group=str(i.get("assignment_group") or "").strip() or None, category=str(i.get("category") or "").strip() or None,
+               resolve_transition_id=str(i.get("resolve_transition_id") or "").strip() or None, verify_tls=bool(i.get("verify_tls", True)), ca_file=ca or None)
+    return out
+
+
+def normalize_common(c: dict) -> dict:
+    try:
+        rh = int(c.get("repeat_hours", 0))
+        if not 0 <= rh <= 720:
+            raise ValueError
+    except (TypeError, ValueError):
+        raise SettingsError("반복 알림 간격은 0~720 시간 숫자여야 합니다")
+    return {"repeat_hours": rh}
 
 
 def normalize_cert_opts(name: str, o: dict, previous: Optional[dict] = None) -> dict:
@@ -115,6 +218,13 @@ def mask(data: dict) -> dict:
     mail = out.get("mail")
     if mail:
         mail["password_set"] = bool(mail.pop("password", None))
+    wh = out.get("webhook")
+    if wh:
+        wh["url_set"] = bool(wh.pop("url", None))
+    it = out.get("itsm")
+    if it:
+        it["password_set"] = bool(it.pop("password", None))
+        it["token_set"] = bool(it.pop("token", None))
     for c in (out.get("certificates") or {}).values():
         c["passphrase_set"] = bool(c.pop("key_passphrase", None))
     return out
@@ -122,7 +232,7 @@ def mask(data: dict) -> dict:
 
 def apply(cfg, st: dict) -> List[str]:
     """설정 화면 값을 Config 에 덮어쓴다. 적용한 항목 목록을 반환."""
-    from .config import SmtpCfg
+    from .config import ItsmCfg, SmtpCfg, WebhookCfg
     notes = []
     mail = st.get("mail")
     if mail is not None:
@@ -131,8 +241,31 @@ def apply(cfg, st: dict) -> List[str]:
             notes.append("메일: 사용 안 함")
         else:
             cfg.notify.smtp = SmtpCfg(mail["host"], mail["from"], list(mail["to"]), int(mail.get("port", 587)), bool(mail.get("starttls", True)),
-                                      mail.get("username"), None, None, bool(mail.get("on_success", True)), mail.get("password"))
+                                      mail.get("username"), None, None, bool(mail.get("on_success", True)), mail.get("password"),
+                                      mail.get("min_severity", "info"))
             notes.append(f"메일: {mail['host']} → {', '.join(mail['to'])}")
+    wh = st.get("webhook")
+    if wh is not None:
+        if not wh.get("enabled", True):
+            cfg.notify.webhook = None
+            notes.append("웹훅: 사용 안 함")
+        else:
+            cfg.notify.webhook = WebhookCfg(None, None, wh.get("format", "generic"), bool(wh.get("on_success", False)), wh.get("url"), wh.get("min_severity", "info"))
+            notes.append(f"웹훅: {wh.get('format')}")
+    it = st.get("itsm")
+    if it is not None:
+        if not it.get("enabled", True):
+            cfg.notify.itsm = None
+            notes.append("티켓: 사용 안 함")
+        else:
+            cfg.notify.itsm = ItsmCfg(it["format"], it["url"], it.get("auth", "basic"), it.get("username"), it.get("password"), None, it.get("token"), None,
+                                      it.get("min_severity", "warning"), it.get("project"), it.get("issue_type", "Task"), None, it.get("assignment_group"),
+                                      it.get("category"), it.get("resolve_transition_id"), bool(it.get("verify_tls", True)), it.get("ca_file"))
+            notes.append(f"티켓: {it['format']}")
+    common = st.get("notify_common")
+    if common is not None:
+        cfg.notify.repeat_hours = int(common.get("repeat_hours", 0))
+        notes.append(f"반복 알림 간격: {cfg.notify.repeat_hours}시간")
     for cs in cfg.certs:
         o = (st.get("certificates") or {}).get(cs.name)
         if o:
