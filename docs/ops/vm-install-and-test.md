@@ -316,6 +316,7 @@ CERTDEPLOY_CONFIG=/etc/certdeploy/certdeploy.yml
 CERTPILOT_DATA_DIR=/var/lib/certdeploy-admin
 CERTPILOT_SECURE_COOKIE=1
 ```
+(선택) 모든 계정에 2단계 인증을 강제하려면 위 파일에 `CERTPILOT_REQUIRE_MFA=1` 을 추가한다 — 미등록 계정은 로그인 후 등록 창만 열린다. 먼저 관리자 본인이 등록(계정 메뉴 → 2단계 인증)한 뒤 켜는 것을 권장한다. 비밀키는 `/var/lib/certdeploy-admin/mfa.key`(권한 600)로 암호화되어 저장되므로 **DB(`certpilot.db`)와 함께 백업**한다.
 서비스 설치·기동:
 ```bash
 sudo cp /opt/cert-monitor/src/certdeploy/systemd/certdeploy-admin.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now certdeploy-admin

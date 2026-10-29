@@ -21,7 +21,7 @@ const STAT_CARDS = [
 ];
 
 let me = null, allServers = [], cardFilter = null, detailServerId = null;
-let detailOffcanvas, serverModal, pwModal;
+let detailOffcanvas, serverModal, pwModal, mfaModal;
 
 async function api(path, method = 'GET', body = null) {
   const opt = { method, headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin' };
@@ -32,7 +32,8 @@ async function api(path, method = 'GET', body = null) {
   const data = ct.includes('json') ? await res.json() : await res.text();
   if (!res.ok) {
     const rid = res.headers.get('X-Request-Id');
-    throw new Error(((data && data.error && data.error.message) || `오류 ${res.status}`) + (rid && res.status >= 500 ? ` [요청 ID ${rid}]` : ''));
+    const err = new Error(((data && data.error && data.error.message) || `오류 ${res.status}`) + (rid && res.status >= 500 ? ` [요청 ID ${rid}]` : ''));
+    err.code = data && data.error && data.error.code; throw err;
   }
   return data;
 }
@@ -86,6 +87,7 @@ async function busy(button, fn) {
 // ---------------------------------------------------------------- 화면 전환
 function showLogin() {
   me = null; $('app-view').hidden = true; $('login-view').hidden = false; $('login-pass').value = '';
+  $('login-code-wrap').hidden = true; $('login-code').value = '';
 }
 function showView(name) {
   ['dashboard', 'audit', 'users', 'debug', 'cd'].forEach((v) => { $(`view-${v}`).hidden = v !== name; });
@@ -101,6 +103,7 @@ function enter(user) {
   $('whoami').textContent = `${user.username} · ${user.role === 'admin' ? '관리자' : '운영자'}`;
   document.querySelectorAll('.admin-only').forEach((e) => { e.hidden = user.role !== 'admin'; });
   showView('dashboard');
+  api('/auth/mfa').then((m) => { if (m.required && !m.enabled) { toast('보안 정책상 2단계 인증을 먼저 등록해야 합니다.', 'warning'); openMfa(); } }).catch(() => {});
 }
 
 // ---------------------------------------------------------------- 현황
@@ -339,7 +342,7 @@ async function probeServer() {
 async function loadAudit() {
   const { logs } = await api('/audit-logs?limit=200');
   const tb = $('audit-body'); tb.replaceChildren();
-  const sec = (t) => t.startsWith('security') || t === 'login_failed';
+  const sec = (t) => t.startsWith('security') || t === 'login_failed' || t.startsWith('mfa_');
   logs.forEach((l) => {
     const tr = document.createElement('tr'); if (sec(l.event_type)) tr.className = 'table-danger';
     const ev = el('code', l.event_type);
@@ -448,15 +451,42 @@ async function testMail() {
   await guarded(() => busy($('btn-mail-test'), async () => { const r = await api('/certdeploy/mail-test', 'POST', mailPayload()); mailResult(r.ok, r.message); }));
 }
 
+// ---------------------------------------------------------------- 2단계 인증(TOTP)
+async function openMfa() {
+  const m = await api('/auth/mfa');
+  ['mfa-off', 'mfa-setup', 'mfa-codes-box', 'mfa-on'].forEach((id) => { $(id).hidden = true; });
+  ['mfa-start-form', 'mfa-enable-form', 'mfa-disable-form'].forEach((id) => $(id).reset());
+  if (m.enabled) {
+    $('mfa-on').hidden = false; $('mfa-recovery-left').textContent = `남은 복구 코드 ${m.recovery_remaining}개`;
+    $('mfa-disable-form').hidden = m.required;
+  } else { $('mfa-off').hidden = false; }
+  mfaModal.show();
+}
+async function mfaStart() {
+  const r = await api('/auth/mfa/setup', 'POST', { password: $('mfa-pw').value });
+  $('mfa-secret').textContent = r.secret.replace(/(.{4})/g, '$1 ').trim(); $('mfa-uri').textContent = r.uri;
+  $('mfa-off').hidden = true; $('mfa-setup').hidden = false;
+}
+async function mfaEnable() {
+  const r = await api('/auth/mfa/enable', 'POST', { code: $('mfa-code').value });
+  $('mfa-codes').textContent = r.recovery_codes.join('\n');
+  $('mfa-setup').hidden = true; $('mfa-codes-box').hidden = false; toast('2단계 인증을 켰습니다.');
+}
+async function mfaDisable() {
+  await api('/auth/mfa/disable', 'POST', { password: $('mfa-dpw').value, code: $('mfa-dcode').value });
+  mfaModal.hide(); toast('2단계 인증을 껐습니다.');
+}
+
 async function loadUsers() {
   const { users } = await api('/users'); const tb = $('users-body'); tb.replaceChildren();
   users.forEach((u) => {
     const a = el('div', null, 'd-flex gap-1 justify-content-end');
+    if (u.mfa) a.append(btn('2단계 인증 초기화', 'btn-outline-secondary', () => guarded(async () => { if (confirm(`${u.username} 의 2단계 인증을 초기화합니다(기기 분실 시). 해당 계정의 로그인 세션도 끊깁니다. 계속할까요?`)) { await api(`/users/${u.username}/mfa/reset`, 'POST'); toast('초기화했습니다. 다음 로그인 후 다시 등록하게 안내하세요.'); loadUsers(); } }), 'bi-shield-x'));
     if (u.locked_until) a.append(btn('잠금 해제', 'btn-outline-warning', () => guarded(async () => { await api(`/users/${u.username}/unlock`, 'POST'); loadUsers(); }), 'bi-unlock'));
     if (u.username !== me.username) a.append(btn('삭제', 'btn-outline-danger', () => guarded(async () => { if (confirm(`${u.username} 삭제?`)) { await api(`/users/${u.username}`, 'DELETE'); loadUsers(); } }), 'bi-trash'));
     const role = el('span', u.role === 'admin' ? '관리자' : '운영자', `badge ${u.role === 'admin' ? 'text-bg-primary' : 'text-bg-secondary'}`);
     const tr = document.createElement('tr');
-    tr.append(cell(u.username), cell(role), cell(u.locked_until ? `${u.locked_until} 까지` : '-'), cell(a, 'text-end')); tb.append(tr);
+    tr.append(cell(u.username), cell(role), cell(u.mfa ? '켜짐' : '꺼짐', u.mfa ? 'text-success' : 'text-muted'), cell(u.locked_until ? `${u.locked_until} 까지` : '-'), cell(a, 'text-end')); tb.append(tr);
   });
 }
 
@@ -467,6 +497,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   detailOffcanvas = new bootstrap.Offcanvas($('detail'));
   serverModal = new bootstrap.Modal($('server-modal'));
   pwModal = new bootstrap.Modal($('pw-modal'));
+  mfaModal = new bootstrap.Modal($('mfa-modal'));
+  $('open-mfa').addEventListener('click', (e) => { e.preventDefault(); openMfa(); });
+  $('mfa-start-form').addEventListener('submit', (e) => { e.preventDefault(); guarded(mfaStart); });
+  $('mfa-enable-form').addEventListener('submit', (e) => { e.preventDefault(); guarded(mfaEnable); });
+  $('mfa-disable-form').addEventListener('submit', (e) => { e.preventDefault(); guarded(mfaDisable); });
+  $('mfa-copy-codes').addEventListener('click', () => navigator.clipboard && navigator.clipboard.writeText($('mfa-codes').textContent).then(() => toast('복사했습니다.')));
   syncThemeIcon();
   $('theme-toggle').addEventListener('click', () => { window.cpSetTheme(!window.cpIsDark(), true); syncThemeIcon(); });
 
@@ -477,8 +513,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('login-form').addEventListener('submit', async (e) => {
     e.preventDefault(); $('login-error').textContent = '';
     await busy($('login-btn'), async () => {
-      try { enter(await api('/auth/login', 'POST', { username: $('login-user').value, password: $('login-pass').value })); }
-      catch (err) { $('login-error').textContent = err.message; }
+      try { enter(await api('/auth/login', 'POST', { username: $('login-user').value, password: $('login-pass').value, code: $('login-code').value })); }
+      catch (err) {
+        if (err.code === 'mfa_required') { $('login-code-wrap').hidden = false; $('login-code').focus(); }
+        $('login-error').textContent = err.message;
+      }
     });
   });
   $('logout').addEventListener('click', async (e) => { e.preventDefault(); await api('/auth/logout', 'POST').catch(() => {}); allServers = []; showLogin(); });

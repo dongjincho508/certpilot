@@ -29,6 +29,17 @@ def _err(code: str, message: str, status: int):
     return jsonify({"error": {"code": code, "message": message}}), status
 
 
+def _load_mfa_key(data_dir: Path) -> bytes:
+    """2단계 인증 비밀키 암호화용 키(data/mfa.key, 권한 600). 없으면 생성한다. DB 백업과 함께 보관해야 복구 가능"""
+    from cryptography.fernet import Fernet
+    path = data_dir / "mfa.key"
+    if not path.exists():
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(Fernet.generate_key())
+    return path.read_bytes().strip()
+
+
 def _bootstrap_admin(cfg, store, auth, audit) -> None:
     """최초 관리자 생성. 이미 있으면 건드리지 않고, CERTPILOT_ADMIN_RESET_PASSWORD=1 일 때만 환경변수
     비밀번호로 복구(재설정·잠금 해제)한다. 실패해도 서버는 뜨고 원인만 stderr 에 남긴다(비밀번호 값 미기록)."""
@@ -69,6 +80,7 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
         "CERTDEPLOY_CONFIG": os.environ.get("CERTDEPLOY_CONFIG"),      # 설정하면 관리자 화면에서 certdeploy 설정(메일·개인키 보호)을 다룬다
         "SECURE_COOKIE": os.environ.get("CERTPILOT_SECURE_COOKIE", "1") == "1",
         "IDLE_MINUTES": int(os.environ.get("CERTPILOT_IDLE_MINUTES", "30")),
+        "REQUIRE_MFA": os.environ.get("CERTPILOT_REQUIRE_MFA") == "1",     # 1 이면 2단계 인증을 등록하기 전에는 다른 기능을 쓸 수 없다
         **(config or {}),
     }
     data_dir = Path(cfg["DATA_DIR"])
@@ -86,7 +98,7 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
     kw = {"sleep": sleep} if sleep else {}
     scanner = Scanner(executor_factory or default_executor_factory(store), probe=probe, clock=clock, **kw)
     service = CertPilotService(store, audit, scanner, clock=clock)
-    auth = AuthService(store, clock=clock, idle_minutes=cfg["IDLE_MINUTES"],
+    auth = AuthService(store, clock=clock, idle_minutes=cfg["IDLE_MINUTES"], secret_key=_load_mfa_key(data_dir),
                        **{k: cfg[k] for k in ("max_failures", "lock_minutes", "max_sessions") if k in cfg})
 
     _bootstrap_admin(cfg, store, auth, audit)
@@ -143,6 +155,8 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
                     return _err("unauthenticated", "로그인이 필요합니다.", 401)
                 if user["role"] not in roles:
                     return _err("forbidden", "권한이 없습니다.", 403)
+                if cfg["REQUIRE_MFA"] and not user["mfa"] and not request.path.startswith("/auth/"):
+                    return _err("mfa_enrollment_required", "보안 정책상 2단계 인증을 먼저 등록해야 합니다.", 403)
                 g.user = user
                 return fn(*a, **k)
             return wrapper
@@ -164,7 +178,7 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
 
     @app.errorhandler(AuthError)
     def _a(e):
-        status = {"invalid": 401, "locked": 423, "exists": 409}.get(e.code, 422)
+        status = {"invalid": 401, "invalid_mfa": 401, "locked": 423, "exists": 409, "mfa_unavailable": 503}.get(e.code, 422)
         return _err(e.code, e.message, status)
 
     @app.errorhandler(Exception)
@@ -202,8 +216,10 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
         data = body()
         username = str(data.get("username", ""))
         try:
-            token = auth.login(username, str(data.get("password", "")))
+            token = auth.login(username, str(data.get("password", "")), str(data.get("code", "")) or None)
         except AuthError as e:
+            if e.code == "mfa_required":          # 비밀번호는 맞았고 인증 코드를 기다리는 중 — 실패가 아니다
+                return _err(e.code, e.message, 401)
             audit.write({"event_type": "login_failed", "description": username[:64],
                          "details": {"actor": username[:64], "code": e.code}})
             return _err(e.code, e.message, 423 if e.code == "locked" else 401)
@@ -237,6 +253,49 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
         resp = jsonify({"status": "ok", "message": "비밀번호를 변경했습니다. 다시 로그인하세요."})
         resp.delete_cookie(COOKIE)
         return resp
+
+    # ---------------------------------------------------------------- 2단계 인증(TOTP)
+    @app.get("/auth/mfa")
+    @require(*both)
+    def mfa_status():
+        return jsonify({"enabled": g.user["mfa"], "required": cfg["REQUIRE_MFA"],
+                        "recovery_remaining": auth.recovery_remaining(g.user["username"])})
+
+    @app.post("/auth/mfa/setup")
+    @require(*both)
+    def mfa_setup():
+        info = auth.mfa_begin(g.user["username"], str(body().get("password", "")))
+        return jsonify(info)
+
+    @app.post("/auth/mfa/enable")
+    @require(*both)
+    def mfa_enable():
+        codes = auth.mfa_enable(g.user["username"], str(body().get("code", "")))
+        audit.write({"event_type": "mfa_enable", "description": g.user["username"],
+                     "details": {"actor": g.user["username"], "security": True}})
+        return jsonify({"status": "ok", "recovery_codes": codes,
+                        "message": "복구 코드는 지금 한 번만 표시됩니다. 안전한 곳에 보관하세요."})
+
+    @app.post("/auth/mfa/disable")
+    @require(*both)
+    def mfa_disable():
+        if cfg["REQUIRE_MFA"]:
+            return _err("forbidden", "보안 정책상 2단계 인증을 해제할 수 없습니다.", 403)
+        d = body()
+        auth.mfa_disable(g.user["username"], str(d.get("password", "")), str(d.get("code", "")))
+        audit.write({"event_type": "mfa_disable", "description": g.user["username"],
+                     "details": {"actor": g.user["username"], "security": True}})
+        return jsonify({"status": "ok"})
+
+    @app.post("/users/<username>/mfa/reset")
+    @require(ADMIN)
+    def mfa_reset(username):
+        if not store.get_user(username):
+            raise NotFound("사용자를 찾을 수 없습니다.")
+        auth.mfa_reset(username)
+        audit.write({"event_type": "mfa_reset", "description": username,
+                     "details": {"actor": g.user["username"], "security": True}})
+        return jsonify({"status": "ok"})
 
     # ---------------------------------------------------------------- 사용자 (관리자)
     @app.get("/users")

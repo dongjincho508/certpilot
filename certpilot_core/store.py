@@ -20,12 +20,15 @@ CREATE TABLE IF NOT EXISTS hostkeys (
   host_id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, first_seen TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS users (
   username TEXT PRIMARY KEY, password_hash TEXT NOT NULL, role TEXT NOT NULL,
-  failed_count INTEGER NOT NULL DEFAULT 0, locked_until TEXT, created_at TEXT NOT NULL);
+  failed_count INTEGER NOT NULL DEFAULT 0, locked_until TEXT, created_at TEXT NOT NULL,
+  totp_secret TEXT, totp_enabled INTEGER NOT NULL DEFAULT 0, totp_last_counter INTEGER NOT NULL DEFAULT -1,
+  recovery_hashes TEXT NOT NULL DEFAULT '[]');
 CREATE TABLE IF NOT EXISTS sessions (
   token_hash TEXT PRIMARY KEY, username TEXT NOT NULL, created_at TEXT NOT NULL, last_seen TEXT NOT NULL);
 """
 
-USER_COLUMNS = frozenset({"password_hash", "role", "failed_count", "locked_until"})
+USER_COLUMNS = frozenset({"password_hash", "role", "failed_count", "locked_until",
+                          "totp_secret", "totp_enabled", "totp_last_counter", "recovery_hashes"})
 
 
 class Store(HostKeyStore):
@@ -43,6 +46,11 @@ class Store(HostKeyStore):
         cols = {r["name"] for r in c.execute("PRAGMA table_info(servers)")}
         if "os_type" not in cols:
             c.execute("ALTER TABLE servers ADD COLUMN os_type TEXT NOT NULL DEFAULT 'auto'")
+        ucols = {r["name"] for r in c.execute("PRAGMA table_info(users)")}
+        for name, ddl in (("totp_secret", "TEXT"), ("totp_enabled", "INTEGER NOT NULL DEFAULT 0"),
+                          ("totp_last_counter", "INTEGER NOT NULL DEFAULT -1"), ("recovery_hashes", "TEXT NOT NULL DEFAULT '[]'")):
+            if name not in ucols:
+                c.execute(f"ALTER TABLE users ADD COLUMN {name} {ddl}")  # nosec B608 - 상수 목록
 
     @contextmanager
     def _conn(self):
@@ -123,7 +131,7 @@ class Store(HostKeyStore):
     # ---- 사용자·세션
     def add_user(self, username, password_hash, role, created_at) -> None:
         with self._conn() as c:
-            c.execute("INSERT INTO users VALUES (?,?,?,0,NULL,?)",
+            c.execute("INSERT INTO users (username, password_hash, role, failed_count, locked_until, created_at) VALUES (?,?,?,0,NULL,?)",
                       (username, password_hash, role, created_at))
 
     def get_user(self, username) -> Optional[dict]:
@@ -133,7 +141,8 @@ class Store(HostKeyStore):
 
     def list_users(self) -> List[dict]:
         with self._conn() as c:
-            return [{"username": r["username"], "role": r["role"], "locked_until": r["locked_until"]}
+            return [{"username": r["username"], "role": r["role"], "locked_until": r["locked_until"],
+                     "mfa": bool(r["totp_enabled"])}
                     for r in c.execute("SELECT * FROM users ORDER BY username")]
 
     def update_user(self, username, **fields) -> None:
