@@ -316,6 +316,7 @@ CERTDEPLOY_CONFIG=/etc/certdeploy/certdeploy.yml
 CERTPILOT_DATA_DIR=/var/lib/certdeploy-admin
 CERTPILOT_SECURE_COOKIE=1
 ```
+(선택) 모든 계정에 2단계 인증을 강제하려면 위 파일에 `CERTPILOT_REQUIRE_MFA=1` 을 추가한다 — 미등록 계정은 로그인 후 등록 창만 열린다. 먼저 관리자 본인이 등록(계정 메뉴 → 2단계 인증)한 뒤 켜는 것을 권장한다. 비밀키는 `/var/lib/certdeploy-admin/mfa.key`(권한 600)로 암호화되어 저장되므로 **DB(`certpilot.db`)와 함께 백업**한다.
 서비스 설치·기동:
 ```bash
 sudo cp /opt/cert-monitor/src/certdeploy/systemd/certdeploy-admin.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now certdeploy-admin
@@ -433,6 +434,47 @@ sudo cp /opt/cert-monitor/src/certdeploy/systemd/certdeploy-renew.* /etc/systemd
 ```
 수동 DNS 방식(`dns.mode: manual`)은 갱신 시점에 타이머가 TXT 안내 메일을 보내고 **종료 코드 4(대기, 오류 아님)** 로 끝나 서비스가 `failed` 로 표시될 수 있다 — TXT 를 등록하면 다음 실행에서 자동으로 이어진다. 상용 인증서를 수동으로 가져오는 방식(`csr`→`import`)만 쓰면 타이머가 필요 없다. 만료 임박은 감시 스택 알림(60/30/14/7일)이 알려 주고, 갱신 때 9단계를 반복한다(유효기간이 단축되므로 장기적으로는 [자동 발급](auto-issue.md)으로 전환).
 **업그레이드**: `cd /opt/cert-monitor/src && git pull` → 감시는 `docker compose pull && docker compose up -d`, certdeploy 는 `sudo /opt/certdeploy/venv/bin/pip install --upgrade /opt/cert-monitor/src` 후 관리자 화면 재시작 `sudo systemctl restart certdeploy-admin`.
+
+## 10-1. 인증서 자동 탐색 (미등록 인증서 찾기, 읽기 전용)
+등록해 둔 서버만 감시하면 **잊힌 서버·임의로 세운 서버의 인증서**는 만료될 때까지 모른다. `certdeploy-discover` 는 지정한 대역(CIDR)과 호스트명 목록의 TLS 포트(기본 443·8443·9443·8444·993·636)에 접속해 인증서만 읽고, 감시 대상(`targets/*.yml`)에 **없는 것**과 **위험한 것**(만료·30일 이내·자체서명·약한 키/서명·구형 TLS·이름 불일치)을 표시한다. 서버에 아무 것도 설치·변경하지 않는다(접속·핸드셰이크만, 데이터 전송 없음).
+
+> ⚠️ 조사 대역은 **전산실이 관리하는 대역만** 넣는다. 사설 대역이 아니면 `--allow-public` 없이는 거부된다. 포트 스캔은 보안 장비(IDS)에 탐지될 수 있으니 보안 담당에게 시간·대역을 사전 공유한다.
+
+```bash
+sudo -u certdeploy /opt/certdeploy/venv/bin/certdeploy-discover --cidr 10.10.0.0/24 --port 443,8443 --emit-targets /var/lib/certdeploy/discovery-new-targets.yml
+```
+- 결과는 화면과 `/var/lib/certdeploy/discovery.json` 에 남고, 다음 실행 때 **새로 나타남/사라짐/인증서 교체**를 비교해 보여 준다.
+- `--emit-targets` 파일은 미등록 인증서를 감시 대상 형식으로 만든 **후보**다. 담당자·서비스 레이블을 확인해 `prometheus/targets/servers.yml` 에 직접 옮긴다(자동 반영은 하지 않음). IP 만 알려진 항목은 호스트명으로 바꿔야 올바른 인증서(SNI)가 조회된다.
+- 호스트명 목록(`--names-file`, Infoblox 내보내기 등)을 주면 IP 스캔으로 못 찾는 가상호스트(SNI)도 조회한다.
+- 매주 자동 실행: 설치 스크립트에 `--discover-cidr 10.10.0.0/24,10.20.0.0/24` 를 주었거나, 수동으로 `certdeploy/discovery.example.yml` 을 `/etc/certdeploy/discovery.yml` 로 복사·수정한 뒤:
+```bash
+sudo cp /opt/cert-monitor/src/certdeploy/systemd/certdeploy-discover.service /opt/cert-monitor/src/certdeploy/systemd/certdeploy-discover.timer /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now certdeploy-discover.timer
+```
+- Pushgateway 로 지표를 보내면(설정의 `pushgateway`) 미등록 인증서가 1시간 넘게 남아 있을 때 `CertDiscoveryUnregistered`(경고), 만료 인증서 발견 시 `CertDiscoveryExpiredFound`, 열흘 넘게 실행되지 않으면 `CertDiscoveryNotRunning` 알림이 나간다.
+- 한계: 로컬 TLS 서버로만 시험했다. 실제 대역 스캔의 소요 시간·IDS 반응·방화벽 차단은 현장에서 확인해야 한다(처음에는 /24 하나, `--concurrency 16` 정도로 시작).
+
+## 10-2. 배포 승인 단계 (갱신본을 서버에 반영하기 전에 담당자 승인)
+자동 갱신·배포를 쓰더라도 **실서버에 반영하기 전에 사람이 확인**하게 할 수 있다. 설정 파일(`certdeploy.yml`)에 정책을 추가한다(최상위 = 모든 인증서, 인증서 항목 안 = 그 인증서만):
+```yaml
+approval:
+  required: true      # 승인 필요
+  approvers: 2        # 필요한 승인자 수(1~3). 2 이상이면 서로 다른 사람
+  ttl_hours: 72       # 요청 유효 시간. 지나면 만료되어 다음 점검 때 새 요청이 생김
+  self_approval: false  # 요청한 사람이 직접 승인 가능한지(수동 deploy 실행자 기준; 타이머가 만든 요청은 해당 없음)
+```
+- **동작**: 갱신 타이머(또는 `deploy`)가 새 인증서를 발견하면 배포하지 않고 **승인 요청**을 만든다(메일·Alertmanager 알림, 종료 코드 5 = 대기 중, 오류 아님). 승인이 모이면 다음 점검 때 자동 배포되거나 `certdeploy deploy` 로 즉시 배포된다.
+- **승인 방법**: 관리자 화면 「발급·배포 설정」→「배포 승인」의 승인/반려 버튼(승인자는 로그인한 관리자 계정), 또는 서버에서:
+```bash
+sudo -u certdeploy /opt/certdeploy/venv/bin/certdeploy -c /etc/certdeploy/certdeploy.yml approvals
+```
+```bash
+sudo -u certdeploy /opt/certdeploy/venv/bin/certdeploy -c /etc/certdeploy/certdeploy.yml approve 요청ID --by 홍길동 --comment "확인함"
+```
+  반려는 `reject 요청ID --reason ...`, 반려·만료 후 다시 요청은 `approval-request`.
+- **안전 규칙**: 승인은 **그 인증서(지문)에만** 유효하다(다른 인증서가 오면 새 승인 필요). 롤백과 `--dry-run` 은 승인 대상이 아니다. 이미 배포된 인증서의 재실행은 승인을 다시 요구하지 않는다.
+- **긴급 우회**: 만료 임박 등으로 승인을 기다릴 수 없을 때 `certdeploy deploy --emergency "사유"`(서버 접속 권한 필요). 감사 로그(`approval_bypass`)와 알림에 남는다.
+- **감시**: 승인 대기 1일 초과 경고(`CertDeployApprovalPending`), 3일 초과 치명(`CertDeployApprovalPendingLong`), 승인 후 하루 넘게 미반영 경고(`CertDeployApprovedNotApplied`). 승인 대기는 인증서 만료 알림과 별개이므로 **만료가 가까우면 승인을 우선 처리**한다.
+- 한계: 로컬 대상·TLS 확인이 없는 환경에서만 시험했다. 실제 SSH 대상·WAF 배포와의 조합은 VM 시험 T-24 에서 확인한다.
 
 ## 11. 시험·버그 수집
 시험은 [테스트 시나리오](test-scenarios.md) T-01~T-22 순서로 수행하고 결과표를 채운다. 문제가 생기면:

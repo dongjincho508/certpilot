@@ -12,6 +12,8 @@ Group=certdeploy
 EnvironmentFile=-/etc/certdeploy/env
 ExecStart=/opt/certdeploy/venv/bin/certdeploy -c /etc/certdeploy/certdeploy.yml renew
 TimeoutStartSec=30min
+# 5 = 담당자 승인 대기 중(오류 아님), 4 = DNS TXT 등록 대기 중
+SuccessExitStatus=4 5
 # 하드닝: 필요한 경로만 쓰기 허용
 NoNewPrivileges=true
 PrivateTmp=true

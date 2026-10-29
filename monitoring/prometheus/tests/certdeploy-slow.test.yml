@@ -109,3 +109,35 @@ tests:
             exp_annotations:
               summary: "수동 교체 대기 3일 초과: hnu/new-pending"
               description: "new-pending 장비의 인증서 수동 교체가 3일 넘게 지연되고 있습니다. 만료 전에 교체되도록 담당자를 확인하세요."
+
+  - name: 배포 승인 - 1일 초과 대기는 경고, 3일 초과는 치명, 승인 후 해소
+    interval: 1h
+    input_series:
+      - series: 'certdeploy_approval_pending{cert="hnu"}'
+        values: '1x100 0x20'
+      - series: 'certdeploy_approval_pending_since_timestamp_seconds{cert="hnu"}'
+        values: '0+0x120'
+    alert_rule_test:
+      - eval_time: 12h
+        alertname: CertDeployApprovalPending
+        exp_alerts: []
+      - eval_time: 26h
+        alertname: CertDeployApprovalPending
+        exp_alerts:
+          - exp_labels: {severity: warning, cert: hnu}
+            exp_annotations:
+              summary: "배포 승인 대기 1일 초과: hnu"
+              description: "hnu 인증서 갱신본의 배포 승인이 하루 넘게 대기 중입니다. 관리자 화면 '발급·배포 설정' 또는 `certdeploy approve` 로 승인/반려하세요."
+      - eval_time: 26h
+        alertname: CertDeployApprovalPendingLong
+        exp_alerts: []
+      - eval_time: 75h
+        alertname: CertDeployApprovalPendingLong
+        exp_alerts:
+          - exp_labels: {severity: critical, cert: hnu}
+            exp_annotations:
+              summary: "배포 승인 대기 3일 초과: hnu"
+              description: "hnu 의 승인이 3일 넘게 지연되고 있습니다. 승인 요청은 유효 시간이 지나면 만료되고 갱신본이 배포되지 않습니다."
+      - eval_time: 110h
+        alertname: CertDeployApprovalPending
+        exp_alerts: []

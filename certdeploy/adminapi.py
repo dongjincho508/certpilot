@@ -10,7 +10,7 @@ from typing import Optional
 
 import yaml
 
-from . import settings as st
+from . import approval, settings as st
 from .bundle import BundleError, load_bundle
 from .config import ConfigError, parse_config
 from .manual import ManualError, convert_key_file, rekey_file
@@ -179,3 +179,43 @@ def mail_test(config_path: Optional[str], payload: Optional[dict] = None, smtp_f
     except MailTestError as e:
         return {"ok": False, "message": str(e)}
     return {"ok": True, "message": f"시험 메일을 보냈습니다: {', '.join(scfg.to)} (수신함을 확인하세요)"}
+
+
+# ------------------------------------------------------------------ 배포 승인
+def approvals(config_path: Optional[str]) -> dict:
+    """인증서별 승인 정책과 대기·최근 요청(화면용)"""
+    cfg = _yaml_cfg(config_path)
+    out = []
+    for cs in cfg.certs:
+        try:
+            reqs = approval.list_requests(cs.state_dir, include_closed=True)
+        except approval.ApprovalError as e:
+            raise AdminError(str(e), 500)
+        reqs = [r for r in reqs if r.get("cert", cs.name) == cs.name][-10:]
+        out.append({"cert": cs.name, "policy": cs.approval, "requests": list(reversed(reqs))})
+    return {"certificates": out}
+
+
+def decide(config_path: Optional[str], req_id: str, decision: str, actor: str, comment: str = "") -> dict:
+    """화면에서 승인/반려. 승인자는 로그인한 관리자 계정(스스로 입력한 이름이 아님)"""
+    if decision not in ("approve", "reject"):
+        raise AdminError("decision 은 approve 또는 reject 여야 합니다")
+    cfg = _yaml_cfg(config_path)
+    cs = next((c for c in cfg.certs if any(r["id"] == req_id for r in approval.list_requests(c.state_dir, include_closed=True))), None)
+    if not cs:
+        raise AdminError("승인 요청을 찾을 수 없습니다", 404)
+    try:
+        r = approval.approve(cs.state_dir, req_id, actor, comment) if decision == "approve" else approval.reject(cs.state_dir, req_id, actor, comment)
+    except approval.ApprovalError as e:
+        raise AdminError(str(e))
+    try:                                   # 지표·알림 정리는 실패해도 승인 결과에 영향이 없다
+        from .notify import build_notifier
+        from .runlog import push_metrics
+        if cs.notify.pushgateway_url:
+            pw = os.environ.get(cs.notify.pushgateway_password_env or "") if cs.notify.pushgateway_password_env else None
+            push_metrics(cs.notify.pushgateway_url, cs.name, approval.metrics_text(cs.name, cs.state_dir), cs.notify.pushgateway_user, pw)
+        if r["status"] in ("approved", "rejected"):
+            build_notifier(cs.notify).resolve(f"approval:{cs.name}")
+    except Exception:  # noqa: BLE001
+        pass
+    return {"cert": cs.name, "request": r}

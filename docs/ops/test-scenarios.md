@@ -288,6 +288,20 @@ $CD --cert hnu deploy --force --target hnu-web-canary
 - **증거**: 화면 캡처(비밀번호 가림), `validate` 출력, `ls -l /var/lib/certdeploy/hnu/managed/`
 - **실패 시**: `journalctl -u certdeploy-admin -n 50`, 화면의 오류 메시지·요청 ID, `$CD diagnose --out`
 
+### T-23 관리자 화면 2단계 인증(TOTP) — 등록·로그인·복구 코드·초기화
+- **사전조건**: 관리자 화면 로그인 가능, 휴대폰에 인증 앱(Google/Microsoft Authenticator 등), 시험용 운영자 계정 1개
+- **절차**: ① 우측 상단 계정 메뉴 → 「2단계 인증」 → 비밀번호 입력 → 「등록 시작」 → 앱에서 **키 직접 입력(시간 기반)** 으로 표시된 설정 키 입력 → 앱의 6자리 코드 입력 → 「켜기」 → **복구 코드 10개 표시(한 번뿐) 저장** ② 로그아웃 후 재로그인: 비밀번호 입력 시 코드 칸이 나타나고 앱 코드로 로그인됨 ③ 같은 코드를 30초 안에 다시 쓰면 거부됨(재사용 방지) ④ 복구 코드 1개로 로그인(같은 코드는 두 번 쓸 수 없음) ⑤ 관리자가 운영자 계정의 「2단계 인증 초기화」 → 그 계정 세션이 끊기고 다음 로그인은 비밀번호만으로 가능 ⑥ (선택) `CERTPILOT_REQUIRE_MFA=1` 로 서비스 재시작 → 미등록 계정은 로그인 후 등록 창만 열리고 다른 기능은 403
+- **기대**: 위 동작대로. 틀린 코드 5회 시 계정 잠금(15분). 감사 로그에 `mfa_enable`·`mfa_disable`·`mfa_reset` 이 남고 설정 키·복구 코드는 없음. 서버 시간이 틀리면 코드가 계속 거부됨(`chronyc tracking` 확인)
+- **증거**: 화면 캡처(설정 키·복구 코드 가림), 감사 로그 화면
+- **실패 시**: 코드가 항상 틀림 → 서버·휴대폰 시간 차이(±30초 허용), `journalctl -u certdeploy-admin -n 50`. `/var/lib/certdeploy-admin/mfa.key` 를 잃으면 등록된 2단계 인증을 복호화할 수 없으므로 관리자가 계정별로 초기화해야 함
+
+### T-24 배포 승인 단계 — 대기·승인·반려·긴급 우회
+- **사전조건**: 설정 파일에 `approval: {required: true, approvers: 2}` (시험은 카나리 대상 1대만 있는 인증서로), 관리자 화면 관리자 계정 2개
+- **절차**: ① `$CD --cert hnu deploy --dry-run` → "실제 배포 시에는 승인이 필요합니다" 출력, 요청은 생기지 않음 ② `$CD --cert hnu deploy --force` → 종료 코드 5, 대상 서버 인증서는 **바뀌지 않음**, 승인 요청 알림 도착 ③ 관리자 화면 「배포 승인」에서 관리자 A 승인(1/2) → 같은 계정으로 다시 승인 불가 → 관리자 B 승인(2/2) ④ `$CD --cert hnu deploy` → 배포 성공, 요청 상태 「배포 완료」 ⑤ 다른 인증서로 교체 후 요청이 새로 생기고 이전 승인은 효력 없음 ⑥ 반려 → `deploy` 가 계속 보류, `approval-request` 로 재요청 ⑦ `$CD --cert hnu deploy --emergency "시험"` → 승인 없이 배포, 감사 로그 `approval_bypass`
+- **기대**: 위 동작대로. 감사 로그에 `approval_requested/approved/rejected/applied/bypass` 가 남고 Grafana·Prometheus 에 `certdeploy_approval_pending` 지표가 보임. 승인 대기 1일 초과 시 경고 알림(시험 시 규칙 임계를 낮춰 확인 가능)
+- **증거**: `$CD approvals --all` 출력, 화면 캡처, 알림 메일
+- **실패 시**: `$CD diagnose --out`, `/var/lib/certdeploy/.../approvals.json` 확인(승인자 이름·시각)
+
 ---
 ## 결과 기록표
 | ID | 일시 | 수행자 | 합격(O/X) | 증거 파일/링크 | 비고(실패 시 번들 경로) |
@@ -315,3 +329,5 @@ $CD --cert hnu deploy --force --target hnu-web-canary
 | T-21 | | | | | |
 | T-02a | | | | | |
 | T-22 | | | | | |
+| T-23 | | | | | |
+| T-24 | | | | | |

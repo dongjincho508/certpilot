@@ -25,3 +25,24 @@ tests:
               summary: "인증서 배포 실패 상태: wildcard/web-2"
               description: "certdeploy 마지막 실행에서 wildcard 인증서의 web-2 배포가 실패(또는 롤백)했습니다. `certdeploy report` 와 서버 로그를 확인하세요."
 
+  - name: 자동 탐색 - 미등록 인증서는 1시간 지속 시 발동, 0이면 무발동
+    interval: 1m
+    input_series:
+      - series: 'certdeploy_discovery_unregistered{job="certdeploy_discovery"}'
+        values: '2+0x90'
+      - series: 'certdeploy_discovery_expired{job="certdeploy_discovery"}'
+        values: '0+0x90'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: CertDiscoveryUnregistered
+        exp_alerts: []
+      - eval_time: 75m
+        alertname: CertDiscoveryUnregistered
+        exp_alerts:
+          - exp_labels: {severity: warning, job: certdeploy_discovery}
+            exp_annotations:
+              summary: "감시 대상에 없는 TLS 인증서 2개 발견"
+              description: "certdeploy-discover 가 등록되지 않은 인증서를 찾았습니다. 결과(discovery.json)와 --emit-targets 후보 파일을 확인해 감시 대상에 등록하거나 담당자에게 확인하세요."
+      - eval_time: 75m
+        alertname: CertDiscoveryExpiredFound
+        exp_alerts: []

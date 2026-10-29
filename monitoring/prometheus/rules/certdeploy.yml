@@ -68,3 +68,55 @@ groups:
         annotations:
           summary: "Pushgateway 중단"
           description: "Pushgateway 가 응답하지 않아 certdeploy 결과를 수집할 수 없습니다."
+
+      # 배포 승인 정책(approval.required)을 쓰는 인증서: 승인이 늦어지면 갱신본이 배포되지 않아 만료 위험이 커진다
+      - alert: CertDeployApprovalPending
+        expr: certdeploy_approval_pending > 0 and (time() - certdeploy_approval_pending_since_timestamp_seconds) > 86400
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "배포 승인 대기 1일 초과: {{ $labels.cert }}"
+          description: "{{ $labels.cert }} 인증서 갱신본의 배포 승인이 하루 넘게 대기 중입니다. 관리자 화면 '발급·배포 설정' 또는 `certdeploy approve` 로 승인/반려하세요."
+
+      - alert: CertDeployApprovalPendingLong
+        expr: certdeploy_approval_pending > 0 and (time() - certdeploy_approval_pending_since_timestamp_seconds) > 86400 * 3
+        for: 10m
+        labels: {severity: critical}
+        annotations:
+          summary: "배포 승인 대기 3일 초과: {{ $labels.cert }}"
+          description: "{{ $labels.cert }} 의 승인이 3일 넘게 지연되고 있습니다. 승인 요청은 유효 시간이 지나면 만료되고 갱신본이 배포되지 않습니다."
+
+      - alert: CertDeployApprovedNotApplied
+        expr: certdeploy_approval_approved_waiting > 0
+        for: 1d
+        labels: {severity: warning}
+        annotations:
+          summary: "승인되었으나 배포되지 않음: {{ $labels.cert }}"
+          description: "승인된 요청이 하루 넘게 반영되지 않았습니다. 갱신 타이머 상태나 `certdeploy deploy` 실행을 확인하세요."
+
+  # 자동 탐색(certdeploy-discover)이 Pushgateway 로 보내는 지표 — 감시 대상에 없는 인증서와 위험 인증서
+  - name: certdiscovery
+    rules:
+      - alert: CertDiscoveryUnregistered
+        expr: certdeploy_discovery_unregistered > 0
+        for: 1h
+        labels: {severity: warning}
+        annotations:
+          summary: "감시 대상에 없는 TLS 인증서 {{ $value }}개 발견"
+          description: "certdeploy-discover 가 등록되지 않은 인증서를 찾았습니다. 결과(discovery.json)와 --emit-targets 후보 파일을 확인해 감시 대상에 등록하거나 담당자에게 확인하세요."
+
+      - alert: CertDiscoveryExpiredFound
+        expr: certdeploy_discovery_expired > 0
+        for: 1h
+        labels: {severity: warning}
+        annotations:
+          summary: "만료된 인증서를 쓰는 엔드포인트 {{ $value }}개 발견"
+          description: "탐색 결과 이미 만료된 인증서가 있습니다(등록 여부 무관). certdeploy-discover 출력의 '만료' 표시 항목을 확인하세요."
+
+      - alert: CertDiscoveryNotRunning
+        expr: time() - certdeploy_discovery_last_run_timestamp_seconds > 86400 * 10
+        for: 30m
+        labels: {severity: info}
+        annotations:
+          summary: "인증서 자동 탐색이 열흘 넘게 실행되지 않음"
+          description: "주 1회 실행되는 certdeploy-discover.timer 가 멈췄을 수 있습니다."

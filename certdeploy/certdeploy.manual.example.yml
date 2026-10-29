@@ -64,3 +64,10 @@ certificates:
         key_path: /etc/ssl/hannam/privkey.pem
         reload_cmd: sudo -n systemctl reload httpd
         verify: {host: www.hannam.ac.kr, port: 443, strict: true}
+
+# (선택) 갱신본을 서버에 배포하기 전에 담당자 승인을 요구하려면 주석을 풀어 최상위(모든 인증서) 또는 인증서 항목 안에 둔다.
+# 설치 매뉴얼 10-2 참고. 승인 전에는 배포되지 않고 알림이 간다(종료 코드 5).
+# approval:
+#   required: true
+#   approvers: 2        # 서로 다른 2명
+#   ttl_hours: 72

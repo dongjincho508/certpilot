@@ -1,0 +1,15 @@
+# certdeploy-discover 설정 예시 → /etc/certdeploy/discovery.yml
+# 명령행 옵션과 같은 이름의 키를 쓴다. 읽기 전용 조사(접속·인증서 조회)이며 서버에 아무 것도 설치·변경하지 않는다.
+# 주의: 조사 대역은 반드시 전산실이 관리하는 대역만 넣는다(외부 대역은 --allow-public 없이는 거부됨).
+cidr:
+  - 10.10.0.0/24            # TODO: 서버 대역
+  - 10.20.0.0/24
+names_file: /etc/certdeploy/discovery-names.txt   # 선택: Infoblox 에서 내보낸 호스트명 목록(한 줄에 하나)
+port: ["443", "8443", "9443", "8444", "993", "636"]
+domain: ["hnu.kr", "hannam.ac.kr"]
+known: ["/opt/cert-monitor/src/monitoring/prometheus/targets/*.yml"]
+out: /var/lib/certdeploy/discovery.json
+emit_targets: /var/lib/certdeploy/discovery-new-targets.yml
+pushgateway: http://127.0.0.1:9091
+timeout: 3
+concurrency: 64
