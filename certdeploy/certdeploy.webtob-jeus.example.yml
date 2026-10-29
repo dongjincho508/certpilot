@@ -1,0 +1,36 @@
+# WebtoB / JEUS 자동 배포 예시 (SSH, 대상 서버에 에이전트 없음)
+# ⚠ 제품별 경로·재기동 명령·키스토어 비밀번호 설정은 서버마다 다르다. 아래 값은 공개 설치 가이드 기준의 예시이며 실제 환경에서는 아직 시험하지 못했다(시험 T-26).
+#   반드시 담당자가 현재 설정(http.m, JEUS 도메인 설정)과 제품 문서로 경로·명령을 확인해 고친다.
+state_dir: /var/lib/certdeploy
+certificate:
+  cert_file: /var/lib/certdeploy/managed/hnu.crt
+  key_file: /var/lib/certdeploy/managed/hnu.key
+targets:
+  - name: sso-webtob
+    type: webtob
+    transport: {kind: ssh, host: sso.univ.example, user: deploy, key_file: /var/lib/certdeploy/.ssh/id_ed25519, known_hosts: /var/lib/certdeploy/.ssh/known_hosts, sudo: true}
+    # http.m 의 *SSL 절이 가리키는 파일과 같은 경로(경로를 바꾸면 http.m 수정 + wscfl 재컴파일이 필요하므로 같은 경로를 쓰는 것이 안전)
+    cert_path: /opt/tmax/webtob/ssl/server.crt     # TODO: 서버 인증서만(cert_content: fullchain 으로 바꾸면 중간 CA 포함)
+    key_path: /opt/tmax/webtob/ssl/server.key      # TODO
+    chain_path: /opt/tmax/webtob/ssl/chain.crt     # TODO: 중간 CA(체인) 파일. 체인 파일을 따로 쓰지 않으면 이 줄 삭제
+    owner: webtob:webtob                           # TODO: WebtoB 를 실행하는 계정(그 계정이 키를 읽을 수 있어야 한다)
+    # 개인키에 패스프레이즈를 쓰는 경우에만(재기동 때 입력을 요구하거나 http.m 의 PassPhraseDialog 로 자동 입력). 쓰지 않으면 줄 삭제 → 평문 키(0600)
+    # password_env: WEBTOB_KEY_PASS
+    # key_format: traditional                      # traditional(RSA PRIVATE KEY, 구형 OpenSSL 호환·기본) | pkcs8
+    # 재기동 명령은 제품 문서로 확인한다. 공개 가이드 기준: 설정 변경 시 `wscfl -i http.m` 컴파일 후 wsdown → wsboot (재기동이 필요).
+    # 패스프레이즈가 있고 PassPhraseDialog 를 쓰지 않으면 wsboot 에서 입력을 기다려 멈추므로 자동화에 부적합.
+    check_cmd: "su - webtob -c 'cd $WEBTOBDIR/config && wscfl -i http.m'"      # TODO: 설정 컴파일(파일 경로가 그대로면 생략 가능: none)
+    reload_cmd: "su - webtob -c 'wsdown && wsboot'"                              # TODO: 실제 재기동 명령으로 교체
+    verify: {host: sso.univ.example, port: 443}
+    canary: true
+
+  - name: portal-jeus
+    type: jeus
+    transport: {kind: ssh, host: portal.univ.example, user: deploy, key_file: /var/lib/certdeploy/.ssh/id_ed25519, known_hosts: /var/lib/certdeploy/.ssh/known_hosts, sudo: true}
+    keystore_path: /opt/tmax/jeus/domains/jeus_domain/config/security/server.jks      # TODO: JEUS SSL 리스너가 읽는 키스토어
+    format: jks                                    # jks(기본, 발급 서버에 JDK keytool 필요) | pkcs12
+    password_env: JEUS_KS_PASS                     # 키스토어 비밀번호. JEUS 설정의 keypass 와 같아야 한다(다르면 JEUS 기동 실패)
+    alias: server                                  # TODO: 현재 키스토어의 별칭과 같게(다르면 JEUS 가 못 찾을 수 있음)
+    owner: jeus:jeus                               # TODO
+    reload_cmd: "none"                             # TODO: JEUS 에서 키스토어 변경을 적용하는 방법(재기동 여부 포함)을 제품 문서로 확인해 명령 지정
+    verify: {host: portal.univ.example, port: 8443}

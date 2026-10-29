@@ -38,7 +38,7 @@ def test_config_defaults_and_lego_derived_paths():
 
 @pytest.mark.parametrize("mutate,msg", [
     (lambda c: c["targets"][0].update(name="bad name!"), "name"),
-    (lambda c: c["targets"][0].update(type="iis"), "알 수 없는 type"),
+    (lambda c: c["targets"][0].update(type="bogus"), "알 수 없는 type"),
     (lambda c: c["targets"][0].pop("key_path"), "key_path"),
     (lambda c: c["targets"][0].update(cert_path="relative/path"), "절대 경로"),
     (lambda c: c["targets"][0].update(transport={"kind": "ssh", "host": "h"}), "host, user"),

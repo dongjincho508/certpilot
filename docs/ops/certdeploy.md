@@ -22,9 +22,13 @@
 | `nginx` | 위와 동일 | `nginx -t` / `systemctl reload nginx` |
 | `nodejs` | 위와 동일 | 없음 / **`reload_cmd` 필수** |
 | `tomcat` | `format: pkcs12\|jks\|pem` (키스토어는 `keystore_path`+`password_env`) | 없음 / **`reload_cmd` 필수** |
-| `generic` | `files:` 목록(content: cert/fullchain/chain/key/pkcs12/jks) — **WebtoB·JEUS 등** | `check_cmd`·`reload_cmd` 직접 지정 |
+| `webtob` | `cert_path`, `key_path`, 선택 `chain_path`·`owner`·`cert_content`, 개인키 패스프레이즈를 쓰면 `password_env`(+`key_format`) | `reload_cmd` 필수(`check_cmd` 선택) — 아래 WebtoB/JEUS 절 |
+| `jeus` | `keystore_path`, `format: jks\|pkcs12`, `password_env`, `alias`, `owner` | `reload_cmd` 필수 |
+| `generic` | `files:` 목록(content: cert/fullchain/chain/key/key_encrypted/key_encrypted_traditional/pkcs12/jks, 항목별 `owner`) — 그 밖의 제품 | `check_cmd`·`reload_cmd` 직접 지정 |
 
-IIS(Windows)는 자동 배포 대상이 아니다. [`deploy-iis.ps1`](../../certdeploy/deploy-iis.ps1) 초안을 수동/별도 자동화로 사용한다.
+**WebtoB / JEUS** (설정 예시 `certdeploy.webtob-jeus.example.yml`, 시험 T-26): 파일 형식·권한·소유자·패스프레이즈 키 생성·롤백은 자동화하지만 **재기동 명령은 제품 문서로 확인해 직접 적는다**(추측한 기본값을 두지 않음). 공개 설치 가이드 기준으로 WebtoB 는 `http.m` 의 `*SSL` 절이 가리키는 PEM 파일(개인키·서버 인증서·체인)을 바꾸고 `wscfl -i http.m` 컴파일 후 `wsdown`→`wsboot` 로 재기동하며, 개인키에 패스프레이즈가 있으면 `wsboot` 에서 입력을 요구한다(`PassPhraseDialog` 로 자동화 가능하나 보안 검토 필요). JEUS 는 SSL 리스너가 읽는 키스토어(JKS 등)와 설정의 `keypass` 가 있고, **재기동 없이 적용되는지는 확인하지 못했다** → `reload_cmd` 를 제품 문서로 정하고 모르면 `none` 으로 두고 수동 재기동. 참고: [SecureSign WebtoB 가이드](https://www.sslcert.co.kr/guides/Install/TmaxSoft-WebtoB-SSL-Certificate-Install), [써트코리아 WebtoB 가이드](https://kb.certkorea.co.kr/knowledgebase/webtob-%EC%9B%B9%ED%88%AC%EB%B9%84-ssl-%EC%84%A4%EC%B9%98-%EA%B0%80%EC%9D%B4%EB%93%9C/), [SecureSign JEUS 가이드](https://www.sslcert.co.kr/guides/TmaxSoft-JEUS-SSL-Certificate-Install), [JEUS 보안 관리 매뉴얼](https://www.tmaxsoft.com/upload/nas/technet/technet/upload/download/online/jeus/pver-20211006-000001/domain/chapter_domain_security.html) — 모두 버전이 다를 수 있다.
+
+IIS(Windows)는 `type: iis`(SSH+PowerShell, 에이전트 없음)로 자동 배포한다 — 설정 예시 `certdeploy.iis.example.yml`, 서버 준비는 설치 매뉴얼 8-1. **실제 Windows 에서는 미검증**(시험 T-25). SSH 를 열 수 없으면 `type: manual` + [`deploy-iis.ps1`](../../certdeploy/deploy-iis.ps1) 초안.
 
 ### 1-1. 추가 기능 요약
 | 구분 | 기능 | 설명 |
@@ -61,7 +65,7 @@ IIS(Windows)는 자동 배포 대상이 아니다. [`deploy-iis.ps1`](../../cert
 | 다중 인증서·백오프·preflight | ✅ 자동 테스트(가짜 lego, 로컬 셸). ⚠ 원격 sudo 허용 점검(`sudo -n -l`)은 실제 sudoers 환경에서 미시험 |
 | lego 호출 | ⚠ **명령 구성·실패 처리만 가짜 lego 로 시험.** 실제 lego 바이너리와 Infoblox 는 이 저장소 개발 환경에서 실행하지 못했다. 옵션·환경변수 이름·산출 파일명은 설치한 lego 로 확인(`lego --help`, `lego dnshelp -c infoblox`) |
 | 실제 Apache/Tomcat/WebtoB/JEUS 서버 | ❌ 미시험(해당 제품의 재로드 동작은 제품 문서로 확인, 아래 3-4) |
-| Windows/IIS | ❌ 자동화 안 함 |
+| Windows/IIS | ⚠ 가짜 Windows(PowerShell 출력을 흉내 내는 시험 장치)로 배포·복구·롤백 흐름만 시험. **실제 PowerShell 스크립트 실행은 미검증** |
 
 ## 3. 설치 (Rocky Linux 10, 발급 전용 서버)
 감시 VM 과 **분리된 서버**에 설치한다(개인키를 보관하므로 접근 계정 최소화).
@@ -211,7 +215,7 @@ lego/Infoblox 없이도 배포 자동화는 그대로 쓸 수 있다. 설정에�
 - 발급 서버에는 개인키가 모이므로 전용 서버, 접근 계정 최소화, 백업은 암호화, 와일드카드 키를 다수 서버에 복사하는 범위를 줄이는 것을 검토
 
 ## 8. 알려진 한계
-- IIS/Windows 자동 배포 없음, 로드밸런서·WAF·방화벽 장비 인증서는 해당 장비 방식으로 별도 교체
+- IIS 자동 배포는 SSH 가 가능한 Windows 만 대상(실제 Windows 미검증), 로드밸런서·WAF·방화벽 장비 인증서는 해당 장비 방식으로 별도 교체
 - 대상은 순차 배포(의도적: 한 대씩 확인해야 실패 시 영향이 한 대에 그침. 50대 이하 기준 문제 없음). 병렬 배포는 지원하지 않음
 - `verify.strict` 는 Python 의 엄격 X.509 검사(RFC 5280)를 사용한다 — AKI·KeyUsage 가 없는 구형 사설 CA 인증서는 `lenient_x509: true` 로 완화
 - lego 옵션·산출 파일명 규칙(`*` → `_`)은 lego 버전에 따라 달라질 수 있어 첫 실행에서 확인 필요
