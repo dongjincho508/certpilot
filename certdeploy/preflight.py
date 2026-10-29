@@ -75,6 +75,38 @@ def _check_manual(d, t, out: List[Check]) -> None:
             out.append(Check(t.name, "현재 TLS", False, str(e)))
 
 
+def _check_iis(d, t, out: List[Check]) -> None:
+    """IIS 대상: SSH 접속 → PowerShell/WebAdministration 확인 → 바인딩 존재와 현재 지문(읽기 전용)"""
+    from . import iisdeploy
+    try:
+        tr = d.transport_factory(t.transport)
+    except TransportError as e:
+        out.append(Check(t.name, "접속", False, str(e)))
+        return
+    try:
+        out.append(Check(t.name, "접속", True, "성공"))
+        r = tr.run(iisdeploy.command(t.iis), stdin=iisdeploy.build_inspect_script(t.iis).encode("utf-8"), timeout=60)
+        prev, done, ok, err = iisdeploy.parse_output(r.out)
+        if not ok:
+            out.append(Check(t.name, "IIS 바인딩", False, err or (r.err.strip().splitlines() or ["PowerShell 실행 실패"])[-1][:200]))
+        else:
+            for b in t.iis["bindings"]:
+                cur = prev.get(iisdeploy.binding_key(b), "")
+                out.append(Check(t.name, f"바인딩 {b['site']}:{b['port']}", True, f"현재 지문 {cur or '(없음)'}"))
+            if iisdeploy.thumbprint(d.bundle) in prev.values():
+                out.append(Check(t.name, "현재 바인딩", True, "이미 새 인증서에 연결되어 있음"))
+    except TransportError as e:
+        out.append(Check(t.name, "IIS 점검", False, str(e)))
+    finally:
+        tr.close()
+    if t.verify:
+        try:
+            got = d._tls(t)
+            out.append(Check(t.name, "현재 TLS", True, f"서빙 중 일련번호 {got:x}" + (" (이미 최신)" if got == d.bundle.serial else "")))
+        except Exception as e:  # noqa: BLE001
+            out.append(Check(t.name, "현재 TLS", False, f"{type(e).__name__}: {e}"))
+
+
 def _check_api(d, t, out: List[Check]) -> None:
     """API 대상: 관리 주소의 TCP/TLS 도달성만 확인한다(로그인·변경 요청은 보내지 않는다)."""
     import socket
@@ -121,6 +153,9 @@ def run_preflight(d: Deployer, only=None) -> List[Check]:
             continue
         if t.api:
             _check_api(d, t, out)
+            continue
+        if t.iis:
+            _check_iis(d, t, out)
             continue
         try:
             tr = d.transport_factory(t.transport)

@@ -34,7 +34,9 @@ def _target() -> dict:
     files = {"type": "array", "items": {"type": "object", "required": ["path", "content"], "properties": {
         "path": _PATH, "content": {"enum": list(CONTENT_KINDS)}, "mode": _S, "password_env": _S, "password_file": _PATH, "alias": _S, "legacy_pkcs12": _B}}}
     return {"type": "object", "required": ["name", "type"], "properties": {
-        "name": {"type": "string", "pattern": r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"}, "type": {"enum": list(TYPES) + ["http_api", "manual"]}, "api": _api(),
+        "name": {"type": "string", "pattern": r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"}, "type": {"enum": list(TYPES) + ["http_api", "manual", "iis"]}, "api": _api(),
+        "iis": {"type": "object", "additionalProperties": False, "required": ["bindings"], "properties": {"store": _S, "powershell": {"enum": ["powershell", "pwsh"]}, "legacy_pkcs12": _B,
+                "bindings": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["site"], "additionalProperties": False, "properties": {"site": _S, "port": _I, "host_header": _S, "ip": _S}}}}},
         "manual": {"type": "object", "properties": {"instructions": _S, "export_dir": _PATH, "formats": {"type": "array", "items": {"enum": ["pem", "pfx"]}},
                                                     "pfx_password_env": _S, "pfx_alias": _S, "remind_days": _I}},
         "transport": transport, "cert_path": _PATH, "key_path": _PATH, "keystore_path": _PATH, "format": {"enum": ["pkcs12", "jks", "pem"]},

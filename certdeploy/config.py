@@ -60,6 +60,7 @@ class Target:
     hook_env: List[str] = field(default_factory=list)   # 훅에 전달할 환경변수 이름(그 밖의 비밀은 전달하지 않는다)
     api: Optional[dict] = None        # type: http_api (웹방화벽·어플라이언스) 전용: HTTP 요청 단계 설정
     manual: Optional[dict] = None     # type: manual (자동화할 수 없는 장비) 전용: 교체용 파일 준비·안내·확인 설정
+    iis: Optional[dict] = None        # type: iis (Windows IIS; SSH+PowerShell) 전용: 바인딩·저장소 설정
 
 
 @dataclass
@@ -256,6 +257,23 @@ def _parse_target(raw, defaults, label_prefix, problems, seen) -> Optional[Targe
             return None
         return Target(name, "http_api", {"kind": "api"}, [], None, None, verify, int(raw.get("order", 100)), bool(raw.get("canary", False)),
                       None, raw.get("pre_cmd"), raw.get("post_cmd"), 0, 10, [str(x) for x in (raw.get("hook_env") or [])], api)
+    if raw.get("type") == "iis":
+        from .iisdeploy import validate_iis
+        iis = validate_iis(raw.get("iis"), label, problems)
+        tr = raw.get("transport") or {}
+        if tr.get("kind") != "ssh" or not tr.get("host") or not HOST_RE.match(str(tr.get("host", ""))) or not tr.get("user"):
+            problems.append(f"{label}: type: iis 는 ssh transport(host, user; Windows OpenSSH)가 필요합니다")
+        verify = None
+        if raw.get("verify"):
+            v = raw["verify"]
+            if not v.get("host"):
+                problems.append(f"{label}: verify.host 가 필요합니다")
+            else:
+                verify = Verify(v["host"], int(v.get("port", 443)), v.get("sni"), bool(v.get("strict", False)), v.get("ca_file"), bool(v.get("lenient_x509", False)))
+        if not iis:
+            return None
+        return Target(name, "iis", tr, [], None, None, verify, int(raw.get("order", 100)), bool(raw.get("canary", False)),
+                      None, raw.get("pre_cmd"), raw.get("post_cmd"), 0, 10, [str(x) for x in (raw.get("hook_env") or [])], None, None, iis)
     tr = raw.get("transport") or {"kind": "local"}
     kind = tr.get("kind")
     if kind == "ssh":

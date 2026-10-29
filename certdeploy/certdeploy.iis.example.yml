@@ -1,0 +1,24 @@
+# Windows IIS 자동 배포 예시 (SSH + PowerShell, 대상 서버에 에이전트 설치 없음)
+# 대상 Windows 준비: 설치 매뉴얼 8-1(OpenSSH Server, 배포용 계정, 관리 도구 기능). 실제 Windows 에서는 아직 시험하지 못했다 → 시험 T-25.
+state_dir: /var/lib/certdeploy
+certificate:
+  cert_file: /var/lib/certdeploy/managed/hnu.crt
+  key_file: /var/lib/certdeploy/managed/hnu.key
+targets:
+  - name: intra-iis
+    type: iis
+    transport:
+      kind: ssh
+      host: intra.univ.example          # TODO: IIS 서버
+      user: certdeploy                  # TODO: Windows 로컬 관리자 그룹의 배포용 계정
+      key_file: /var/lib/certdeploy/.ssh/id_ed25519
+      known_hosts: /var/lib/certdeploy/.ssh/known_hosts
+    iis:
+      bindings:                         # 이미 https 바인딩이 있는 사이트만 지정(없는 바인딩은 만들지 않고 실패한다)
+        - {site: "Default Web Site", port: 443}
+        - {site: "Portal", port: 443, host_header: "portal.univ.example"}    # SNI 바인딩
+      store: My                         # LocalMachine\My (기본)
+      # powershell: powershell          # PowerShell 7 이면 pwsh
+      # legacy_pkcs12: true             # 구형 Windows 호환 PFX(기본 true). 최신 Windows 만 있으면 false 가능
+    verify: {host: intra.univ.example, port: 443}
+    canary: true

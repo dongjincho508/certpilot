@@ -93,3 +93,14 @@ def sandbox(tmp_path):
             f.symlink_to(target)
 
     return Box()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_trace():
+    """진단 추적기는 프로세스 전역이라, 앞선 시험이 설정한 파일 경로·작업 ID 가 다음 시험에 새지 않게 매번 초기화한다."""
+    from certpilot_core import trace
+    trace.TRACER.clear()
+    trace.TRACER.configure(path="", echo=None)
+    trace.run_id_var.set(None)
+    yield
+    trace.TRACER.configure(path="", echo=None)

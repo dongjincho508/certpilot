@@ -16,7 +16,7 @@ from typing import Callable, List, Optional
 
 from certpilot_core import trace
 
-from . import apideploy, remote
+from . import apideploy, iisdeploy, remote
 from .bundle import Bundle, BundleError
 from .config import Config, Target
 from .handlers import FileSpec
@@ -107,6 +107,10 @@ class Deployer:
                 m = t.manual
                 lines.append(f"    수동 교체: 교체용 파일({', '.join(m['formats'])})을 {m['export_dir'] or self.state.dir + '/handoff/' + t.name} 에 준비하고 알림 — 담당자가 장비에서 교체")
                 lines.append(f"    확인: {('%s:%d' % (t.verify.host, t.verify.port)) if t.verify else '없음 — 교체 후 certdeploy confirm --target ' + t.name}")
+                continue
+            if t.iis:
+                lines += iisdeploy.plan_lines(t.iis)
+                lines.append(f"    확인: {('%s:%d' % (t.verify.host, t.verify.port)) if t.verify else '없음(TLS 확인을 하지 않음)'}")
                 continue
             if t.api:
                 lines += apideploy.plan_lines(t.api)
@@ -318,6 +322,8 @@ class Deployer:
                 return TargetResult(t.name, "failed", msg, before)
         if t.api:
             return self._deploy_api(t, before)
+        if t.iis:
+            return self._deploy_iis(t, before)
         ts = self.clock().strftime("%Y%m%d%H%M%S")
         installed: List[remote.Installed] = []
         transport: Optional[Transport] = None
@@ -395,6 +401,85 @@ class Deployer:
         self.state.save()
         self.notifier.fire(t.name, f"인증서 배포 실패: {t.name}", msg, "critical")
         return TargetResult(t.name, status, msg + self._post_hook(t, status), before)
+
+    def _iis_run(self, t: Target, transport: Transport, script: str):
+        r = transport.run(iisdeploy.command(t.iis), stdin=script.encode("utf-8"), timeout=max(120, self.cfg.options.command_timeout))
+        prev, done, ok, err = iisdeploy.parse_output(r.out)
+        if r.rc != 0 or not ok:
+            detail = err or (r.err.strip().splitlines() or ["원격 PowerShell 이 비정상 종료했습니다"])[-1][:200]
+            return prev, done, False, detail
+        return prev, done, True, None
+
+    def _deploy_iis(self, t: Target, before) -> TargetResult:
+        """Windows IIS: PFX 를 stdin 으로 전달해 저장소에 가져오고 바인딩 연결 → TLS 일련번호 확인 → 실패 시 이전 지문으로 복구."""
+        new, iis = self.bundle.serial, t.iis
+        thumb = iisdeploy.thumbprint(self.bundle)
+        transport, prev, done, reason = None, {}, [], None
+        try:
+            with trace.span("deploy", "connect", target=t.name, kind="ssh", host=t.transport.get("host"), iis=True):
+                transport = self.transport_factory(t.transport)
+            pw = iisdeploy.new_password()
+            pfx = self.bundle.pkcs12(pw, "server", legacy=iis["legacy_pkcs12"])
+            script = iisdeploy.build_deploy_script(iis, pfx, pw, thumb)
+            with trace.span("deploy", "iis_bind", target=t.name, thumbprint=thumb, bindings=len(iis["bindings"])) as ctx:
+                prev, done, ok, err = self._iis_run(t, transport, script)
+                ctx.update(ok=ok, changed=len(done))
+            if not ok:
+                raise DeployFailure(f"IIS 바인딩 실패: {err}")
+            self._verify_new(t)
+            self._health_and_soak(t)
+        except (DeployFailure, TransportError, BundleError) as e:
+            reason = str(e)
+        rolled, problem = False, ""
+        if reason is not None:
+            trace.event("deploy", "failure", "error", target=t.name, reason=reason, iis=True)
+            changed = {k: prev.get(k, "") for k in done}
+            if changed and transport is not None:
+                try:
+                    _, _, ok, err = self._iis_run(t, transport, iisdeploy.build_rollback_script({**iis, "bindings": [b for b in iis["bindings"] if iisdeploy.binding_key(b) in changed]}, changed))
+                    rolled = ok
+                    if not ok:
+                        problem = f" / 롤백도 실패({err}) — 수동 조치 필요(IIS 관리자에서 바인딩의 인증서를 이전 것으로 지정)"
+                except (TransportError, iisdeploy.IisError) as e:
+                    problem = f" / 롤백도 실패({e}) — 수동 조치 필요"
+            elif not changed:
+                problem = ""               # 바인딩이 바뀌기 전에 실패 — 되돌릴 것이 없다
+        if transport is not None:
+            transport.close()
+        if reason is None:
+            self.state.set_target(t.name, serial=f"{new:x}", deployed_at=self.clock().isoformat(), status="ok", error="",
+                                  iis_prev=prev, iis_thumbprint=thumb)
+            self.state.save()
+            self.notifier.resolve(t.name)
+            return TargetResult(t.name, "deployed", ("배포·확인 완료" if t.verify else "배포 완료(TLS 확인은 설정 안 됨)") + self._post_hook(t, "deployed"), before)
+        status = "rolled_back" if rolled else "failed"
+        msg = reason + (" → 이전 인증서로 복구함" if rolled else "") + problem
+        self.state.set_target(t.name, status=status, error=msg, failed_at=self.clock().isoformat())
+        self.state.save()
+        self.notifier.fire(t.name, f"인증서 배포 실패: {t.name}", msg, "critical")
+        return TargetResult(t.name, status, msg + self._post_hook(t, status), before)
+
+    def _rollback_iis(self, t: Target) -> TargetResult:
+        rec = self.state.target(t.name)
+        prev = rec.get("iis_prev") or {}
+        if not prev or not any(prev.values()):
+            return TargetResult(t.name, "failed", "되돌릴 이전 인증서 지문 기록이 없습니다")
+        try:
+            transport = self.transport_factory(t.transport)
+        except TransportError as e:
+            return TargetResult(t.name, "failed", f"롤백 실패: {e}")
+        try:
+            script = iisdeploy.build_rollback_script(t.iis, prev)
+            _, _, ok, err = self._iis_run(t, transport, script)
+        except (TransportError, iisdeploy.IisError) as e:
+            return TargetResult(t.name, "failed", f"롤백 실패: {e}")
+        finally:
+            transport.close()
+        if not ok:
+            return TargetResult(t.name, "failed", f"롤백 실패: {err}")
+        self.state.set_target(t.name, status="rolled_back", error="수동 롤백", iis_prev={})
+        self.state.save()
+        return TargetResult(t.name, "rolled_back", "바인딩을 이전 인증서로 되돌림")
 
     def _rollback_api(self, t: Target) -> TargetResult:
         prev = apideploy.load_prev(self.state.dir, t.name, "previous")
@@ -525,6 +610,8 @@ class Deployer:
             return TargetResult(name, "failed", "수동 교체 대상은 자동 롤백하지 않습니다(장비에서 이전 인증서로 되돌리세요)")
         if t.api:
             return self._rollback_api(t)
+        if t.iis:
+            return self._rollback_iis(t)
         backups = self.state.target(name).get("backups") or []
         if not backups:
             return TargetResult(name, "failed", "되돌릴 백업 기록이 없습니다")

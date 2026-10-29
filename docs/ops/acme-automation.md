@@ -38,7 +38,7 @@
 ## 5. 배포와 서비스별 주의
 배포 엔진은 점검 → 재로드 → **TLS 로 새 인증서 확인** → 실패 시 자동 롤백 순서로 한 대씩 진행한다.
 - Apache/nginx/Node.js(PEM), Tomcat(PKCS#12·JKS·PEM)은 내장 유형, **WebtoB·JEUS 는 `generic` 유형으로 파일 목록과 명령을 직접 지정** — 제품 버전별 인증서 형식·재기동 방식은 벤더 문서로 확인해 설정에 채운다
-- IIS 는 자동 배포 대상이 아니다(`certdeploy/deploy-iis.ps1` 초안)
+- IIS 는 `type: iis`(SSH+PowerShell)로 자동 배포 가능(실제 Windows 미검증, 시험 T-25). SSH 불가 시 수동 교체(`certdeploy/deploy-iis.ps1` 초안)
 - 오래된 클라이언트(구형 Java, Android 7.1 이하 등)가 접속하는 서비스는 Let's Encrypt 루트 신뢰 여부를 사전 점검
 
 ## 6. 개인키 취급 원칙

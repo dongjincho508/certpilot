@@ -59,7 +59,7 @@
 | Apache httpd | PEM(`SSLCertificateFile`/`SSLCertificateKeyFile`/체인), `reload` |
 | Tomcat | PEM 직접 참조 또는 PKCS#12/JKS 변환. 버전에 따라 재로드 가능 여부 상이 |
 | WebtoB / JEUS | 제품 고유 설정. **벤더 문서·기존 설정 확인 후 진행** |
-| IIS | PFX 가져오기 → 바인딩 교체(`certdeploy/deploy-iis.ps1` 초안, certdeploy 자동 배포 대상 아님) |
+| IIS | PFX 가져오기 → 바인딩 교체. certdeploy `type: iis` 로 자동 배포 가능(미검증), 수동은 `certdeploy/deploy-iis.ps1` 초안 |
 | Node.js | PEM 교체 후 재시작(프록시 뒤라면 프록시 인증서만 교체) |
 | 로드밸런서/WAF | 해당 장비 콘솔에서 별도 교체(감시 대상에 장비 VIP 등록) |
 
