@@ -435,6 +435,23 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
                      "details": {"actor": g.user["username"], "changed": r["changed"], "messages": r["messages"]}})     # 비밀번호·암호는 기록하지 않는다
         return jsonify(r)
 
+    @app.get("/certdeploy/approvals")
+    @require(ADMIN)
+    def cd_approvals():
+        r = cd_call(lambda m: m.approvals(cfg.get("CERTDEPLOY_CONFIG")))
+        return r if isinstance(r, tuple) else jsonify(r)
+
+    @app.post("/certdeploy/approvals/<req_id>/<decision>")
+    @require(ADMIN)
+    def cd_decide(req_id, decision):
+        d = body()
+        r = cd_call(lambda m: m.decide(cfg.get("CERTDEPLOY_CONFIG"), req_id, decision, g.user["username"], str(d.get("comment", ""))[:200]))
+        if isinstance(r, tuple):
+            return r
+        audit.write({"event_type": f"approval_{decision}d" if decision == "approve" else "approval_rejected", "description": f"{r['cert']}/{req_id}",
+                     "details": {"actor": g.user["username"], "cert": r["cert"], "status": r["request"]["status"], "security": True}})
+        return jsonify(r)
+
     @app.post("/certdeploy/mail-test")
     @require(ADMIN)
     def cd_mail_test():

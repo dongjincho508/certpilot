@@ -120,6 +120,7 @@ class CertSet:
     acme: Optional[dict] = None       # 내장 ACME 클라이언트 설정(검증·기본값 적용 후)
     key_encryption: str = "none"      # none: 평문(권한 600) | passphrase: 저장본 개인키를 암호(key_password_env)로 보호
     key_passphrase: Optional[str] = None   # 관리자 화면(settings.json)에서 입력한 암호(있으면 환경변수보다 후순위)
+    approval: Optional[dict] = None   # 배포 승인 정책(approval.required 가 true 일 때만 설정됨)
 
 
 @dataclass
@@ -135,7 +136,7 @@ class Config:
         """인증서가 하나일 때 cfg.targets, cfg.cert_file 같은 접근을 그 인증서로 위임(하위 호환)."""
         if name == "certs":      # copy/pickle 중 속성이 아직 없을 때의 무한 재귀 방지
             raise AttributeError(name)
-        if name in ("cert_file", "key_file", "key_password_env", "targets", "lego", "acme", "name", "key_encryption", "key_passphrase") and len(self.certs) == 1:
+        if name in ("cert_file", "key_file", "key_password_env", "targets", "lego", "acme", "name", "key_encryption", "key_passphrase", "approval") and len(self.certs) == 1:
             return getattr(self.certs[0], name)
         raise AttributeError(name)
 
@@ -335,7 +336,7 @@ def _parse_acme(a, label, problems) -> Optional[dict]:
     return out
 
 
-def _parse_certset(spec, name, defaults, state_dir, options, notify, audit_dir, problems, multi) -> Optional[CertSet]:
+def _parse_certset(spec, name, defaults, state_dir, options, notify, audit_dir, problems, multi, approval_default=None) -> Optional[CertSet]:
     cert = spec.get("certificate") or {}
     lego = spec.get("lego")
     cert_file, key_file = cert.get("cert_file"), cert.get("key_file")
@@ -365,6 +366,8 @@ def _parse_certset(spec, name, defaults, state_dir, options, notify, audit_dir, 
             problems.append(f"[{name}] key_encryption: passphrase 에는 certificate.key_password_env(암호가 든 환경변수 이름)가 필요합니다")
         if lego:
             problems.append(f"[{name}] lego 엔진은 개인키를 평문으로 저장하므로 key_encryption: passphrase 와 함께 쓸 수 없습니다(내장 acme 또는 수동 import 사용)")
+    from .approval import parse_policy
+    approval = parse_policy(spec["approval"] if "approval" in spec else approval_default, f"[{name}]", problems)
     targets, seen = [], set()
     for i, raw in enumerate(spec.get("targets") or [], start=1):
         t = _parse_target(raw, defaults, f"[{name}] targets[{i}]", problems, seen)
@@ -373,7 +376,7 @@ def _parse_certset(spec, name, defaults, state_dir, options, notify, audit_dir, 
     if not spec.get("targets"):
         problems.append(f"[{name}] targets 가 비어 있습니다")
     return CertSet(name, cert_file or "", key_file or "", cert.get("key_password_env"), targets, options, notify,
-                   lego, cert_state, audit_dir, acme, key_enc if key_enc in ("none", "passphrase") else "none")
+                   lego, cert_state, audit_dir, acme, key_enc if key_enc in ("none", "passphrase") else "none", approval=approval)
 
 
 def parse_config(data: dict) -> Config:
@@ -405,11 +408,11 @@ def parse_config(data: dict) -> Config:
             if name in names:
                 problems.append(f"certificates: 이름이 중복됩니다: {name}")
             names.add(name)
-            cs = _parse_certset(spec, name, defaults, state_dir, options, notify, audit_dir, problems, True)
+            cs = _parse_certset(spec, name, defaults, state_dir, options, notify, audit_dir, problems, True, data.get("approval"))
             if cs:
                 certs.append(cs)
     else:
-        cs = _parse_certset(data, "default", defaults, state_dir, options, notify, audit_dir, problems, False)
+        cs = _parse_certset(data, "default", defaults, state_dir, options, notify, audit_dir, problems, False, data.get("approval"))
         if cs:
             certs.append(cs)
     if problems:

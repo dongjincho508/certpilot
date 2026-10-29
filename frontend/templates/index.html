@@ -132,6 +132,9 @@
                 <div class="card shadow-sm mb-3"><div class="card-header fw-semibold"><i class="bi bi-award me-1"></i>인증서 현황 · 개인키 보호</div>
                     <div class="card-body"><div class="small text-body-secondary mb-3">인증서별로 <strong>개인키 보호(암호 사용/사용 안 함)</strong>를 선택합니다. 사용을 선택하면 서버에 저장된 개인키 파일을 암호로 잠그고, 배포할 때만 메모리에서 풉니다(웹서버에 배포되는 키는 평문). 암호는 <strong>별도로 안전하게 보관</strong>하세요 — 잃으면 키를 복구할 수 없습니다.</div>
                         <div id="cd-certs" class="vstack gap-3"></div></div></div>
+                <div class="card shadow-sm mb-3" id="cd-approvals-card" hidden><div class="card-header fw-semibold"><i class="bi bi-patch-check me-1"></i>배포 승인</div>
+                    <div class="card-body"><div class="small text-body-secondary mb-3">승인 정책이 켜진 인증서는 갱신본을 서버에 배포하기 전에 담당자 승인이 필요합니다. 승인은 <strong>그 인증서에만</strong> 유효하며 기한이 지나면 만료됩니다. 승인 후 배포는 다음 갱신 점검 때 자동으로, 또는 서버에서 <code>certdeploy deploy</code> 로 즉시 반영됩니다.</div>
+                        <div id="cd-approvals" class="vstack gap-3"></div></div></div>
                 <div class="card shadow-sm mb-3"><div class="card-header fw-semibold"><i class="bi bi-envelope me-1"></i>메일 알림 <span id="cd-mail-source" class="badge text-bg-secondary ms-2"></span></div>
                     <form class="card-body" id="cd-mail-form" autocomplete="off"><div class="row g-3">
                         <div class="col-12"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" id="m-enabled" checked><label class="form-check-label" for="m-enabled">메일 알림 사용</label></div></div>

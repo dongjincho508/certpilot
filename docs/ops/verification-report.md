@@ -107,6 +107,7 @@
 | `tests/test_install_scripts.py` | 31 | 자동 설치 스크립트(문법·shellcheck·dry-run 무변경·입력 검증·비밀 미출력)·Alertmanager 렌더링(amtool)·Kickstart(ksvalidator RHEL10). **실제 Rocky 10 실행은 미검증** |
 | `tests/test_discover.py` | 25 | 자동 탐색(범위·가드, 인증서 해석, 분류, 실제 TLS 소켓 조회, 비교, CLI, 지표·알림 규칙). 실제 대역 스캔은 미검증 |
 | `tests/test_mfa.py` | 19 | 2단계 인증(RFC 6238 시험 벡터, 등록·로그인·재사용 방지·복구 코드·잠금·해제·초기화·정책 강제·암호화 저장·DB 이전·화면 연결). 실제 인증 앱과의 연동·브라우저 화면은 미검증 |
+| `tests/test_approval.py` | 34 | 배포 승인(정책 검증, 1·2인 승인, 요청자 제한, 반려·만료·대체, CLI 실제 배포 흐름, 긴급 우회, 감사, 관리자 화면 API, 알림 규칙). 실제 SSH 대상과의 조합은 미검증 |
 | `tests/test_pipeline_e2e.py` | 1 | 전 과정 시나리오(등록→발급→배포→지표→실패 주입→진단→복구) |
 
 ## 6. 재현 방법

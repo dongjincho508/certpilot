@@ -11,7 +11,7 @@ import yaml
 
 from certpilot_core import diag as cpdiag, trace
 
-from . import __version__, acme, diagnose as dg
+from . import __version__, acme, approval, diagnose as dg
 from .dnsprov import DnsProviderError, build_provider
 from .dnsquery import DnsError, system_resolvers
 from .backup import BackupError, create_backup, restore_backup
@@ -182,7 +182,76 @@ def plan(obj, only):
 
 
 # ------------------------------------------------------------------ 배포
-def _run_deploy(cfg, cs, bundle, force, dry_run, only, cont, action="deploy", issue_failures=0):
+EXIT_WAITING_APPROVAL = 5     # 담당자 승인을 기다리는 중(오류가 아님)
+
+
+def _whoami():
+    import getpass
+    try:
+        return getpass.getuser()
+    except Exception:  # noqa: BLE001
+        return "unknown"
+
+
+def _push_approval_metrics(cs):
+    if cs.notify.pushgateway_url:
+        pw = os.environ.get(cs.notify.pushgateway_password_env or "") if cs.notify.pushgateway_password_env else None
+        push_metrics(cs.notify.pushgateway_url, cs.name, approval.metrics_text(cs.name, cs.state_dir),
+                     cs.notify.pushgateway_user, pw)
+
+
+def _approval_audit(cs, event, req, extra=None):
+    if cs.audit_dir:
+        try:
+            from certpilot_core.audit_storage import AuditLogWriter
+            AuditLogWriter(cs.audit_dir, log_type="certdeploy").write({
+                "event_type": event, "description": f"{cs.name}/{req.get('id')}",
+                "details": {"actor": (extra or {}).get("actor", "certdeploy"), "cert": cs.name, "serial": req.get("serial"), **(extra or {})}})
+        except Exception as e:  # noqa: BLE001 — 감사 기록 문제가 승인 절차를 막지 않게 한다
+            click.echo(f"주의: 감사 로그 기록 실패({type(e).__name__})", err=True)
+
+
+def _approval_gate(cs, bundle, d, only, force, dry_run, action, emergency):
+    """배포 전 승인 확인. (진행 여부 코드, 승인 요청 또는 None) 반환 — 코드가 None 이면 계속 진행."""
+    policy = cs.approval
+    if not policy:
+        return None, None
+    # 실제로 바뀔 대상이 없으면(이미 배포됨) 승인 절차를 건드리지 않는다
+    if not force and all(r.status == "skipped" for r in d.deploy(dry_run=True, only=list(only) or None)):
+        return None, None
+    names = [t.name for t in cs.targets if not only or t.name in only]
+    if emergency and not dry_run:
+        rec = approval.record_bypass(cs.state_dir, cs.name, bundle, emergency, _whoami())
+        click.echo(f"[{cs.name}] ⚠ 승인 없이 긴급 배포합니다 — 사유: {emergency}")
+        d.notifier.fire(f"approval-bypass:{cs.name}", f"승인 우회 긴급 배포: {cs.name}",
+                        f"{_whoami()} 님이 승인 없이 긴급 배포했습니다. 일련번호 {bundle.serial:x}. 사유: {emergency}", "warning")
+        _approval_audit(cs, "approval_bypass", rec, {"actor": _whoami(), "reason": emergency, "security": True})
+        return None, None
+    g = approval.gate(cs.name, cs.state_dir, policy, bundle, names, action,
+                      requested_by=approval.SYSTEM if action == "renew" else _whoami(), create=not dry_run)
+    req = g.request
+    if req is None:                     # --dry-run: 요청은 만들지 않고 승인이 필요함만 알린다
+        click.echo(f"[{cs.name}] 실제 배포 시에는 승인이 필요합니다(승인 {policy['approvers']}명, 아직 요청 없음)")
+        return 0, None
+    if g.status == "approved":
+        if dry_run:
+            click.echo(f"[{cs.name}] 승인됨: 요청 {req['id']}")
+        return None, req
+    why = {"pending": f"승인 대기 {len(req['approvals'])}/{req['needed']}", "rejected": "반려됨"}[g.status]
+    click.echo(f"[{cs.name}] 배포 보류 — {why} (요청 {req['id']}, 일련번호 {req['serial']}, 만료 {req['not_after'][:10]})")
+    if g.status == "pending":
+        click.echo(f"  승인: certdeploy -c <설정> approve {req['id']} --by <이름>   (관리자 화면에서도 가능, 유효 {policy['ttl_hours']}시간)")
+    if g.created and not dry_run:
+        d.notifier.fire(f"approval:{cs.name}", f"인증서 배포 승인 요청: {cs.name}",
+                        f"새 인증서(일련번호 {req['serial']}, 만료 {req['not_after'][:10]})를 {', '.join(names)} 에 배포하려면 승인 {req['needed']}명이 필요합니다.\n"
+                        f"관리자 화면 '발급·배포 설정' 에서 승인하거나 `certdeploy approve {req['id']} --by 이름` 을 실행하세요. 유효 {policy['ttl_hours']}시간.", "warning")
+        _approval_audit(cs, "approval_requested", req, {"actor": req["requested_by"]})
+    if not dry_run:
+        _push_approval_metrics(cs)
+    return (0 if dry_run else EXIT_WAITING_APPROVAL), req
+
+
+def _run_deploy(cfg, cs, bundle, force, dry_run, only, cont, action="deploy", issue_failures=0, emergency=None):
     d = _deployer(cs, bundle)
     problems = d.validate_targets()
     if problems:
@@ -192,9 +261,20 @@ def _run_deploy(cfg, cs, bundle, force, dry_run, only, cont, action="deploy", is
     started = datetime.now(timezone.utc)
     try:
         with exclusive_lock(cs.state_dir):
+            blocked, req = _approval_gate(cs, bundle, d, only, force, dry_run, action, emergency)
+            if blocked is not None:
+                if dry_run:       # 계획 확인은 승인 여부와 무관하게 계속 보여준다
+                    pass
+                else:
+                    return blocked
             results = d.deploy(force=force, dry_run=dry_run, only=list(only) or None, continue_on_error=cont)
             code = _print_results(results)
             finish_run(cs, bundle, results, started, d.notifier, action=action, issue_failures=issue_failures)
+            if req and not dry_run and code == 0 and not only and req.get("status") == "approved":
+                approval.mark_applied(cs.state_dir, req["id"])
+                d.notifier.resolve(f"approval:{cs.name}")
+                _approval_audit(cs, "approval_applied", req, {"actor": "certdeploy"})
+                _push_approval_metrics(cs)
             return code
     except LockedError as e:
         click.echo(str(e), err=True)
@@ -206,14 +286,15 @@ def _run_deploy(cfg, cs, bundle, force, dry_run, only, cont, action="deploy", is
 @click.option("--dry-run", is_flag=True, help="계획만 확인")
 @click.option("--target", "only", multiple=True)
 @click.option("--continue-on-error", is_flag=True, help="실패해도 다음 대상 진행(기본은 중단)")
+@click.option("--emergency", metavar="사유", help="승인 정책을 우회하는 긴급 배포(사유 필수; 감사 로그·알림에 남음)")
 @click.pass_obj
-def deploy(obj, force, dry_run, only, continue_on_error):
-    """현재 인증서 파일을 모든 대상에 배포한다."""
+def deploy(obj, force, dry_run, only, continue_on_error, emergency):
+    """현재 인증서 파일을 모든 대상에 배포한다(승인 정책이 있으면 승인된 인증서만)."""
     cfg, sets = _sets(obj)
     codes = []
     for cs in sets:
         _hdr(cs, len(sets) > 1)
-        codes.append(_run_deploy(cfg, cs, _bundle(cs), force, dry_run, only, continue_on_error))
+        codes.append(_run_deploy(cfg, cs, _bundle(cs), force, dry_run, only, continue_on_error, emergency=emergency))
     sys.exit(_worst(codes))
 
 
@@ -427,6 +508,91 @@ def issue(obj, staging, no_deploy, ignore_backoff):
 def renew(obj, staging, no_deploy, force_deploy, ignore_backoff):
     """갱신(lego renew; 인증서가 없으면 최초 발급)하고 배포한다. 타이머로 주기 실행하는 명령."""
     _issue_all(obj, staging, False, no_deploy, force_deploy, ignore_backoff)
+
+
+# ------------------------------------------------------------------ 배포 승인
+def _find_request(sets, req_id):
+    for cs in sets:
+        for r in approval.list_requests(cs.state_dir, include_closed=True):
+            if r["id"] == req_id:
+                return cs, r
+    raise click.ClickException(f"승인 요청을 찾을 수 없습니다: {req_id}")
+
+
+@main.command()
+@click.option("--all", "show_all", is_flag=True, help="완료·반려·만료된 이력도 표시")
+@click.pass_obj
+def approvals(obj, show_all):
+    """배포 승인 요청 목록(대기 중 기본)."""
+    cfg, sets = _sets(obj)
+    n = 0
+    for cs in sets:
+        for r in approval.list_requests(cs.state_dir, include_closed=show_all):
+            n += 1
+            who = ", ".join(a["by"] for a in r["approvals"]) or "-"
+            click.echo(f"{r['id']}  [{approval.label(r['status'])}]  인증서 {r['cert']}  일련번호 {r.get('serial')}  승인 {len(r['approvals'])}/{r.get('needed', 0)} ({who})  "
+                       f"요청 {r['requested_at']} by {r['requested_by']}  유효 ~ {r.get('expires_at', '-')}")
+    if not n:
+        click.echo("대기 중인 승인 요청이 없습니다" if not show_all else "승인 이력이 없습니다")
+
+
+@main.command()
+@click.argument("request_id")
+@click.option("--by", default=None, help="승인자 이름(기본: 현재 OS 사용자)")
+@click.option("--comment", default="", help="승인 의견")
+@click.pass_obj
+def approve(obj, request_id, by, comment):
+    """배포 승인. 필요한 인원(approvers)이 모두 승인하면 다음 배포(타이머 또는 deploy)에서 반영된다."""
+    cfg, sets = _sets(obj)
+    cs, _ = _find_request(sets, request_id)
+    try:
+        r = approval.approve(cs.state_dir, request_id, by or _whoami(), comment)
+    except approval.ApprovalError as e:
+        raise click.ClickException(str(e))
+    _approval_audit(cs, "approval_approved", r, {"actor": by or _whoami(), "approvals": len(r["approvals"]), "needed": r["needed"]})
+    _push_approval_metrics(cs)
+    if r["status"] == "approved":
+        click.echo(f"승인 완료({len(r['approvals'])}/{r['needed']}). 즉시 반영하려면: certdeploy --cert {cs.name} deploy  (아니면 다음 갱신 점검 때 자동 반영)")
+        build_notifier(cs.notify).resolve(f"approval:{cs.name}")
+    else:
+        click.echo(f"승인 {len(r['approvals'])}/{r['needed']} — 다른 승인자가 더 필요합니다")
+
+
+@main.command()
+@click.argument("request_id")
+@click.option("--by", default=None)
+@click.option("--reason", default="", help="반려 사유")
+@click.pass_obj
+def reject(obj, request_id, by, reason):
+    """배포 승인 요청을 반려한다(이 인증서는 새 요청을 만들기 전까지 배포되지 않는다)."""
+    cfg, sets = _sets(obj)
+    cs, _ = _find_request(sets, request_id)
+    try:
+        r = approval.reject(cs.state_dir, request_id, by or _whoami(), reason)
+    except approval.ApprovalError as e:
+        raise click.ClickException(str(e))
+    _approval_audit(cs, "approval_rejected", r, {"actor": by or _whoami(), "reason": reason})
+    _push_approval_metrics(cs)
+    click.echo(f"반려했습니다: {request_id}")
+
+
+@main.command("approval-request")
+@click.pass_obj
+def approval_request(obj):
+    """반려·만료된 인증서에 대해 승인 요청을 다시 만든다."""
+    cfg, sets = _sets(obj)
+    for cs in sets:
+        if not cs.approval:
+            click.echo(f"[{cs.name}] 승인 정책이 없습니다")
+            continue
+        b = _bundle(cs)
+        g = approval.gate(cs.name, cs.state_dir, cs.approval, b, [t.name for t in cs.targets], "deploy", _whoami(), reopen=True)
+        click.echo(f"[{cs.name}] 요청 {g.request['id']} — {approval.label(g.request['status'])}")
+        if g.created:
+            build_notifier(cs.notify).fire(f"approval:{cs.name}", f"인증서 배포 승인 요청: {cs.name}",
+                                           f"일련번호 {g.request['serial']} 배포 승인이 필요합니다. certdeploy approve {g.request['id']}", "warning")
+            _approval_audit(cs, "approval_requested", g.request, {"actor": _whoami()})
+        _push_approval_metrics(cs)
 
 
 # ------------------------------------------------------------------ 운영 편의

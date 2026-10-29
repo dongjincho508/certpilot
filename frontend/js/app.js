@@ -392,6 +392,36 @@ async function loadCd() {
   }
   const box = $('cd-certs'); box.replaceChildren();
   o.certificates.forEach((c) => box.append(certCard(c)));
+  await loadApprovals();
+}
+const APPROVAL_LABEL = { pending: '승인 대기', approved: '승인됨(배포 대기)', applied: '배포 완료', rejected: '반려', expired: '만료', superseded: '새 인증서로 대체', bypassed: '긴급 우회' };
+async function loadApprovals() {
+  const { certificates } = await api('/certdeploy/approvals');
+  const used = certificates.filter((c) => c.policy);
+  $('cd-approvals-card').hidden = !used.length;
+  const box = $('cd-approvals'); box.replaceChildren();
+  used.forEach((c) => {
+    const wrap = el('div', null, 'border rounded p-3');
+    wrap.append(el('strong', c.cert), el('span', ` · 승인 ${c.policy.approvers}명 필요 · 유효 ${c.policy.ttl_hours}시간`, 'small text-body-secondary ms-2'));
+    if (!c.requests.length) wrap.append(el('div', '승인 요청 이력이 없습니다.', 'small text-body-secondary mt-2'));
+    c.requests.forEach((r) => {
+      const row = el('div', null, 'd-flex flex-wrap align-items-center gap-2 mt-2 small');
+      const open = r.status === 'pending';
+      row.append(el('span', APPROVAL_LABEL[r.status] || r.status, `badge ${open ? 'text-bg-warning' : r.status === 'approved' ? 'text-bg-info' : r.status === 'applied' ? 'text-bg-success' : 'text-bg-secondary'}`),
+        el('code', `일련번호 …${(r.serial || '').slice(-10)}`), el('span', `승인 ${r.approvals.length}/${r.needed} (${r.approvals.map((a) => a.by).join(', ') || '-'})`),
+        el('span', `요청 ${r.requested_at.slice(0, 16).replace('T', ' ')} · ${r.requested_by}`, 'text-body-secondary'));
+      if (open) {
+        const mine = r.approvals.some((a) => a.by === me.username);
+        const act = el('span', null, 'ms-auto d-flex gap-1');
+        act.append(btn(mine ? '승인함' : '승인', 'btn-outline-success', () => guarded(async () => { await api(`/certdeploy/approvals/${r.id}/approve`, 'POST', {}); toast('승인했습니다.'); loadApprovals(); }), 'bi-check2'),
+          btn('반려', 'btn-outline-danger', () => guarded(async () => { const reason = prompt('반려 사유(선택)') ; if (reason === null) return; await api(`/certdeploy/approvals/${r.id}/reject`, 'POST', { comment: reason }); toast('반려했습니다.'); loadApprovals(); }), 'bi-x'));
+        if (mine) act.firstChild.disabled = true;
+        row.append(act);
+      }
+      wrap.append(row);
+    });
+    box.append(wrap);
+  });
 }
 function certCard(c) {
   const card = el('div', null, 'border rounded p-3');

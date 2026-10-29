@@ -453,6 +453,29 @@ sudo cp /opt/cert-monitor/src/certdeploy/systemd/certdeploy-discover.service /op
 - Pushgateway 로 지표를 보내면(설정의 `pushgateway`) 미등록 인증서가 1시간 넘게 남아 있을 때 `CertDiscoveryUnregistered`(경고), 만료 인증서 발견 시 `CertDiscoveryExpiredFound`, 열흘 넘게 실행되지 않으면 `CertDiscoveryNotRunning` 알림이 나간다.
 - 한계: 로컬 TLS 서버로만 시험했다. 실제 대역 스캔의 소요 시간·IDS 반응·방화벽 차단은 현장에서 확인해야 한다(처음에는 /24 하나, `--concurrency 16` 정도로 시작).
 
+## 10-2. 배포 승인 단계 (갱신본을 서버에 반영하기 전에 담당자 승인)
+자동 갱신·배포를 쓰더라도 **실서버에 반영하기 전에 사람이 확인**하게 할 수 있다. 설정 파일(`certdeploy.yml`)에 정책을 추가한다(최상위 = 모든 인증서, 인증서 항목 안 = 그 인증서만):
+```yaml
+approval:
+  required: true      # 승인 필요
+  approvers: 2        # 필요한 승인자 수(1~3). 2 이상이면 서로 다른 사람
+  ttl_hours: 72       # 요청 유효 시간. 지나면 만료되어 다음 점검 때 새 요청이 생김
+  self_approval: false  # 요청한 사람이 직접 승인 가능한지(수동 deploy 실행자 기준; 타이머가 만든 요청은 해당 없음)
+```
+- **동작**: 갱신 타이머(또는 `deploy`)가 새 인증서를 발견하면 배포하지 않고 **승인 요청**을 만든다(메일·Alertmanager 알림, 종료 코드 5 = 대기 중, 오류 아님). 승인이 모이면 다음 점검 때 자동 배포되거나 `certdeploy deploy` 로 즉시 배포된다.
+- **승인 방법**: 관리자 화면 「발급·배포 설정」→「배포 승인」의 승인/반려 버튼(승인자는 로그인한 관리자 계정), 또는 서버에서:
+```bash
+sudo -u certdeploy /opt/certdeploy/venv/bin/certdeploy -c /etc/certdeploy/certdeploy.yml approvals
+```
+```bash
+sudo -u certdeploy /opt/certdeploy/venv/bin/certdeploy -c /etc/certdeploy/certdeploy.yml approve 요청ID --by 홍길동 --comment "확인함"
+```
+  반려는 `reject 요청ID --reason ...`, 반려·만료 후 다시 요청은 `approval-request`.
+- **안전 규칙**: 승인은 **그 인증서(지문)에만** 유효하다(다른 인증서가 오면 새 승인 필요). 롤백과 `--dry-run` 은 승인 대상이 아니다. 이미 배포된 인증서의 재실행은 승인을 다시 요구하지 않는다.
+- **긴급 우회**: 만료 임박 등으로 승인을 기다릴 수 없을 때 `certdeploy deploy --emergency "사유"`(서버 접속 권한 필요). 감사 로그(`approval_bypass`)와 알림에 남는다.
+- **감시**: 승인 대기 1일 초과 경고(`CertDeployApprovalPending`), 3일 초과 치명(`CertDeployApprovalPendingLong`), 승인 후 하루 넘게 미반영 경고(`CertDeployApprovedNotApplied`). 승인 대기는 인증서 만료 알림과 별개이므로 **만료가 가까우면 승인을 우선 처리**한다.
+- 한계: 로컬 대상·TLS 확인이 없는 환경에서만 시험했다. 실제 SSH 대상·WAF 배포와의 조합은 VM 시험 T-24 에서 확인한다.
+
 ## 11. 시험·버그 수집
 시험은 [테스트 시나리오](test-scenarios.md) T-01~T-22 순서로 수행하고 결과표를 채운다. 문제가 생기면:
 ```bash
