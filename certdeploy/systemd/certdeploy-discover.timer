@@ -1,0 +1,11 @@
+# /etc/systemd/system/certdeploy-discover.timer — 주 1회(일요일 새벽, 부하가 적은 시간)
+[Unit]
+Description=certdeploy 인증서 자동 탐색 주기
+
+[Timer]
+OnCalendar=Sun *-*-* 02:40:00
+RandomizedDelaySec=20m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

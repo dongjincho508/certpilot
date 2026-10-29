@@ -8,6 +8,7 @@ dependencies = ["flask>=2.3", "paramiko>=3.4", "cryptography>=42", "click>=8.1",
 [project.scripts]
 certpilot = "certpilot_cli.cli:main"
 certdeploy = "certdeploy.cli:main"
+certdeploy-discover = "certdeploy.discover_cli:main"
 
 [tool.setuptools]
 packages = ["certpilot_core", "certpilot_cli", "certpilot_api", "certdeploy"]

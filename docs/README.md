@@ -15,6 +15,7 @@
 | ④ 발급 | [자동 발급 가이드](ops/auto-issue.md) · [certdeploy](ops/certdeploy.md) | Let's Encrypt(DNS 연동/수동) 발급, 수동 와일드카드 가져오기, 명령 요약 |
 | ⑤ 호환성 | [호환성 가이드](ops/compatibility.md) | DNS 제공자 선택, 웹방화벽·어플라이언스(HTTP API) 배포, 확장 방법 |
 | ⑤-1 설정 화면 | [설치 매뉴얼 7-5](ops/vm-install-and-test.md) | 관리자 화면에서 메일 입력·인증서별 개인키 보호 선택 |
+| ⑤-2 자동 탐색 | [설치 매뉴얼 10-1](ops/vm-install-and-test.md) | `certdeploy-discover`: 대역을 스캔해 미등록·위험 인증서 찾기(읽기 전용, 주 1회 타이머, 알림) |
 | ⑥ 장애 | [디버깅 가이드](ops/debugging.md) | trace/diagnose, 버그 수집·전달 형식 |
 | ⑦ 교체 | [인증서 교체 체크리스트](ops/cert-rotation-checklist.md) | 11/12 만료 대응(기존 방식) 일정·절차 |
 

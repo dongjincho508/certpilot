@@ -434,6 +434,24 @@ sudo cp /opt/cert-monitor/src/certdeploy/systemd/certdeploy-renew.* /etc/systemd
 수동 DNS 방식(`dns.mode: manual`)은 갱신 시점에 타이머가 TXT 안내 메일을 보내고 **종료 코드 4(대기, 오류 아님)** 로 끝나 서비스가 `failed` 로 표시될 수 있다 — TXT 를 등록하면 다음 실행에서 자동으로 이어진다. 상용 인증서를 수동으로 가져오는 방식(`csr`→`import`)만 쓰면 타이머가 필요 없다. 만료 임박은 감시 스택 알림(60/30/14/7일)이 알려 주고, 갱신 때 9단계를 반복한다(유효기간이 단축되므로 장기적으로는 [자동 발급](auto-issue.md)으로 전환).
 **업그레이드**: `cd /opt/cert-monitor/src && git pull` → 감시는 `docker compose pull && docker compose up -d`, certdeploy 는 `sudo /opt/certdeploy/venv/bin/pip install --upgrade /opt/cert-monitor/src` 후 관리자 화면 재시작 `sudo systemctl restart certdeploy-admin`.
 
+## 10-1. 인증서 자동 탐색 (미등록 인증서 찾기, 읽기 전용)
+등록해 둔 서버만 감시하면 **잊힌 서버·임의로 세운 서버의 인증서**는 만료될 때까지 모른다. `certdeploy-discover` 는 지정한 대역(CIDR)과 호스트명 목록의 TLS 포트(기본 443·8443·9443·8444·993·636)에 접속해 인증서만 읽고, 감시 대상(`targets/*.yml`)에 **없는 것**과 **위험한 것**(만료·30일 이내·자체서명·약한 키/서명·구형 TLS·이름 불일치)을 표시한다. 서버에 아무 것도 설치·변경하지 않는다(접속·핸드셰이크만, 데이터 전송 없음).
+
+> ⚠️ 조사 대역은 **전산실이 관리하는 대역만** 넣는다. 사설 대역이 아니면 `--allow-public` 없이는 거부된다. 포트 스캔은 보안 장비(IDS)에 탐지될 수 있으니 보안 담당에게 시간·대역을 사전 공유한다.
+
+```bash
+sudo -u certdeploy /opt/certdeploy/venv/bin/certdeploy-discover --cidr 10.10.0.0/24 --port 443,8443 --emit-targets /var/lib/certdeploy/discovery-new-targets.yml
+```
+- 결과는 화면과 `/var/lib/certdeploy/discovery.json` 에 남고, 다음 실행 때 **새로 나타남/사라짐/인증서 교체**를 비교해 보여 준다.
+- `--emit-targets` 파일은 미등록 인증서를 감시 대상 형식으로 만든 **후보**다. 담당자·서비스 레이블을 확인해 `prometheus/targets/servers.yml` 에 직접 옮긴다(자동 반영은 하지 않음). IP 만 알려진 항목은 호스트명으로 바꿔야 올바른 인증서(SNI)가 조회된다.
+- 호스트명 목록(`--names-file`, Infoblox 내보내기 등)을 주면 IP 스캔으로 못 찾는 가상호스트(SNI)도 조회한다.
+- 매주 자동 실행: 설치 스크립트에 `--discover-cidr 10.10.0.0/24,10.20.0.0/24` 를 주었거나, 수동으로 `certdeploy/discovery.example.yml` 을 `/etc/certdeploy/discovery.yml` 로 복사·수정한 뒤:
+```bash
+sudo cp /opt/cert-monitor/src/certdeploy/systemd/certdeploy-discover.service /opt/cert-monitor/src/certdeploy/systemd/certdeploy-discover.timer /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now certdeploy-discover.timer
+```
+- Pushgateway 로 지표를 보내면(설정의 `pushgateway`) 미등록 인증서가 1시간 넘게 남아 있을 때 `CertDiscoveryUnregistered`(경고), 만료 인증서 발견 시 `CertDiscoveryExpiredFound`, 열흘 넘게 실행되지 않으면 `CertDiscoveryNotRunning` 알림이 나간다.
+- 한계: 로컬 TLS 서버로만 시험했다. 실제 대역 스캔의 소요 시간·IDS 반응·방화벽 차단은 현장에서 확인해야 한다(처음에는 /24 하나, `--concurrency 16` 정도로 시작).
+
 ## 11. 시험·버그 수집
 시험은 [테스트 시나리오](test-scenarios.md) T-01~T-22 순서로 수행하고 결과표를 채운다. 문제가 생기면:
 ```bash

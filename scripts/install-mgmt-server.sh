@@ -30,6 +30,7 @@ ADMIN_USER="certadmin2"
 ADMIN_CIDR=""
 CONFIG_TEMPLATE="manual"
 ENABLE_RENEW_TIMER=0
+DISCOVER_CIDR=""
 SKIP_UPDATE=0
 SKIP_OS_CHECK=0
 NO_NETWORK_CHECK=0
@@ -39,7 +40,7 @@ FORCE=0
 ONLY=""
 
 STEPS=(preflight base docker source monitoring nginx certdeploy admin verify)
-CONFIG_KEYS="HOSTNAME_FQDN TIMEZONE REPO_URL LOCAL_SRC SMTP_SMARTHOST SMTP_FROM MAIL_TO SMTP_USER SMTP_PASSWORD_ENV WEBHOOK_URL_ENV ADMIN_USER ADMIN_CIDR CONFIG_TEMPLATE ENABLE_RENEW_TIMER SMTP_NO_TLS"
+CONFIG_KEYS="HOSTNAME_FQDN TIMEZONE REPO_URL LOCAL_SRC SMTP_SMARTHOST SMTP_FROM MAIL_TO SMTP_USER SMTP_PASSWORD_ENV WEBHOOK_URL_ENV ADMIN_USER ADMIN_CIDR CONFIG_TEMPLATE ENABLE_RENEW_TIMER DISCOVER_CIDR SMTP_NO_TLS"
 
 usage() {
   cat <<'USAGE'
@@ -58,6 +59,7 @@ Rocky Linux 10 관리 서버 자동 설치 (감시 스택 + certdeploy + 관리�
   --admin-cidr CIDR        관리자 화면(8443)을 허용할 관리자 PC 대역(권장), 예: 10.10.0.0/24
   --config-template T      certdeploy 설정 예시: manual(기본)|acme|waf-manual|none
   --enable-renew-timer     자동 발급(내장 ACME/lego) 갱신 타이머 설치
+  --discover-cidr A,B      인증서 자동 탐색 대역(예: 10.10.0.0/24); 지정하면 주 1회 탐색 타이머 설치
   --timezone TZ            기본 Asia/Seoul
   --repo-url URL           소스 저장소(기본 GitHub)
   --local-src DIR          GitHub 에 접속할 수 없을 때: 이미 내려받은 소스 폴더를 복사해 사용
@@ -118,6 +120,7 @@ while [ $# -gt 0 ]; do
     --admin-cidr) ADMIN_CIDR="$2"; shift 2 ;;
     --config-template) CONFIG_TEMPLATE="$2"; shift 2 ;;
     --enable-renew-timer) ENABLE_RENEW_TIMER=1; shift ;;
+    --discover-cidr) DISCOVER_CIDR="$2"; shift 2 ;;
     --timezone) TIMEZONE="$2"; shift 2 ;;
     --repo-url) REPO_URL="$2"; shift 2 ;;
     --local-src) LOCAL_SRC="$2"; shift 2 ;;
@@ -142,6 +145,7 @@ valid() { [[ "$2" =~ $1 ]] || die "$3 형식이 올바르지 않습니다: $2"; 
 [ -z "$SMTP_FROM" ] || valid '^[^@[:space:]]+@[^@[:space:]]+$' "$SMTP_FROM" "발신 주소"
 [ -z "$SMTP_USER" ] || valid '^[A-Za-z0-9._@+-]+$' "$SMTP_USER" "SMTP 계정"
 valid '^[a-z_][a-z0-9_-]{2,31}$' "$ADMIN_USER" "관리자 계정"
+[ -z "$DISCOVER_CIDR" ] || valid '^[0-9./,]+$' "$DISCOVER_CIDR" "탐색 대역"
 valid '^[A-Za-z_]+/[A-Za-z_+-]+$' "$TIMEZONE" "시간대"
 [ -z "$ADMIN_CIDR" ] || valid '^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$' "$ADMIN_CIDR" "관리자 PC 대역(CIDR)"
 case "$CONFIG_TEMPLATE" in manual|acme|waf-manual|none) ;; *) die "--config-template 은 manual|acme|waf-manual|none 중 하나" ;; esac
@@ -348,6 +352,16 @@ step_certdeploy() {
     run cp "$SRC_DIR/certdeploy/systemd/certdeploy-renew.service" "$SRC_DIR/certdeploy/systemd/certdeploy-renew.timer" /etc/systemd/system/
     run systemctl daemon-reload
     run systemctl enable --now certdeploy-renew.timer
+  fi
+  if [ -n "$DISCOVER_CIDR" ]; then
+    local cidr_yaml="" c
+    for c in ${DISCOVER_CIDR//,/ }; do cidr_yaml="$cidr_yaml  - $c\n"; done
+    # shellcheck disable=SC2059
+    printf "cidr:\n$cidr_yaml"'port: ["443", "8443", "9443", "8444", "993", "636"]\ndomain: ["hnu.kr", "hannam.ac.kr"]\nout: /var/lib/certdeploy/discovery.json\nemit_targets: /var/lib/certdeploy/discovery-new-targets.yml\npushgateway: http://127.0.0.1:9091\n' \
+      | write_file /etc/certdeploy/discovery.yml 0640 root:certdeploy
+    run cp "$SRC_DIR/certdeploy/systemd/certdeploy-discover.service" "$SRC_DIR/certdeploy/systemd/certdeploy-discover.timer" /etc/systemd/system/
+    run systemctl daemon-reload
+    run systemctl enable --now certdeploy-discover.timer
   fi
 }
 

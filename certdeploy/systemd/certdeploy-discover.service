@@ -1,0 +1,18 @@
+# /etc/systemd/system/certdeploy-discover.service — 인증서 자동 탐색(읽기 전용: 접속·인증서 조회만 한다)
+[Unit]
+Description=certdeploy: 인증서 자동 탐색
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=certdeploy
+Group=certdeploy
+# 조사 범위·옵션은 /etc/certdeploy/discovery.yml (certdeploy/discovery.example.yml 참고)
+ExecStart=/opt/certdeploy/venv/bin/certdeploy-discover --config /etc/certdeploy/discovery.yml
+TimeoutStartSec=60min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/certdeploy
