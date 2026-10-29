@@ -1,0 +1,42 @@
+# Rocky Linux 10 무인 설치(Kickstart) 예시 — 관리 서버 VM 용. 복사해서 TODO 를 고쳐 쓴다.
+# 사용: Rocky 10 minimal/DVD ISO 로 부팅 → 부팅 메뉴에서 e 키 → 끝에 inst.ks=http://<파일서버>/rocky10-mgmt.ks 추가
+#       (또는 이 파일을 'OEMDRV' 라벨 ISO/디스크에 ks.cfg 로 넣으면 자동 인식)
+# 설치 후 첫 부팅 때 자동설치 스크립트가 돌게 하려면 %post 의 주석을 풀고 --hostname 등을 채운다.
+# 비밀번호는 이 파일에 평문으로 쓰지 말고 해시를 넣는다:  openssl passwd -6   (출력값을 rootpw/user 에 사용)
+text
+reboot
+lang ko_KR.UTF-8
+keyboard --vckeymap=kr --xlayouts='kr'
+timezone Asia/Seoul --utc
+network --bootproto=static --device=link --ip=10.0.0.10 --netmask=255.255.255.0 --gateway=10.0.0.1 --nameserver=10.0.0.2 --hostname=mgmt.hnu.kr --activate   # TODO: 실제 값
+rootpw --lock
+user --name=sysadmin --groups=wheel --iscrypted --password=$6$TODO_REPLACE_WITH_openssl_passwd_-6_OUTPUT   # TODO
+selinux --enforcing
+firewall --enabled --service=ssh
+services --enabled=chronyd,sshd
+
+# 디스크: 40 GB 이상 권장. LVM, /var 를 넉넉히(Prometheus·Docker 데이터)
+zerombr
+clearpart --all --initlabel
+autopart --type=lvm
+bootloader --append="crashkernel=auto"
+
+# Rocky 10 은 설치 매체의 저장소를 그대로 쓴다. 최소 구성 + 자동설치 스크립트에 필요한 도구만
+%packages
+@^minimal-environment
+git
+curl
+tar
+chrony
+open-vm-tools
+%end
+
+%post --log=/root/ks-post.log
+# SSH 로 root 직접 로그인 금지(기본값 유지). 자동설치는 첫 로그인 후 수동 실행이 안전하다:
+#   sudo git clone https://github.com/dongjincho508/certpilot.git /opt/cert-monitor/src
+#   sudo bash /opt/cert-monitor/src/scripts/install-mgmt-server.sh --hostname mgmt.hnu.kr ...
+# 완전 무인으로 하려면 아래 주석을 풀고 값을 채운다(SMTP 비밀번호는 넣지 말고 설치 후 secrets 에 직접 입력).
+# git clone https://github.com/dongjincho508/certpilot.git /opt/cert-monitor/src
+# bash /opt/cert-monitor/src/scripts/install-mgmt-server.sh --yes --hostname mgmt.hnu.kr \
+#   --mail-to cert-admin@hnu.kr --smtp-host smtp.hnu.kr:587 --smtp-from cert-monitor@hnu.kr >/root/install.out 2>&1
+%end

@@ -10,7 +10,7 @@
 | 단계 | 문서 | 내용 |
 |---|---|---|
 | ① 준비 | [VM 구성 전 준비 체크리스트](ops/pre-vm-checklist.md) | 결정할 것, 모을 정보, 요청할 것, 일정 |
-| ② 설치 | [관리 서버 설치·테스트 매뉴얼](ops/vm-install-and-test.md) | Rocky 10.x 에서 감시 스택+certdeploy 설치(명령어 상세), 예상 화면 |
+| ② 설치 | [관리 서버 설치·테스트 매뉴얼](ops/vm-install-and-test.md) | Rocky 10.x 에서 감시 스택+certdeploy 설치(명령어 상세), 예상 화면. **자동 설치 스크립트**(`scripts/install-mgmt-server.sh`)·Kickstart 예시 포함 |
 | ③ 시험 | [테스트 시나리오](ops/test-scenarios.md) | T-01~T-19 절차·기대 결과·증거·결과 기록표 |
 | ④ 발급 | [자동 발급 가이드](ops/auto-issue.md) · [certdeploy](ops/certdeploy.md) | Let's Encrypt(DNS 연동/수동) 발급, 수동 와일드카드 가져오기, 명령 요약 |
 | ⑤ 호환성 | [호환성 가이드](ops/compatibility.md) | DNS 제공자 선택, 웹방화벽·어플라이언스(HTTP API) 배포, 확장 방법 |

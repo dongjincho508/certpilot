@@ -26,3 +26,9 @@ data/
 # 모니터링 스택 비밀·런타임
 monitoring/.env
 monitoring/alertmanager/secrets/
+
+# 설치 스크립트가 만드는 운영용 파일(비밀·환경별 값)
+monitoring/alertmanager/alertmanager.local.yml
+monitoring/docker-compose.override.yml
+monitoring/alertmanager/secrets/
+monitoring/prometheus/targets/servers.yml
