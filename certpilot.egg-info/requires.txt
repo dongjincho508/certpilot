@@ -1,7 +1,0 @@
-flask>=2.3
-paramiko>=3.4
-cryptography>=42
-click>=8.1
-werkzeug>=2.2
-gunicorn>=21
-pyyaml>=6

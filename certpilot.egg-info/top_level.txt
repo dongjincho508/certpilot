@@ -1,4 +1,0 @@
-certdeploy
-certpilot_api
-certpilot_cli
-certpilot_core

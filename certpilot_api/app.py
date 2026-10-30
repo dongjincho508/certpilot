@@ -92,7 +92,7 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
     except OSError as e:
         raise RuntimeError(
             f"데이터 디렉터리({data_dir})에 쓸 수 없습니다: {e}. "
-            "Render 디스크는 root 소유로 마운트되므로 컨테이너를 root 로 시작해 소유권을 맞춰야 합니다.") from e
+            "서비스 계정(certdeploy)이 쓸 수 있도록 폴더 소유권·권한을 확인하세요(설치 매뉴얼 7-5).") from e
     store = Store(cfg.get("DB_PATH") or str(data_dir / "certpilot.db"))
     audit = AuditLogWriter(cfg["AUDIT_DIR"] or str(data_dir / "audit"), log_type="certpilot")
     kw = {"sleep": sleep} if sleep else {}
@@ -410,7 +410,7 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
         if not cfg.get("CERTDEPLOY_CONFIG"):
             return _err("certdeploy", "이 서버에는 certdeploy 연동이 설정되어 있지 않습니다(환경변수 CERTDEPLOY_CONFIG). 설치 매뉴얼의 '관리자 화면' 절을 참고하세요.", 409)
         try:
-            from certdeploy import adminapi        # 지연 임포트: certdeploy 가 없는 배포(예: Render)에서도 앱은 정상 기동
+            from certdeploy import adminapi        # 지연 임포트: certdeploy 가 없는 환경(개발·시험)에서도 앱은 정상 기동
         except ImportError:
             return _err("certdeploy", "certdeploy 패키지가 설치되어 있지 않습니다", 409)
         try:
@@ -540,4 +540,4 @@ def create_app(config: Optional[dict] = None, executor_factory: Optional[Callabl
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT") or os.environ.get("CERTPILOT_API_PORT") or 8080)
-    create_app().run(host="0.0.0.0", port=port, debug=False)  # nosec B104 — 컨테이너(Render) 개발용 진입점
+    create_app().run(host="0.0.0.0", port=port, debug=False)  # nosec B104 — 개발용 진입점(운영은 gunicorn + nginx)
