@@ -1,0 +1,4 @@
+[console_scripts]
+certdeploy = certdeploy.cli:main
+certdeploy-discover = certdeploy.discover_cli:main
+certpilot = certpilot_cli.cli:main

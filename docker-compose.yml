@@ -1,0 +1,17 @@
+# 로컬/단일 서버 실행:  cp docker/.env.example .env  후  docker compose up --build
+services:
+  certpilot:
+    build: .
+    ports:
+      - "${CERTPILOT_API_PORT:-8080}:8080"
+    environment:
+      CERTPILOT_ADMIN_USER: ${CERTPILOT_ADMIN_USER:-}
+      CERTPILOT_ADMIN_PASSWORD: ${CERTPILOT_ADMIN_PASSWORD:-}
+      CERTPILOT_SECURE_COOKIE: ${CERTPILOT_SECURE_COOKIE:-0}   # HTTPS 뒤에서는 1
+    volumes:
+      - certpilot_data:/data
+      # ssh-agent 소켓을 쓰려면: - ${SSH_AUTH_SOCK}:/ssh-agent  와 SSH_AUTH_SOCK=/ssh-agent
+    restart: unless-stopped
+
+volumes:
+  certpilot_data:

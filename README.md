@@ -1,47 +1,61 @@
-# CertPilot — 인증서 감시·발급·자동 배포
+# CertPilot
 
-Rocky Linux **관리 서버 1대**에서 서버 50대 이하의 SSL/TLS 인증서를 **감시하고(Prometheus·ssl_exporter·Alertmanager·Grafana)**, **발급·반입하고(상용 인증서 수동 가져오기 / Let's Encrypt DNS-01)**, **에이전트 없이 자동 배포(SSH/API, 실패 시 자동 롤백)** 하는 도구 모음입니다.
+> **프로젝트 방향 (2026-10-28)**: 인증서 만료 감시는 오픈소스 **Prometheus + ssl_exporter + Grafana**, 인증서 발급·자동 배포는 **`certdeploy`**(Let's Encrypt DNS-01 자동 발급 또는 상용 인증서 수동 가져오기, 웹서버·웹방화벽 자동 배포·롤백)로 Rocky Linux 관리 서버 1대에서 운영합니다. 아래의 CertPilot 앱(SSH 파일 조회·감사 로그)은 **보류·미사용**이며 Render 구성은 그대로 둡니다.
+>
+> **🚀 처음이면 [원스톱 시작 가이드](docs/ops/quickstart.md)** (설치 마법사 → 첫날 체크리스트 → 운영 주기표). **📚 문서 목차는 [docs/README.md](docs/README.md)** — 먼저 볼 것: [VM 구성 전 준비 체크리스트](docs/ops/pre-vm-checklist.md) → [설치·테스트 매뉴얼](docs/ops/vm-install-and-test.md) → [테스트 시나리오](docs/ops/test-scenarios.md). 상태와 미검증 범위: [검증 보고서](docs/ops/verification-report.md). 자동 발급: [auto-issue](docs/ops/auto-issue.md), DNS·웹방화벽 호환성: [compatibility](docs/ops/compatibility.md), 문제 추적: [debugging](docs/ops/debugging.md). **메일·개인키 보호 설정은 관리자 화면**([설치 매뉴얼 7-5](docs/ops/vm-install-and-test.md)).
 
-> **🚀 처음이면 [원스톱 시작 가이드](docs/ops/quickstart.md)** — 설치 마법사 → 첫날 체크리스트 → 운영 주기표 → 증상별 조치. **📚 문서 목차는 [docs/README.md](docs/README.md)**, 상세 명령은 [설치·테스트 매뉴얼](docs/ops/vm-install-and-test.md), 시험은 [테스트 시나리오](docs/ops/test-scenarios.md), 상태와 미검증 범위는 [검증 보고서](docs/ops/verification-report.md).
+Linux 서버에 설치된 SSL/TLS 인증서를 **SSH(디스크 파일)와 TLS 포트(실행 중 서비스)** 로 조회하고, 만료 위험을 한 화면에서 보여주는 MVP.
 
-## 한눈에
+- 대상: Linux 서버(SSH, OpenSSH 7.0+). 형식: PEM(단일·번들), 키스토어(PKCS#12/JKS)는 존재만 표시
+- 상태 8종: 정상 · 만료 임박(기본 30일) · 만료 · 체인 위험 · 유효 전 · 조회 실패 · 인증서 미발견 · 확인 필요
+- 보안: ssh-agent 키 인증(패스워드 미지원), TOFU+호스트 키 변경 차단, 고정 읽기 전용 명령·경로 화이트리스트, RBAC(관리자/운영자), 해시 체인 감사 로그
+- **현재 상태: MVP 핵심 구현 + 자동 테스트 완료 / 프로덕션 릴리스 보류** — 근거와 남은 일은 [TRACEABILITY](docs/TRACEABILITY.md), [OPEN_ITEMS](docs/OPEN_ITEMS.md)
 
-| | 기능 | 위치 |
-|---|---|---|
-| 🔭 | 만료 감시·알림(메일·메신저·티켓) | `monitoring/`, Grafana |
-| 🔐 | 발급·반입(상용 CSR/import, 내장 ACME DNS-01, DNS 제공자 선택) | `certdeploy/` |
-| 🚀 | 자동 배포(Apache·nginx·Tomcat·WebtoB·JEUS·IIS·웹방화벽), 롤백, 카나리, 승인 단계 | `certdeploy/` |
-| 🔎 | 미등록 인증서 자동 탐색 | `certdeploy-discover` |
-| 🛡 | 관리자 화면(설정·운영), 2단계 인증, 변조 방지 감사 로그 | `certpilot_api/`, `frontend/` |
-| 💾 | 매일 암호화 백업·검증·외부 복사·복구 | `certdeploy backup-*` |
-
-## 설치 (Rocky Linux 10, 한 번에)
+## 빠른 시작
 
 ```bash
-sudo dnf -y install git && sudo git clone https://github.com/dongjincho508/certpilot.git /opt/cert-monitor/src
-cd /opt/cert-monitor/src && sudo bash scripts/install-mgmt-server.sh      # 설치 마법사가 질문합니다(--dry-run 으로 계획만 확인 가능)
+pip install -r requirements-dev.txt
+scripts/check.sh                      # 문법 검사 + 전체 테스트
+python scripts/dev_server.py 8080     # 샘플 데이터가 든 데모 (admin / Demo!Passw0rd-1234)
 ```
-업데이트(설정·데이터 유지): `cd /opt/cert-monitor/src && sudo git pull --ff-only && sudo /opt/certdeploy/venv/bin/pip install -e . && sudo systemctl restart certdeploy-admin`
+
+실제 실행(운영):
+```bash
+cp docker/.env.example .env           # CERTPILOT_ADMIN_USER / CERTPILOT_ADMIN_PASSWORD 설정
+docker compose up --build             # http://localhost:8080
+```
+SSH 조회는 **ssh-agent 에 로드된 키**로 수행됩니다(컨테이너에서는 `SSH_AUTH_SOCK` 마운트 또는 비밀 환경변수 `CERTPILOT_SSH_PRIVATE_KEY` 를 시작 시 메모리 agent 에 로드). **Render 배포는 [docs/ops/render.md](docs/ops/render.md)**. 조회 계정은 인증서 읽기 권한만 가진 전용 계정을 쓰세요.
+
+CLI(로컬 파일 점검·감사 로그 검증):
+```bash
+python -m certpilot_cli.cli check-file /path/server.pem --warn-days 30
+python -m certpilot_cli.cli audit-verify /data/audit
+```
 
 ## 구조
 
 ```
-certdeploy/      발급·배포·승인·백업·탐색·알림 (CLI: certdeploy, certdeploy-discover)
-certpilot_api/   관리자 화면 백엔드(Flask: 인증·RBAC·2단계 인증·감사 로그·설정 API)
-certpilot_core/  공용(인증·감사 로그·저장소·추적) 및 SSH 인벤토리 조회
+certpilot_core/  status · remote(명령 정책·SSH) · scanner · cert_parser · store · auth · audit_storage · service
+certpilot_api/   Flask create_app() (인증·RBAC·REST)
 certpilot_cli/   로컬 점검 CLI
-frontend/        관리자 화면(Bootstrap, 외부 CDN 없음)
-monitoring/      Prometheus·Alertmanager·Grafana·ssl_exporter(Docker Compose)
-scripts/         설치 스크립트(install-mgmt-server.sh), Kickstart 예시, 점검 도구
-tests/           pytest(단위·통합·설치 스크립트 실제 실행·브라우저 화면)
-docs/            시작 가이드·설치 매뉴얼·시험·검증 보고서
+frontend/        단일 페이지 UI — Bootstrap 5 + Bootswatch(Flatly/Darkly 라이트·다크), 외부 CDN 없음(vendor/ 포함)
+tests/           pytest (단위·API·통합) / scripts/ 개발 서버·화면 스모크
+docs/            PRD · 결정 기록 · ARCHITECTURE · TRACEABILITY · OPEN_ITEMS · design/ · history/ · archive/
 ```
 
-## 개발·시험
-```bash
-pip install -r requirements-dev.txt
-scripts/check.sh                      # 문법 검사 + 전체 테스트 (promtool/amtool 이 PATH 에 있으면 감시 설정 시험까지)
-```
+## 문서
+| 문서 | 설명 |
+|---|---|
+| [PRD](docs/PRD.md) | 요구사항(오너 승인 기준선) |
+| [ARCHITECTURE](docs/ARCHITECTURE.md) | 구현 구조·조회 흐름·설계 결정 |
+| [TRACEABILITY](docs/TRACEABILITY.md) | 요구사항 → 코드 → 테스트, AC 상태 |
+| [OPEN_ITEMS](docs/OPEN_ITEMS.md) | 미확정·이월 항목 |
+| [ROADMAP](docs/ROADMAP.md) | 제품 방향·단계별 계획·오너 결정 사항(제안) |
+| [설계 색인](docs/design/README.md) | API · 인프라 · PKI · UI · 위협 모델 · 테스트 |
+| [결정 기록](docs/decisions.md) · [릴리스 상태](docs/release-approval.md) | |
+
+## 환경 변수
+`CERTPILOT_ADMIN_USER`/`CERTPILOT_ADMIN_PASSWORD`(최초 관리자) · `CERTPILOT_DATA_DIR`(기본 `./data`, DB·감사 로그) · `CERTPILOT_SECURE_COOKIE`(HTTPS 에서 1) · `CERTPILOT_IDLE_MINUTES`(기본 30) · `CERTPILOT_ADMIN_RESET_PASSWORD`(1 이면 관리자 비밀번호를 환경변수 값으로 복구, 복구 후 제거) · `CERTPILOT_SSH_PRIVATE_KEY_B64`/`CERTPILOT_SSH_PRIVATE_KEY`(조회용 개인키, 시작 시 agent 로드 후 삭제) · `PORT`
 
 ## 라이선스
 MIT

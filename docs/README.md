@@ -1,6 +1,6 @@
 # 문서 안내
 
-이 저장소는 **인증서 감시(Prometheus·ssl_exporter·Alertmanager·Grafana) + 인증서 발급·자동 배포(`certdeploy`)** 를 Rocky Linux 관리 서버 1대에서 운영하기 위한 코드와 문서다. 관리자 화면(설정·운영)은 `certpilot_api`/`frontend` 코드로 같은 서버에 설치된다.
+이 저장소는 **인증서 감시(Prometheus·ssl_exporter·Alertmanager·Grafana) + 인증서 발급·자동 배포(`certdeploy`)** 를 Rocky Linux 관리 서버 1대에서 운영하기 위한 코드와 문서다. CertPilot 웹 앱은 Render 구성은 쓰지 않고, 같은 코드를 관리 서버의 **관리자 화면(설정·운영)** 으로 설치해 쓴다. 웹 앱 자체 문서는 맨 아래.
 
 ## 지금 상태 (2026-10-28)
 - 코드·자동 테스트 완료, **실제 VM·실제 장비 검증 전** → 무엇을 검증했고 무엇이 남았는지는 [검증 보고서](ops/verification-report.md)
@@ -38,6 +38,7 @@
 | [감시 서버 구축 가이드(Rocky 10)](ops/rocky-linux-deploy.md) | 감시 스택만 구축하는 상세 가이드(설치 매뉴얼의 5~6단계 원본) |
 | [갱신 자동화 설계](ops/acme-automation.md) | lego + Infoblox 설계(내장 ACME 이전 설계 문서) |
 | [monitoring/README](../monitoring/README.md) | 감시 스택 구성·규칙·대시보드·도구 |
+| [ROADMAP](ROADMAP.md) | 제품 방향 결정 기록 |
 
 ## 설정 예시 파일 (`certdeploy/`)
 | 파일 | 용도 |
@@ -48,3 +49,7 @@
 | `certdeploy.waf-manual.example.yml` | 웹방화벽 옵션 C — **사람이 교체**(교체용 파일 준비·메일 안내·독촉·서빙 확인) |
 | `certdeploy.example.yml` | lego 엔진 포함 전체 항목 설명 |
 | `certdeploy schema` | 설정 JSON Schema 출력(편집기 자동완성) |
+
+## CertPilot 웹 앱 (보류) 문서
+[PRD](PRD.md) · [ARCHITECTURE](ARCHITECTURE.md) · [TRACEABILITY](TRACEABILITY.md) · [OPEN_ITEMS](OPEN_ITEMS.md) · [decisions](decisions.md) · [release-approval](release-approval.md) · [Render 배포](ops/render.md) · [design/](design/) · [archive/](archive/) · [history/](history/)
+Render 배포 구성은 사용하지 않기로 했으나 **정리하지 않고 그대로 둔다**(결정 2026-10-28).
