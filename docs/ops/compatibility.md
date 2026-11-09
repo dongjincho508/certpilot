@@ -95,7 +95,7 @@ aws route53 change-resource-record-sets --hosted-zone-id "$ROUTE53_ZONE_ID" --ch
 | 서로 다른 CA | 내장 ACME 는 `acme.directory` 로 ACME 지원 CA 지정(EAB 가 필요한 CA 는 아직 미지원) |
 
 ## 5. 알려진 한계
-- 내장 ACME 의 `_acme-challenge` **CNAME 위임**, **EAB**(외부 계정 바인딩) 미지원 — 필요하면 추가 개발
+- 내장 ACME 의 **EAB**(외부 계정 바인딩) 미지원 — 필요하면 추가 개발. (`_acme-challenge` CNAME 위임은 `acme.dns.delegate` 로 지원: [auto-issue](auto-issue.md))
 - `http_api` 는 바이너리 본문(원시 octet-stream 업로드)과 클라이언트 인증서(mTLS) 인증은 아직 지원하지 않는다(PEM/PFX 를 JSON·폼·multipart 로 보내는 방식만)
 - 실제 업체·장비 검증은 시험 환경에서 별도로 필요
 

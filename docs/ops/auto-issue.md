@@ -21,7 +21,7 @@ dig CAA hnu.kr +short
 ```
    - NS 가 인터넷에서 조회되는 권한 DNS(= TXT 를 등록할 곳)인지, CAA 가 있다면 `letsencrypt.org` 를 허용하는지 확인(`hannam.ac.kr` 도 동일). 권한 DNS 는 인터넷에서 53 포트 조회가 되어야 한다
 2. **와일드카드 범위**: `*.hnu.kr` 은 `hnu.kr` 자체와 `a.b.hnu.kr` 같은 2단계 이하를 포함하지 않는다 → `domains` 에 루트를 함께 넣는다
-3. `_acme-challenge.hnu.kr` 이름에 **CNAME 이 이미 있으면 안 된다**(TXT 와 공존 불가). CNAME 위임 방식은 아직 지원하지 않는다
+3. `_acme-challenge.hnu.kr` 이름에 **CNAME 이 이미 있으면** TXT 를 그 이름에 직접 넣을 수 없다(공존 불가) → **CNAME 위임 설정**(`acme.dns.delegate`)을 쓰면 TXT 를 CNAME 대상 이름에 넣어 해결된다(아래 「CNAME 위임」)
 4. (연동 모드) Infoblox 에 **TXT 레코드 생성·조회·삭제만 가능한 전용 계정**을 만들고, 공개 DNS 뷰 이름을 확인
 
 ## 2. 설정
@@ -96,3 +96,18 @@ sudo cp /opt/cert-monitor/src/certdeploy/systemd/certdeploy-renew.* /etc/systemd
 - 계정 키(`state_dir/acme/account-*.key`)와 대기 중 개인키는 0600, 발급 후 대기 키 삭제
 - Infoblox 계정은 TXT 권한만, 환경변수 파일은 600. 트레이스·진단 번들에는 비밀번호·키가 마스킹됨
 - 스테이징 발급분은 운영 위치에 설치·배포되지 않음
+
+## CNAME 위임 (`acme.dns.delegate`)
+`_acme-challenge.hnu.kr` 가 이미 다른 이름으로 **CNAME** 되어 있거나(영구 위임을 권장하는 조직이 많음), 인증용 TXT 만 별도 영역·별도 DNS 에서 관리하고 싶을 때 쓴다. Let's Encrypt 는 CNAME 을 따라가 대상 이름의 TXT 를 검증한다. certdeploy 는 TXT 를 **챌린지 이름이 아니라 CNAME 대상 이름**에 넣고 빼며, 전파 확인도 대상 이름으로 한다.
+```yaml
+acme:
+  dns:
+    mode: rfc2136               # 연동 모드(infoblox·rfc2136 등). 공급자의 zone 은 '대상 이름이 있는 영역'
+    rfc2136: {server: "10.0.0.53", zone: "acme.hnu.kr", tsig_key_name: acme-key, tsig_secret_env: TSIG_SECRET}
+    check_resolvers: ["10.0.0.53"]
+    delegate: auto              # 챌린지 이름의 CNAME 을 DNS 로 조회해 자동으로 따라감(check_resolvers 필요)
+    # 또는 명시: delegate: {"_acme-challenge.hnu.kr": "_acme-challenge.hnu.acme.hnu.kr"}
+```
+- **명시 매핑**이 `auto` 보다 우선한다. CNAME 이 없으면 원래 이름을 그대로 쓴다. 수동 모드에서는 명시 매핑을 쓰면 안내문이 대상 이름을 보여 준다.
+- 사전 준비(한 번): 메인 영역에 `_acme-challenge.hnu.kr  CNAME  _acme-challenge.hnu.acme.hnu.kr` 등록, 대상 영역에서 TSIG 키(또는 Infoblox 계정)에 **그 영역만** 쓰기 허용 → 메인 영역에는 쓰기 권한이 필요 없어 권한 범위가 좁아진다.
+- 시험: 실제 BIND 두 영역(CNAME 영역 + TXT 갱신 허용 영역)에서 자동/명시 위임·TSIG 갱신·삭제를 확인했다(`tests/test_real_software.py`). 실제 Let's Encrypt·Infoblox 와는 미검증.

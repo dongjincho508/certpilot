@@ -28,6 +28,7 @@ certificates:
       dns:
         mode: infoblox                          # infoblox(자동 등록·삭제) | manual(사람이 TXT 등록)
         check_resolvers: ["203.0.113.53"]       # 전파 확인할 DNS(권장: 이 영역의 권한 DNS IP). 생략하면 서버 DNS 설정 사용
+        # delegate: auto                        # _acme-challenge 가 CNAME 으로 위임돼 있으면: TXT 를 CNAME 대상 이름에 넣는다(docs/ops/auto-issue.md)
         propagation_timeout: 300                # TXT 가 보일 때까지 최대 대기(초)
         infoblox:
           host: infoblox-gm.hnu.kr              # Grid Master (WAPI 주소)

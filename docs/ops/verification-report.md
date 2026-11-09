@@ -71,9 +71,9 @@
 | lego 실행 | 다운로드·실행 제한 | (lego 사용 시) 설치 7-3 | 내장 ACME 사용 |
 
 ## 4. 알려진 한계 (설계상 미지원)
-- 내장 ACME: `_acme-challenge` **CNAME 위임**, **EAB**(외부 계정 바인딩) 미지원
+- 내장 ACME: **EAB**(외부 계정 바인딩) 미지원(CNAME 위임은 `acme.dns.delegate` 로 지원)
 - `http_api`: 원시 바이너리 업로드, 클라이언트 인증서(mTLS) 인증 미지원
-- IIS 자동 배포 미구현(초안 스크립트만)
+- IIS 자동 배포(`type: iis`)는 가짜 Windows 로만 시험(실제 PowerShell 실행·문법 검사는 미검증), SSH 를 열 수 없는 Windows 는 수동 교체
 - 인증서 상태의 상세 웹 화면은 Grafana 대시보드가 담당하고, 관리자 화면은 설정(메일·개인키 보호)과 요약 현황만 제공한다(Render 의 CertPilot 앱은 사용하지 않음)
 - 관리자 화면에서 저장하는 SMTP 비밀번호·개인키 암호는 `settings.json`(0600, certdeploy 계정)에 평문으로 저장된다(서버 침해 시 노출 — 파일 단독 유출은 디스크 암호화·접근 통제로 방어)
 - 단일 관리 서버(고가용성 없음): 장애 시 백업([T-11](test-scenarios.md))으로 새 VM 에 복원
@@ -114,7 +114,9 @@
 | `tests/test_backup_auto.py` | 35 | 백업 자동화(설정 검증, 수집·SQLite 스냅샷·제외·누락 보고, 암호화·변조 검출, GFS 보관 정리, 폴더/SSH 외부 복사와 실패 격리, 지표·상태, CLI, 심층 검증, 복구 계획/적용, 악성 아카이브 거부, 관리자 화면). **실제 NAS·SSH 서버·새 VM 복구는 미검증** |
 | `tests/test_installer_real.py` (+`installer_harness.sh`, `installer_verify.py`) | 5 | **설치 스크립트 실제 실행**(가짜 dnf·systemctl·docker 등만 끼운 overlay 격리 환경): 전체 설치→비밀번호·권한·설정 생성→설치된 설정으로 백업 실행→관리자 화면 기동·로그인·2단계 인증 강제, 재실행(비밀번호 유지)·중단 후 재개·최소 설치·OS 불일치 거부. 이 시험으로 임시 인증서 폴더 누락, 다중 인증서 백업 누락 등 버그를 찾아 수정. **실제 dnf·이미지 내려받기·방화벽·SELinux 는 미검증** |
 | `tests/test_ui_cd.py` (+`ui_cd_smoke.js`) | 1 | 설정·운영 화면을 **실제 브라우저(Chromium)** 로 확인(체크리스트·탭·이동 버튼·모바일 폭 가로 넘침 없음·한글 감사 라벨). node/playwright 없으면 건너뜀 |
-| `tests/test_docs_ux.py` | 5 | 시작 가이드가 모든 화면 탭·설치 단계·마법사 질문을 설명하는지, 문서 링크·이미지 유효, 시험 번호(T-01~T-28) 일치 |
+| `tests/test_docs_ux.py` | 5 | 시작 가이드가 모든 화면 탭·설치 단계·마법사 질문을 설명하는지, 문서 링크·이미지 유효, 시험 번호(T-01~T-29) 일치 |
+| `tests/test_real_software.py` | 17 | **진짜 소프트웨어로 검증**: 실제 nginx·Apache 에 배포→새 인증서 서빙 확인→설정 오류·재로드 실패 시 롤백, 실제 Tomcat(JVM)이 우리가 만든 PKCS12·JKS 키스토어를 읽고 서빙(실제 keytool 로 확인), 실제 BIND 에 대한 RFC 2136 TSIG 갱신(올바른 키만 수락·잘못된 키/서명 없음/다른 영역 거부), 실제 sshd+sudo 로 배포·롤백·호스트 키 변경 거부·최소 권한(재로드만 sudo) 구성, 설치가 만드는 nginx 설정을 실제 `nginx -t`, 모든 systemd 유닛을 실제 `systemd-analyze verify`(음성 대조 포함). 이 시험으로 nginx `http2 on;`(1.25 미만 오류), 최소 권한 구성에서 점검 명령의 sudo 누락, 저장소에 섞인 `.whl` 부산물을 찾아 수정. **Rocky·SELinux·실제 장비는 미검증** |
+| `tests/test_acme_delegate.py` | 14 | ACME CNAME 위임(자동 조회·명시 매핑·순환 감지·설정 검증·수동 안내·가짜 CA 로 발급 전 과정에서 TXT 가 대상 이름에만 등록/삭제) |
 | `tests/test_pipeline_e2e.py` | 1 | 전 과정 시나리오(등록→발급→배포→지표→실패 주입→진단→복구) |
 
 ## 6. 재현 방법

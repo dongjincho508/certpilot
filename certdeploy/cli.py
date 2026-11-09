@@ -422,11 +422,11 @@ def _issue_acme(cfg, cs, staging, force_run, no_deploy, force_deploy, ignore_bac
         else:
             if not pend:
                 pend = acme.start_order(client, cs.state_dir, cs.name, a["domains"], a["key_type"], _key_write_pw(cs))
-            missing = acme.wait_visible(acme.txt_records(pend), resolvers, 0) if acme.txt_records(pend) else []
+            missing = acme.wait_visible(acme.delegated_records(acme.txt_records(pend), a["dns"].get("delegate_map")), resolvers, 0) if acme.txt_records(pend) else []
             if missing:
-                text = acme.instructions(pend)
+                text = acme.instructions(pend, a["dns"].get("delegate_map"))
                 click.echo(f"[{cs.name}] DNS TXT 등록 대기 중\n{text}")
-                if missing != acme.txt_records(pend):
+                if missing != acme.delegated_records(acme.txt_records(pend), a["dns"].get("delegate_map")):
                     click.echo("아직 보이지 않는 레코드: " + ", ".join(n for n, _ in missing))
                 notifier.fire(_lego_label(cs) + ":dns", f"DNS TXT 등록 필요: {cs.name}", text, "warning")
                 return EXIT_WAITING_DNS

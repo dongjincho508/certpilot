@@ -550,7 +550,7 @@ $bkp
  ② 감시할 서버 목록 등록 → $SRC_DIR/monitoring/prometheus/targets/servers.yml (또는 scripts/csv_to_targets.py)
  ③ 배포 대상 서버 준비 → 아래 SSH 공개키를 각 대상 서버의 배포 계정 authorized_keys 에 등록(설치 매뉴얼 8단계)
  ④ /etc/certdeploy/certdeploy.yml 의 targets·경로를 실제 값으로 수정 → 설치 매뉴얼 7-4(known_hosts), 9단계(인증서 준비)
- ⑤ 시험 시나리오 T-01~T-28 진행(docs/ops/test-scenarios.md) — 막히면 certdeploy diagnose --out 번들을 전달
+ ⑤ 시험 시나리오 T-01~T-29 진행(docs/ops/test-scenarios.md) — 막히면 certdeploy diagnose --out 번들을 전달
 
 ■ 4. 배포용 SSH 공개키 (대상 서버에 등록)
 $pub

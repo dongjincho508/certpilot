@@ -3,7 +3,6 @@
 # 방화벽: firewall-cmd --permanent --add-port=8443/tcp && firewall-cmd --reload  (관리자 PC 대역만 허용하는 것을 권장)
 server {
     listen 8443 ssl;
-    http2 on;
     server_name mgmt.univ.example;                    # TODO: 관리 서버 호스트명
     ssl_certificate     /etc/pki/tls/certs/mgmt.crt;  # Grafana 와 같은 인증서 사용 가능
     ssl_certificate_key /etc/pki/tls/private/mgmt.key;

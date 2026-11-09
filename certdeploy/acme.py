@@ -258,11 +258,25 @@ def txt_records(pend: dict) -> List[Tuple[str, str]]:
     return [(c["txt_name"], c["txt_value"]) for c in pend["challenges"] if not c.get("valid")]
 
 
-def instructions(pend: dict) -> str:
+def instructions(pend: dict, delegate: Optional[dict] = None) -> str:
+    """수동 모드 안내. delegate({챌린지 이름: 위임 대상})가 있으면 TXT 는 대상 이름에 등록하도록 안내한다."""
+    d = {k.rstrip(".").lower(): v.rstrip(".").lower() for k, v in (delegate or {}).items()}
     lines = ["DNS 에 아래 TXT 레코드를 등록하세요(같은 이름에 값이 둘이면 둘 다 등록, 기존 값은 지우지 않음):"]
-    lines += [f"  이름: {n}   종류: TXT   값: {v}" for n, v in txt_records(pend)]
+    for n, v in txt_records(pend):
+        t = d.get(n.rstrip(".").lower())
+        lines.append(f"  이름: {t}   종류: TXT   값: {v}   (CNAME 위임: {n} → {t})" if t else f"  이름: {n}   종류: TXT   값: {v}")
     lines.append("  (TTL 은 짧게(60~300초). 등록 후 같은 명령(issue/renew)을 다시 실행하면 확인 후 발급을 진행합니다)")
     return "\n".join(lines)
+
+
+def delegated_records(records: List[Tuple[str, str]], delegate: Optional[dict] = None, provider=None) -> List[Tuple[str, str]]:
+    """CNAME 위임 시 TXT 는 대상 이름에 있으므로, 전파 확인은 대상 이름으로 한다(권한 DNS 만 보는 resolver 는 영역 간 CNAME 을 따라가지 않는다)."""
+    d = {k.rstrip(".").lower(): v.rstrip(".").lower() for k, v in (delegate or {}).items()}
+    out = []
+    for n, v in records:
+        t = provider.target(n) if provider is not None and hasattr(provider, "target") else d.get(n.rstrip(".").lower(), n)
+        out.append((t, v))
+    return out
 
 
 def wait_visible(records: List[Tuple[str, str]], resolvers: List[str], timeout: float, interval: float = 10.0,
@@ -327,7 +341,7 @@ def issue_with_provider(client: AcmeClient, provider, state_dir: str, name: str,
         for n, v in recs:
             provider.present(n, v)
         if resolvers:
-            missing = wait_visible(recs, resolvers, propagation_timeout, sleep=sleep, check=check)
+            missing = wait_visible(delegated_records(recs, provider=provider), resolvers, propagation_timeout, sleep=sleep, check=check)
             if missing:
                 raise AcmeError("TXT 가 DNS 에 전파되지 않았습니다: " + ", ".join(n for n, _ in missing))
         return complete_order(client, pend, state_dir, key_password)
