@@ -364,6 +364,7 @@ sudo dnf -y install policycoreutils-python-utils && sudo semanage fcontext -a -t
 ```
 Apache 설정은 먼저 **수동으로** `SSLCertificateFile /etc/ssl/univ/fullchain.pem`, `SSLCertificateKeyFile /etc/ssl/univ/privkey.pem` 을 가리키게 바꾸고(처음 한 번 현재 인증서를 그 경로에 복사) `apachectl configtest` 통과를 확인한다.
 **Ubuntu/Debian 대상**: 서비스 이름이 `apache2` 이므로 sudoers·`reload_cmd` 의 `httpd` 를 `apache2` 로 바꾼다.
+**Nginx 대상**: sudoers 는 `/usr/bin/systemctl reload nginx, /usr/sbin/nginx -t` 로 하고 `reload_cmd: sudo -n systemctl reload nginx`. `reload_cmd` 를 `sudo` 로 쓰면 설정 점검(`check_cmd`)도 자동으로 `sudo -n apachectl configtest` / `sudo -n nginx -t` 가 된다(직접 지정도 가능). **전체 root 권한을 주는 `sudo: true` 는 쓰지 마세요** — 실제 sshd+sudo 시험(T-29)에서 인증서 폴더만 쓰고 재로드만 sudo 하는 방식이 정상 동작함을 확인했다.
 **Tomcat / Node.js**: 키스토어 경로·형식·재로드(재기동) 명령은 **제품 문서와 현재 설정으로 확인**해 `targets` 에 반영한다(`reload_cmd` 는 sudoers 에 해당 명령만 허용).
 **WebtoB / JEUS**: 전용 유형 `type: webtob`·`type: jeus`(설정 예시 `certdeploy.webtob-jeus.example.yml`, 시험 T-26). 현재 `http.m`(`*SSL` 절)·JEUS 도메인 설정에서 **인증서/키스토어 경로, 실행 계정, 패스프레이즈 사용 여부, 재기동 명령**을 확인해 채운다. 배포용 계정은 `sudo` 로 파일 교체와 그 재기동 명령만 허용하고, 파일은 `owner`(WebtoB/JEUS 실행 계정)가 읽을 수 있어야 한다. 경로를 바꾸면 `http.m`/JEUS 설정도 바뀌므로 **기존 경로를 그대로 쓴다**.
 **웹방화벽(모니터랩)**: API/CLI 가 확인되기 전에는 **옵션 C(사람이 교체)** 로 시작한다 — 설정은 `certdeploy.waf-manual.example.yml`, 시험은 T-21. API 문서가 오면 옵션 A(`http_api`, T-18)로 전환. 선택 가이드·확인 질문은 [호환성 가이드](compatibility.md).
@@ -571,7 +572,7 @@ sudo systemctl restart certdeploy-admin && cd /opt/cert-monitor/src/monitoring &
 - 한계: 로컬 폴더·SSH 대상(로컬 명령 실행으로 대체 시험)으로 시험했다. NAS 마운트·실제 SSH 서버·복구 후 서비스 기동은 VM 시험 T-28 에서 확인한다. 대용량(수 GB)에서는 메모리에 한 번에 올리므로 현재 규모(수 MB)를 전제로 한다.
 
 ## 11. 시험·버그 수집
-시험은 [테스트 시나리오](test-scenarios.md) T-01~T-28 순서로 수행하고 결과표를 채운다. 문제가 생기면:
+시험은 [테스트 시나리오](test-scenarios.md) T-01~T-29 순서로 수행하고 결과표를 채운다. 문제가 생기면:
 ```bash
 $CD diagnose --out /tmp/diag.json
 ```
@@ -595,7 +596,7 @@ $CD diagnose --out /tmp/diag.json
 - [ ] 5개 컨테이너 실행, 재부팅 후 자동 복구, nginx HTTPS 로 Grafana 접속
 - [ ] 관리자 화면(8443) 로그인, 메일 시험 도착, 인증서별 개인키 보호 선택 적용(7-5)
 - [ ] 등록 대상 전부 Prometheus `up`, 대시보드에 인증서 표시, 테스트 알림 수신
-- [ ] T-01~T-28 합격 · 결과표 보관
+- [ ] T-01~T-29 합격 · 결과표 보관
 - [ ] VMware: EVC/CPU 호환성 확인, VMware Tools 시간 동기화 끔, 스냅샷 없음(작업 시에만), VM 콘솔·스냅샷·백업 접근 인원 최소화, 디스크 암호화 방식(LUKS 또는 vSphere 암호화) 결정·암호 봉인 보관
 - [ ] 개인키 권한 600, `certdeploy` 계정 외 접근 불가, 백업본 암호화 보관·복원 시험 완료
 - [ ] 알림 수신자·야간/휴일 담당 확정, 갱신 달력 등록(수동 방식: 현재 약 200일, **2027-03-15 부터 100일, 2029-03-15 부터 47일** → 자동 발급 전환 계획)

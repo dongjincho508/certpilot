@@ -330,6 +330,13 @@ $CD --cert hnu deploy --force --target hnu-web-canary
 - **증거**: `backup-status` 출력, 외부 대상 `ls -l`, 복구 후 `validate`/`status` 출력, 알림 캡처
 - **실패 시**: `journalctl -u certdeploy-backup -n 100`, 「일부 누락」이면 빠진 경로(권한·SELinux), 외부 복사 실패 메시지(경로·권한·known_hosts), `$CD diagnose --out`
 
+### T-29 대상 서버 최소 권한 배포 (실제 Rocky 대상)
+- **사전조건**: 대상 Rocky 서버에 배포 계정(`deploy`), 인증서 전용 폴더(소유자 deploy), sudoers 에 **점검·재로드 명령만** 허용(설치 매뉴얼 8단계), 설정은 `transport.sudo` 없이 `reload_cmd: sudo -n …`
+- **절차**: ① `$CD preflight --target <대상>` → 「sudo 허용」 항목이 ✅ ② `$CD deploy --target <대상>` → 새 인증서 서빙(`verify`), 파일 소유자가 deploy ③ 일부러 `reload_cmd` 를 sudoers 에 없는 명령으로 바꿔 `preflight` → ❌ 로 사전에 잡힘 ④ 설정 점검(`apachectl configtest`) 실패를 일으켜(잘못된 지시어 임시 추가) `deploy` → **이전 파일로 롤백**되고 서비스는 이전 인증서로 계속 동작 ⑤ SELinux Enforcing 에서 `ls -Z` 로 인증서 파일 라벨(`cert_t`) 확인
+- **기대**: 위 동작대로. `sudo: true` 없이 동작. 이 흐름은 개발 환경에서 진짜 sshd·sudo·nginx 로 확인했고, **Rocky·SELinux·실제 Apache 에서의 동작은 이 시험에서 처음 확인**한다
+- **증거**: `preflight`/`deploy` 출력, `ls -lZ`, `/var/log/secure` 의 sudo 기록
+- **실패 시**: `journalctl -u sshd`, `/var/log/audit/audit.log`(SELinux 거부: `ausearch -m avc -ts recent`), `$CD diagnose --out`
+
 ---
 ## 결과 기록표
 | ID | 일시 | 수행자 | 합격(O/X) | 증거 파일/링크 | 비고(실패 시 번들 경로) |
@@ -363,3 +370,4 @@ $CD --cert hnu deploy --force --target hnu-web-canary
 | T-26 | | | | | |
 | T-27 | | | | | |
 | T-28 | | | | | |
+| T-29 | | | | | |

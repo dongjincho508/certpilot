@@ -30,7 +30,16 @@ def b64u_dec(s):
 class Zone:
     def __init__(self):
         self.txt = {}
+        self.cname = {}                          # 이름 → CNAME 대상(재귀 resolver 처럼 get 이 체인을 따라간다)
         self.lock = threading.Lock()
+
+    def chase(self, name):
+        n = name.rstrip(".").lower()
+        for _ in range(8):
+            if n not in self.cname:
+                break
+            n = self.cname[n].rstrip(".").lower()
+        return n
 
     def add(self, name, value):
         with self.lock:
@@ -44,7 +53,7 @@ class Zone:
 
     def get(self, name):
         with self.lock:
-            return list(self.txt.get(name.rstrip(".").lower(), []))
+            return list(self.txt.get(self.chase(name), []))
 
 
 class _Server(ThreadingHTTPServer):
@@ -294,6 +303,13 @@ def _dns_response(query, zone):
         off += 1 + query[off]
     qname = ".".join(labels)
     question = query[12:off + 5]
+    qtype = struct.unpack(">H", question[-4:-2])[0]
+    if qtype == 5:                                                   # CNAME 조회
+        tgt = zone.cname.get(qname.rstrip(".").lower())
+        if tgt:
+            data = b"".join(bytes([len(p)]) + p.encode() for p in tgt.rstrip(".").split(".")) + b"\x00"
+            return struct.pack(">HHHHHH", qid, 0x8180, 1, 1, 0, 0) + question + b"\xc0\x0c" + struct.pack(">HHIH", 5, 1, 60, len(data)) + data
+        return struct.pack(">HHHHHH", qid, 0x8180, 1, 0, 0, 0) + question
     vals = zone.get(qname)
     answers = b""
     for v in vals:

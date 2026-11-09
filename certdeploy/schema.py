@@ -47,7 +47,8 @@ def _target() -> dict:
 
 def _acme() -> dict:
     from .dnsprov import PROVIDER_REQUIRED
-    dns_props = {"mode": {"enum": list(PROVIDER_REQUIRED)}, "check_resolvers": {"type": "array", "items": _S}, "propagation_timeout": _I}
+    dns_props = {"mode": {"enum": list(PROVIDER_REQUIRED)}, "check_resolvers": {"type": "array", "items": _S}, "propagation_timeout": _I,
+                 "delegate": {"anyOf": [{"const": "auto"}, {"type": "object"}]}}
     dns_props.update({m: {"type": "object", "required": list(req)} for m, req in PROVIDER_REQUIRED.items() if m != "manual"})
     dns = {"type": "object", "additionalProperties": False, "properties": dns_props}
     return {"type": "object", "required": ["domains"], "additionalProperties": False, "properties": {

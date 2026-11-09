@@ -119,7 +119,7 @@ sudo SMTP_PASSWORD='…' bash scripts/install-mgmt-server.sh --yes --hostname mg
 | 6 | 배포 대상 준비 | 🖥 대상 서버에 SSH 공개키 등록·sudoers 최소 권한(매뉴얼 8단계), `known_hosts` 등록 | `certdeploy preflight` ✅ |
 | 7 | 인증서 반입/발급 | 🖥 `certdeploy csr` → CA 제출 → `import` (매뉴얼 9단계) 또는 자동 발급 | `validate` ✅ |
 | 8 | **백업 확인** | 🖥 `certdeploy backup-run` 1회 → 「백업」 탭 정상, **외부 복사 대상 추가** | 체크리스트 ✅ |
-| 9 | 시험 | [테스트 시나리오](test-scenarios.md) T-01~T-28, 막히면 진단 번들 | 결과 기록표 |
+| 9 | 시험 | [테스트 시나리오](test-scenarios.md) T-01~T-29, 막히면 진단 번들 | 결과 기록표 |
 
 ## 6. 화면 가이드 — 어느 탭에서 뭘 하나요?
 
@@ -180,6 +180,6 @@ sudo SMTP_PASSWORD='…' bash scripts/install-mgmt-server.sh --yes --hostname mg
 | 복구 코드 | 휴대폰을 잃었을 때 쓰는 1회용 코드(등록 때 한 번만 표시) |
 
 ## 10. 솔직한 한계 (꼭 읽으세요)
-- **실제 Rocky 10 VM·실제 장비(Apache/IIS/WebtoB/JEUS, 웹방화벽, Infoblox, ServiceNow/Jira/Teams)에서는 아직 시험하지 못했습니다.** 코드와 가짜 장치로 검증한 범위는 [검증 보고서](verification-report.md)에 있고, VM에서 확인할 절차는 [테스트 시나리오](test-scenarios.md)(T-01~T-28)입니다. 막히면 **그 단계의 출력과 진단 번들**을 전달해 주세요.
-- 설치 스크립트는 가짜 시스템 명령으로 **끝까지 실행**해 설정·권한·비밀번호·백업·관리자 화면 기동을 검증했습니다. 실제 `dnf`·Docker 이미지 내려받기·방화벽·SELinux 동작은 VM에서 처음 확인됩니다.
+- **실제 Rocky 10 VM·실제 장비(Apache/IIS/WebtoB/JEUS, 웹방화벽, Infoblox, ServiceNow/Jira/Teams)에서는 아직 시험하지 못했습니다.** 코드와 가짜 장치로 검증한 범위는 [검증 보고서](verification-report.md)에 있고, VM에서 확인할 절차는 [테스트 시나리오](test-scenarios.md)(T-01~T-29)입니다. 막히면 **그 단계의 출력과 진단 번들**을 전달해 주세요.
+- 배포 흐름은 개발 환경에서 **진짜 nginx·Apache·Tomcat(JVM)·BIND·OpenSSH+sudo**로 검증했습니다(롤백, 최소 권한, 키스토어, TSIG DNS 갱신). 설치 스크립트는 가짜 시스템 명령으로 **끝까지 실행**해 설정·권한·비밀번호·백업·관리자 화면 기동을 검증했습니다. 실제 `dnf`·Docker 이미지 내려받기·방화벽·SELinux 동작은 VM에서 처음 확인됩니다.
 - 비밀번호·백업 비밀번호·개인키 암호를 **잃으면 복구할 수 없습니다**. 서버 밖에 봉인 보관하세요.

@@ -64,7 +64,8 @@ IIS(Windows)는 `type: iis`(SSH+PowerShell, 에이전트 없음)로 자동 배�
 | 백업·복원 | ✅ 왕복·비밀번호 오류·변조·경로 이탈/링크 거부 |
 | 다중 인증서·백오프·preflight | ✅ 자동 테스트(가짜 lego, 로컬 셸). ⚠ 원격 sudo 허용 점검(`sudo -n -l`)은 실제 sudoers 환경에서 미시험 |
 | lego 호출 | ⚠ **명령 구성·실패 처리만 가짜 lego 로 시험.** 실제 lego 바이너리와 Infoblox 는 이 저장소 개발 환경에서 실행하지 못했다. 옵션·환경변수 이름·산출 파일명은 설치한 lego 로 확인(`lego --help`, `lego dnshelp -c infoblox`) |
-| 실제 Apache/Tomcat/WebtoB/JEUS 서버 | ❌ 미시험(해당 제품의 재로드 동작은 제품 문서로 확인, 아래 3-4) |
+| 실제 nginx·Apache·Tomcat(JVM, PKCS12/JKS)·OpenSSH+sudo | ✅ 개발 환경에서 **진짜 소프트웨어**로 배포·롤백 확인(`tests/test_real_software.py`). Rocky·SELinux 에서의 동작은 VM 시험 |
+| 실제 WebtoB/JEUS 서버 | ❌ 미시험(해당 제품의 재로드 동작은 제품 문서로 확인, 아래 3-4) |
 | Windows/IIS | ⚠ 가짜 Windows(PowerShell 출력을 흉내 내는 시험 장치)로 배포·복구·롤백 흐름만 시험. **실제 PowerShell 스크립트 실행은 미검증** |
 
 ## 3. 설치 (Rocky Linux 10, 발급 전용 서버)

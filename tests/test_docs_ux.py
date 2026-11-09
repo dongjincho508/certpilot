@@ -26,7 +26,7 @@ def test_quickstart_covers_screens_steps_and_is_linked():
         assert tab.split("·")[0] in html
     for step in ("preflight", "base", "docker", "source", "monitoring", "nginx", "certdeploy", "admin", "verify"):
         assert step in (ROOT / "scripts/install-mgmt-server.sh").read_text(encoding="utf-8")
-    for must in ("install-mgmt-server.sh", "설치 마법사", "--dry-run", "같은 명령을 다시 실행", "서버 밖", "증상", "백업 비밀번호", "T-01~T-28"):
+    for must in ("install-mgmt-server.sh", "설치 마법사", "--dry-run", "같은 명령을 다시 실행", "서버 밖", "증상", "백업 비밀번호", "T-01~T-29"):
         assert must in q, must
     assert "quickstart.md" in (ROOT / "docs/README.md").read_text(encoding="utf-8") and "quickstart.md" in (ROOT / "README.md").read_text(encoding="utf-8")
     assert "quickstart.md" in (ROOT / "docs/ops/vm-install-and-test.md").read_text(encoding="utf-8")
@@ -35,9 +35,9 @@ def test_quickstart_covers_screens_steps_and_is_linked():
 def test_scenarios_count_matches_docs():
     s = (ROOT / "docs/ops/test-scenarios.md").read_text(encoding="utf-8")
     ids = sorted(set(re.findall(r"^### (T-\d+[a-z]?)\b", s, re.M)))
-    assert "T-28" in ids and len(ids) >= 28
+    assert "T-29" in ids and len(ids) >= 28
     for f in (ROOT / "docs/ops/quickstart.md", ROOT / "docs/ops/vm-install-and-test.md"):
-        assert "T-01~T-28" in f.read_text(encoding="utf-8")
+        assert "T-01~T-29" in f.read_text(encoding="utf-8")
 
 
 def test_wizard_questions_are_documented():

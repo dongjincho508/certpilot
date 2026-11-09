@@ -260,6 +260,60 @@ class Rfc2136Provider:
         self._do(fqdn, value, False)
 
 
+class DelegatingProvider:
+    """_acme-challenge 를 다른 영역으로 CNAME 위임해 둔 경우: TXT 를 챌린지 이름이 아니라 위임 대상 이름에 넣고 뺀다.
+    mapping(명시) 이 우선이고, auto 이면 챌린지 이름의 CNAME 을 DNS 로 조회해 따라간다. CA 는 CNAME 을 따라 대상 TXT 를 검증한다."""
+
+    def __init__(self, inner, mapping: Optional[dict] = None, auto: bool = False, resolvers: Optional[list] = None, resolve=None):
+        self.inner, self.mapping, self.auto, self.resolvers = inner, {k.rstrip(".").lower(): v.rstrip(".").lower() for k, v in (mapping or {}).items()}, auto, resolvers or []
+        from . import dnsquery
+        self._resolve = resolve or dnsquery.resolve_cname
+        self.name, self.automatic = inner.name, inner.automatic
+
+    def target(self, fqdn: str) -> str:
+        key = fqdn.rstrip(".").lower()
+        if key in self.mapping:
+            return self.mapping[key]
+        if self.auto and self.resolvers:
+            try:
+                t = self._resolve(key, self.resolvers)
+            except Exception as e:  # noqa: BLE001 — 조회 실패 시 위임 없는 것으로 보고 원래 이름을 쓴다(실패는 전파 확인 단계에서 드러남)
+                trace.event("acme", "cname_lookup", "warning", fqdn=key, error=type(e).__name__)
+                t = None
+            if t:
+                trace.event("acme", "cname_delegate", fqdn=key, target=t)
+                return t
+        return key
+
+    def present(self, fqdn, value):
+        self.inner.present(self.target(fqdn), value)
+
+    def cleanup(self, fqdn, value):
+        self.inner.cleanup(self.target(fqdn), value)
+
+
+def parse_delegate(raw, label: str, problems: list):
+    """acme.dns.delegate 검증: 'auto' 또는 {챌린지 이름: 대상 이름} 매핑 → (mapping, auto)"""
+    import re
+    name_re = re.compile(r"^(?=.{1,253}$)([A-Za-z0-9_]([A-Za-z0-9_-]*[A-Za-z0-9_])?\.)+[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\.?$")
+    if raw in (None, False, ""):
+        return {}, False
+    if raw == "auto":
+        return {}, True
+    if not isinstance(raw, dict) or not raw:
+        problems.append(f"{label} acme.dns.delegate 는 auto 또는 {{_acme-challenge.도메인: 대상 이름}} 매핑이어야 합니다")
+        return {}, False
+    out = {}
+    for k, v in raw.items():
+        if not (isinstance(k, str) and isinstance(v, str) and name_re.match(k) and name_re.match(v)):
+            problems.append(f"{label} acme.dns.delegate 항목이 올바르지 않습니다: {k!r}: {v!r}")
+        elif not k.lower().startswith("_acme-challenge."):
+            problems.append(f"{label} acme.dns.delegate 의 키는 _acme-challenge. 로 시작해야 합니다: {k}")
+        else:
+            out[k] = v
+    return out, False
+
+
 # 필수 설정 키(설정 검증과 안내 메시지에 사용)
 PROVIDER_REQUIRED = {
     "manual": (), "infoblox": ("host", "user_env", "password_env"), "exec": ("cmd",), "webhook": ("url_env",),
@@ -275,6 +329,14 @@ def _env(environ, name, what):
 
 
 def build_provider(dns_cfg: dict, environ=os.environ):
+    inner = _build_provider(dns_cfg, environ)
+    mapping, auto = dns_cfg.get("delegate_map") or {}, bool(dns_cfg.get("delegate_auto"))
+    if (mapping or auto) and getattr(inner, "automatic", False):
+        return DelegatingProvider(inner, mapping, auto, dns_cfg.get("check_resolvers") or [])
+    return inner
+
+
+def _build_provider(dns_cfg: dict, environ=os.environ):
     mode = dns_cfg.get("mode", "manual")
     c = dns_cfg.get(mode) or {}
     if mode == "manual":

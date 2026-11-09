@@ -77,7 +77,7 @@ def test_systemd_units_verify(tmp_path):
         pytest.skip("systemd-analyze 없음")
     d = os.path.join(ROOT, "certdeploy", "systemd")
     r = subprocess.run(["systemd-analyze", "verify", f"{d}/certdeploy-renew.service", f"{d}/certdeploy-renew.timer", f"{d}/certdeploy-admin.service"], capture_output=True, text=True)
-    problems = [l for l in r.stderr.splitlines() if l and "is not executable" not in l and "No such file" not in l]   # 설치 전이라 바이너리가 없는 것은 정상
+    problems = [l for l in r.stderr.splitlines() if l and "is not executable" not in l and "No such file" not in l and "IPv6" not in l]   # 설치 전이라 바이너리가 없는 것, 시험 커널의 IPv6 미지원 안내는 정상
     assert not problems, problems
 
 

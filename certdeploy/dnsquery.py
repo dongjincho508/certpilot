@@ -52,9 +52,9 @@ def _read_name(msg: bytes, off: int):
     return ".".join(labels), (end if jumped else off)
 
 
-def build_query(name: str, qid: Optional[int] = None) -> bytes:
+def build_query(name: str, qid: Optional[int] = None, qtype: int = 16) -> bytes:
     qid = random.randrange(65536) if qid is None else qid
-    return struct.pack(">HHHHHH", qid, 0x0100, 1, 0, 0, 0) + _encode_name(name) + struct.pack(">HH", 16, 1)
+    return struct.pack(">HHHHHH", qid, 0x0100, 1, 0, 0, 0) + _encode_name(name) + struct.pack(">HH", qtype, 1)
 
 
 def parse_txt_response(msg: bytes) -> List[str]:
@@ -82,6 +82,66 @@ def parse_txt_response(msg: bytes) -> List[str]:
             out.append("".join(parts))
         off += rdlen
     return out
+
+
+def parse_cname_response(msg: bytes) -> List[str]:
+    """응답에서 CNAME 레코드의 대상 이름 목록(없으면 빈 목록)."""
+    if len(msg) < 12:
+        raise DnsError("DNS 응답이 너무 짧습니다")
+    _, flags, qd, an, _, _ = struct.unpack(">HHHHHH", msg[:12])
+    if flags & 0xF not in (0, 3):
+        raise DnsError(f"DNS 오류 응답(rcode={flags & 0xF})")
+    off = 12
+    for _ in range(qd):
+        _, off = _read_name(msg, off)
+        off += 4
+    out = []
+    for _ in range(an):
+        _, off = _read_name(msg, off)
+        rtype, _, _, rdlen = struct.unpack(">HHIH", msg[off:off + 10])
+        off += 10
+        if rtype == 5:
+            target, _ = _read_name(msg, off)
+            out.append(target.rstrip(".").lower())
+        off += rdlen
+    return out
+
+
+def _ask(q: bytes, server: str, port: int, timeout: float) -> bytes:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.settimeout(timeout)
+            s.sendto(q, (server, port))
+            data, _ = s.recvfrom(4096)
+        return data
+    except OSError as e:
+        raise DnsError(f"{server} 조회 실패: {type(e).__name__}") from e
+
+
+def query_cname(name: str, server: str, port: int = 53, timeout: float = 3.0) -> List[str]:
+    return parse_cname_response(_ask(build_query(name, qtype=5), server, port, timeout))
+
+
+def resolve_cname(name: str, resolvers: List[str], max_depth: int = 8) -> Optional[str]:
+    """name 이 CNAME 이면 체인을 따라가 마지막 대상 이름을, CNAME 이 아니면 None. 첫 번째로 응답하는 resolver 를 사용한다."""
+    cur, seen = name.rstrip(".").lower(), []
+    for _ in range(max_depth):
+        target = None
+        for r in resolvers:
+            host, _, port = r.partition(":")
+            try:
+                found = query_cname(cur, host, int(port or 53))
+            except DnsError:
+                continue
+            target = found[0] if found else None
+            break
+        if not target:
+            break
+        if target in seen or target == name.rstrip(".").lower():
+            raise DnsError(f"CNAME 순환이 감지되었습니다: {cur} → {target}")
+        seen.append(cur)
+        cur = target
+    return cur if seen else None
 
 
 def query_txt(name: str, server: str, port: int = 53, timeout: float = 3.0) -> List[str]:

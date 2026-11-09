@@ -376,6 +376,9 @@ def _parse_target(raw, defaults, label_prefix, problems, seen) -> Optional[Targe
         _abs(f.dest, f"{label} 파일 경로", problems)
     check = raw.get("check_cmd", default_check(raw))
     reload_cmd = raw.get("reload_cmd", default_reload(raw))
+    if "check_cmd" not in raw and str(reload_cmd or "").lstrip().startswith("sudo") and raw.get("type") in ("apache", "nginx") and not (raw.get("transport") or {}).get("sudo"):
+        # 최소 권한 구성(재로드만 sudo)에서는 설정 점검도 root 권한이 필요하다(로그·키 파일 접근) → 점검 명령도 sudo 로 실행한다
+        check = "sudo -n apachectl configtest" if raw["type"] == "apache" else "sudo -n nginx -t"
     if raw["type"] in ("nodejs", "tomcat", "webtob", "jeus", "generic") and "reload_cmd" not in raw:
         problems.append(f"{label}: reload_cmd 가 필요합니다(없으면 'none' 으로 명시)")
     if str(reload_cmd).lower() == "none":
@@ -426,7 +429,10 @@ def _parse_acme(a, label, problems) -> Optional[dict]:
     mode = dns.get("mode", "manual")
     out["dns"] = {"mode": mode, "check_resolvers": [str(x) for x in (dns.get("check_resolvers") or [])],
                   "propagation_timeout": int(dns.get("propagation_timeout", 300))}
-    from .dnsprov import PROVIDER_REQUIRED
+    from .dnsprov import PROVIDER_REQUIRED, parse_delegate
+    out["dns"]["delegate_map"], out["dns"]["delegate_auto"] = parse_delegate(dns.get("delegate"), label, problems)
+    if out["dns"]["delegate_auto"] and not out["dns"]["check_resolvers"]:
+        problems.append(f"{label} acme.dns.delegate: auto 에는 check_resolvers(CNAME 을 조회할 DNS 서버)가 필요합니다")
     if mode not in PROVIDER_REQUIRED:
         problems.append(f"{label} acme.dns.mode 는 {', '.join(PROVIDER_REQUIRED)} 중 하나여야 합니다")
     elif mode != "manual":

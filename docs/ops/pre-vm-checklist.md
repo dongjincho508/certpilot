@@ -59,7 +59,7 @@ VM 이 없어도 **DNS 관리자가 확인** 가능한 항목:
 | 권한 네임서버 | `dig NS hnu.kr +short` | |
 | 그 네임서버가 Infoblox 인가, 인터넷에서 UDP/TCP 53 조회 가능한가 | DNS 관리자 | |
 | **CAA 레코드** | `dig CAA hnu.kr +short` — 값이 있는데 `letsencrypt.org` 가 없으면 발급 거부 → `0 issue "letsencrypt.org"` 추가 | |
-| `_acme-challenge.hnu.kr` 에 **CNAME 이 있나**(있으면 TXT 와 공존 불가, 내장 ACME 는 CNAME 위임 미지원) | `dig CNAME _acme-challenge.hnu.kr +short` | |
+| `_acme-challenge.hnu.kr` 에 **CNAME 이 있나**(있으면 TXT 와 공존 불가 → `acme.dns.delegate` 로 CNAME 위임 설정) | `dig CNAME _acme-challenge.hnu.kr +short` | |
 | 공개 DNS 뷰 이름(Infoblox 뷰 사용 시) | DNS 관리자 | |
 | API 계정(TXT 생성·조회·삭제 권한만), WAPI 버전 | DNS 관리자 | |
 ### D. 웹방화벽(모니터랩 AIWAF/AIWAAP) — 제조사·담당자에게

@@ -8,7 +8,6 @@ server {
 }
 server {
     listen 443 ssl;
-    http2 on;
     server_name monitor.univ.example;                 # TODO
     ssl_certificate     /etc/pki/tls/certs/monitor.crt;       # TODO: 인증서(처음엔 사내 CA/자체 서명도 가능)
     ssl_certificate_key /etc/pki/tls/private/monitor.key;

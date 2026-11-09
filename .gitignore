@@ -32,3 +32,6 @@ monitoring/alertmanager/alertmanager.local.yml
 monitoring/docker-compose.override.yml
 monitoring/alertmanager/secrets/
 monitoring/prometheus/targets/servers.yml
+
+# 빌드·다운로드 부산물
+*.whl
