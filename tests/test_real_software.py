@@ -83,6 +83,10 @@ class Site:
 # ------------------------------------------------------------------ nginx
 @pytest.fixture
 def nginx(tmp_path):
+    yield from nginx_site(tmp_path)
+
+
+def nginx_site(tmp_path):
     port = free_port()
     s = Site(tmp_path, port)
     (tmp_path / "snippets").mkdir()
@@ -149,6 +153,10 @@ def test_real_nginx_reload_failure_restores_files(nginx):
 # ------------------------------------------------------------------ Apache
 @pytest.fixture
 def apache(tmp_path):
+    yield from apache_site(tmp_path)
+
+
+def apache_site(tmp_path):
     port = free_port()
     s = Site(tmp_path, port)
     mods = "/usr/lib/apache2/modules"
@@ -267,6 +275,10 @@ SECRET = "c2VjcmV0LXRzaWctYmFzZTY0LXZhbHVlLTEyMzQ1Ng=="      # base64
 
 @pytest.fixture
 def bind(tmp_path):
+    yield from bind_site(tmp_path)
+
+
+def bind_site(tmp_path):
     if not shutil.which("named"):
         pytest.skip("named 없음")
     port = free_port()
@@ -390,6 +402,10 @@ def test_systemd_units_pass_systemd_analyze_verify(tmp_path):
 # ------------------------------------------------------------------ 진짜 sshd + sudo + 진짜 nginx (프로세스 내 가짜 SSH 서버가 아님)
 @pytest.fixture
 def real_ssh(tmp_path):
+    yield from real_ssh_site(tmp_path)
+
+
+def real_ssh_site(tmp_path):
     """root 소유 폴더에 배포하려면 sudo 가 필요한 상황을 만든다: 배포 계정 cdeploy(NOPASSWD sudo)로 실제 OpenSSH 서버에 접속."""
     if os.geteuid() != 0 or not all(shutil.which(b) for b in ("sshd", "ssh-keygen", "ssh-keyscan", "sudo", "useradd")):
         pytest.skip("root·sshd·sudo 필요")

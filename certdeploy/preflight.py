@@ -93,7 +93,7 @@ def _check_iis(d, t, out: List[Check]) -> None:
             for b in t.iis["bindings"]:
                 cur = prev.get(iisdeploy.binding_key(b), "")
                 out.append(Check(t.name, f"바인딩 {b['site']}:{b['port']}", True, f"현재 지문 {cur or '(없음)'}"))
-            if iisdeploy.thumbprint(d.bundle) in prev.values():
+            if not getattr(d.bundle, "pending", False) and iisdeploy.thumbprint(d.bundle) in prev.values():
                 out.append(Check(t.name, "현재 바인딩", True, "이미 새 인증서에 연결되어 있음"))
     except TransportError as e:
         out.append(Check(t.name, "IIS 점검", False, str(e)))

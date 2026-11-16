@@ -187,3 +187,16 @@ def key_permission_problems(path: str) -> List[str]:
     except OSError:
         pass
     return problems
+
+
+class PendingBundle:
+    """자동 발급(ACME) 설정 직후 첫 발급 전: 인증서 파일은 아직 없지만 발급할 이름은 안다.
+    validate·preflight 가 대상 서버 접속·권한·이름(SAN) 점검을 미리 할 수 있게 쓰는 자리표시자(배포에는 쓰지 않는다)."""
+    pending = True
+    serial = None
+
+    def __init__(self, names):
+        self.names = list(names)
+
+    def covers(self, host: str) -> bool:
+        return any(hostname_matches(n, host) for n in self.names)

@@ -11,7 +11,7 @@
 | R1 | 서버 50대 이하의 인증서 만료 감시·알림 | `monitoring/`(Prometheus·ssl_exporter·Alertmanager·Grafana) | ✅ promtool 규칙 시험, 🧪 실제 Prometheus·Alertmanager·ssl_exporter | T-01, T-02 |
 | R2 | 상용 와일드카드(RapidSSL) **수동 반입** 후 자동 배포 | `certdeploy csr/import/deploy` | ✅, 🧪 OpenSSL 체인 검증 | T-04~T-08 |
 | R3 | 대상 서버에 **에이전트 없이** 배포 | SSH(OpenSSH)/API, 실패 시 자동 롤백 | ✅, 🧪 **실제 sshd+sudo·nginx·Apache·Tomcat 배포·롤백** | T-05, T-07, T-29 |
-| R4 | Let's Encrypt **자체 발급** — DNS 연동과 수동 TXT 둘 다 | 내장 ACME(DNS-01) `issue/renew` | ✅ 가짜 CA 로 발급 전 과정 | T-14~T-16 |
+| R4 | Let's Encrypt **자체 발급** — DNS 연동과 수동 TXT 둘 다 | 내장 ACME(DNS-01) `issue/renew` | ✅ 가짜 CA 로 발급 전 과정, 🧪 **실제 ACME 서버(Pebble)+실제 BIND 로 와일드카드 발급·교체, 수동 TXT 두 단계** | T-14~T-16 |
 | R5 | DNS 호환성(여러 DNS 중 선택) | infoblox·rfc2136·cloudflare·powerdns·webhook·exec·manual, **CNAME 위임** | ✅, 🧪 **실제 BIND 의 RFC 2136 TSIG·CNAME 위임** | T-14, T-17 |
 | R6 | 웹방화벽(모니터랩: 업로드 후 「적용」 단계) | `http_api`(단계·대기·롤백) / `manual`(교체 파일·독촉·서빙 확인) | ✅ 가짜 WAF | T-18, T-21 |
 | R7 | 관리자 화면에서 메일 입력, 인증서별 개인키 암호 사용/미사용 | 관리자 화면 「알림」·「인증서·승인」, `settings.json`(600) | ✅, 🧪 실제 브라우저 | T-20, T-22 |
@@ -26,7 +26,7 @@
 |---|---|---|---|---|
 | R12 | 미등록 인증서 자동 탐색 | `certdeploy-discover`(읽기 전용, 사설 대역만, 주간 타이머, 알림) | ✅ 실제 TLS 소켓 | **T-30** |
 | R13 | AD/LDAP 없이 로그인 보안 강화 | 2단계 인증(TOTP)·복구 코드·정책 강제 | ✅, 🧪 설치 시험에서 등록 흐름 | T-23 |
-| R14 | 배포 전 승인(1~3인) | `approval` 정책·승인 화면·긴급 우회 | ✅ | T-24 |
+| R14 | 배포 전 승인(1~3인) | `approval` 정책·승인 화면·긴급 우회 | ✅, 🧪 실제 ACME 발급본으로 승인 대기→승인→배포 | T-24 |
 | R15 | IIS 자동 배포 | `type: iis`(SSH+PowerShell) | ✅ 가짜 Windows (PowerShell 실행은 미검증) | T-25 |
 | R16 | WebtoB/JEUS 자동 배포 | `type: webtob`/`jeus`(암호화 키, 소유자, 키스토어) | ✅, 🧪 실제 Tomcat 이 JKS/PKCS12 를 읽음 | T-26 |
 | R17 | 알림 확장(관리자 화면에서 설정) | 메일·메신저 5종·ServiceNow/Jira 티켓, 심각도·반복 억제 | ✅ 가짜 서버 | T-27 |
@@ -50,6 +50,8 @@
 | 기획 | 자동 탐색(R12)과 원스톱 설치·업데이트(R10·R11)에 대응하는 VM 시험 항목이 없음 | T-30, T-31 추가 |
 | 시험 | 실제 sshd 시험의 임시 계정 이름이 고정이라 이전 실행 잔여 계정과 충돌 | 고유 이름·강제 정리로 수정 |
 | 문서 | 검증 보고서 요약(시험 수·기능표)과 일부 문서의 시험 범위·IIS 설명이 오래됨 | 현재 상태로 갱신 |
+| 시험 | **실제 ACME 서버(Pebble) 전 과정 시험**에서 자동 발급 신규 구성 시 첫 발급 전에는 `validate`·`preflight`(대상 서버 사전 점검)가 "인증서 파일 없음"으로 멈춤을 발견 | 발급할 이름으로 대상 점검을 계속하도록 수정 |
+| UX | 수동 TXT 방식에서 발급 후 등록한 TXT 를 지워도 된다는 안내가 없음 | 안내 추가 |
 | 보안 | 모든 관리 API 의 인증 적용, CSRF(JSON 전용 + SameSite=Strict 쿠키), 보안 헤더(CSP·X-Frame-Options) 재확인 | 이상 없음 |
 | UI | 상단 메뉴 + 중첩 탭 구조로 기능이 늘수록 찾기 어려움 | 사이드바 정보 구조로 개편(R20) |
 

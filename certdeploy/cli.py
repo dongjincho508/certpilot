@@ -15,7 +15,7 @@ from . import __version__, acme, approval, backup as backup_mod, backupjob, diag
 from .dnsprov import DnsProviderError, build_provider
 from .dnsquery import DnsError, system_resolvers
 from .backup import BackupError, create_backup, restore_backup
-from .bundle import BundleError, key_permission_problems, load_bundle
+from .bundle import BundleError, PendingBundle, key_permission_problems, load_bundle
 from .config import HOST_RE, NAME_RE, ConfigError, load_config
 from .engine import Deployer
 from .handlers import TYPES
@@ -84,6 +84,14 @@ def _bundle(cs, exit_on_error=True):
         sys.exit(2)
 
 
+def _bundle_for_check(cs):
+    """점검(validate·preflight)용: 자동 발급 인증서가 아직 한 번도 발급되지 않았으면 자리표시자로 대상 점검은 계속한다."""
+    if cs.acme and not os.path.exists(cs.cert_file):
+        click.echo(f"[{cs.name}] 아직 발급 전(자동 발급): 첫 발급은 `certdeploy --cert {cs.name} issue`. 지금은 설정·대상 서버만 점검합니다")
+        return PendingBundle(cs.acme["domains"])
+    return _bundle(cs)
+
+
 def _deployer(cs, bundle):
     try:
         state = State(cs.state_dir).load()
@@ -132,8 +140,15 @@ def validate(obj):
     code = 0
     for cs in sets:
         _hdr(cs, len(sets) > 1)
-        b = _bundle(cs)
+        b = _bundle_for_check(cs)
         d = _deployer(cs, b)
+        if getattr(b, "pending", False):
+            problems = d.validate_targets()
+            for p in problems:
+                click.echo(f"문제: {p}")
+            click.echo(f"발급할 이름: {', '.join(b.names)} · 대상 {len(cs.targets)}개")
+            code = max(code, 1 if problems else 0)
+            continue
         enc = open(cs.key_file, "rb").read(400).find(b"ENCRYPTED") >= 0
         click.echo(f"개인키 저장: {'암호화됨' if enc else '평문(권한 600으로 보호)'}  설정 key_encryption={cs.key_encryption}")
         if enc != (cs.key_encryption == 'passphrase'):
@@ -161,7 +176,7 @@ def preflight(obj, only):
     bad = 0
     for cs in sets:
         _hdr(cs, len(sets) > 1)
-        checks = run_preflight(_deployer(cs, _bundle(cs)), list(only) or None)
+        checks = run_preflight(_deployer(cs, _bundle_for_check(cs)), list(only) or None)
         for c in checks:
             click.echo(f"{'✔' if c.ok else '✘'} [{c.target}] {c.name} — {c.detail}")
             bad += not c.ok
@@ -393,6 +408,13 @@ def _report_issue_failure(cs, notifier, backoff, message):
 EXIT_WAITING_DNS = 4          # 사람이 DNS 에 TXT 를 등록하기를 기다리는 중(수동 모드)
 
 
+def _txt_cleanup_hint(records):
+    """수동 TXT 방식: 발급이 끝나면 사람이 등록했던 TXT 는 더 필요 없다(남겨 두면 DNS 가 지저분해지고 다음 안내와 헷갈림)."""
+    if records:
+        click.echo("이제 DNS 에 등록했던 아래 TXT 레코드는 지워도 됩니다(다음 갱신 때는 새 값을 다시 안내합니다): "
+                   + ", ".join(sorted({n.rstrip('.') for n, _ in records})))
+
+
 def _issue_acme(cfg, cs, staging, force_run, no_deploy, force_deploy, ignore_backoff):
     """내장 ACME(DNS-01). 연동(infoblox)은 한 번에, 수동(manual)은 'TXT 안내 → 등록 후 재실행' 두 단계."""
     a = cs.acme
@@ -414,6 +436,7 @@ def _issue_acme(cfg, cs, staging, force_run, no_deploy, force_deploy, ignore_bac
         client = acme.load_account(cs.state_dir, directory, a["email"])
         provider = build_provider(a["dns"])
         resolvers = a["dns"]["check_resolvers"] or system_resolvers()
+        manual_done = []
         if provider.automatic:
             if pend:
                 acme.clear_pending(cs.state_dir, cs.name)
@@ -430,12 +453,14 @@ def _issue_acme(cfg, cs, staging, force_run, no_deploy, force_deploy, ignore_bac
                     click.echo("아직 보이지 않는 레코드: " + ", ".join(n for n, _ in missing))
                 notifier.fire(_lego_label(cs) + ":dns", f"DNS TXT 등록 필요: {cs.name}", text, "warning")
                 return EXIT_WAITING_DNS
+            manual_done = acme.delegated_records(acme.txt_records(pend), a["dns"].get("delegate_map"))
             key_pem, chain = acme.complete_order(client, pend, cs.state_dir, _key_read_pw(cs))
         if staging:                                   # 시험 발급분은 신뢰되지 않으므로 운영 위치에 설치·배포하지 않는다
             sdir = os.path.join(cs.state_dir, "acme", "staging")
             bundle, _ = acme.install_issued(key_pem, chain, os.path.join(sdir, cs.name + ".crt"), os.path.join(sdir, cs.name + ".key"), _key_write_pw(cs))
             acme.clear_pending(cs.state_dir, cs.name)
             click.echo(f"[{cs.name}] 스테이징 발급 성공(일련번호 {bundle.serial:x}) — 운영 위치에는 설치하지 않았습니다. 이제 --staging 없이 실행하세요")
+            _txt_cleanup_hint(manual_done)
             return 0
         bundle, _ = acme.install_issued(key_pem, chain, cs.cert_file, cs.key_file, _key_write_pw(cs))
         acme.clear_pending(cs.state_dir, cs.name)
@@ -449,6 +474,7 @@ def _issue_acme(cfg, cs, staging, force_run, no_deploy, force_deploy, ignore_bac
     notifier.resolve(_lego_label(cs))
     notifier.resolve(_lego_label(cs) + ":dns")
     click.echo(f"[{cs.name}] 발급 완료: 일련번호 {bundle.serial:x}, 만료 {bundle.not_after:%Y-%m-%d} → {cs.cert_file}")
+    _txt_cleanup_hint(manual_done)
     if no_deploy:
         return 0
     return _run_deploy(cfg, cs, _bundle(cs), force_deploy, False, (), False, action="renew", issue_failures=0)
