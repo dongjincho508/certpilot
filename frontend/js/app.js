@@ -89,10 +89,28 @@ function showLogin() {
   me = null; $('app-view').hidden = true; $('login-view').hidden = false; $('login-pass').value = '';
   $('login-code-wrap').hidden = true; $('login-code').value = '';
 }
+const PAGES = {
+  dashboard: ['감시', '서버 인벤토리'], users: ['관리', '사용자'], audit: ['관리', '감사 로그'], debug: ['관리', '진단'],
+  'cd:home': ['운영', '대시보드'], 'cd:certs': ['운영', '인증서·승인'], 'cd:notify': ['운영', '알림'], 'cd:backup': ['운영', '백업'],
+};
+let currentView = null;
+function markNav() {
+  const key = currentView === 'cd' ? `cd:${cdTabName}` : currentView;
+  document.querySelectorAll('#main-tabs .cp-nav-link').forEach((a) => {
+    const k = a.dataset.cdTab ? `cd:${a.dataset.cdTab}` : a.dataset.view;
+    a.classList.toggle('active', k === key);
+    if (k === key) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+  });
+  const [g, page] = PAGES[key] || ['', ''];
+  $('crumb-group').textContent = g; $('crumb-page').textContent = page;
+  document.title = `${page} · CertPilot`;
+}
+function closeSidebar() { const s = bootstrap.Offcanvas.getInstance($('sidebar')); if (s) s.hide(); }
 function showView(name) {
   ['dashboard', 'audit', 'users', 'debug', 'cd'].forEach((v) => { $(`view-${v}`).hidden = v !== name; });
   $('view-mfagate').hidden = true;
-  document.querySelectorAll('#main-tabs .nav-link').forEach((a) => a.classList.toggle('active', a.dataset.view === name));
+  currentView = name; markNav();
+  window.scrollTo({ top: 0 });
   if (name === 'dashboard') guarded(loadServers);
   if (name === 'audit') guarded(loadAudit);
   if (name === 'users') guarded(loadUsers);
@@ -102,6 +120,7 @@ function showView(name) {
 async function enter(user) {
   me = user; $('login-view').hidden = true; $('app-view').hidden = false;
   $('whoami').textContent = `${user.username} · ${user.role === 'admin' ? '관리자' : '운영자'}`;
+  $('avatar').textContent = (user.username || '?').slice(0, 1).toUpperCase();
   document.querySelectorAll('.admin-only').forEach((e) => { e.hidden = user.role !== 'admin'; });
   let gate = null;
   try { gate = await api('/auth/mfa'); } catch { /* 조회 실패 시 일반 화면으로 */ }
@@ -111,7 +130,7 @@ async function enter(user) {
     return;
   }
   $('view-mfagate').hidden = true;
-  showView('dashboard');
+  if (user.role === 'admin') { cdTabName = 'home'; showView('cd'); } else showView('dashboard');   // 관리자는 운영 대시보드부터
 }
 
 // ---------------------------------------------------------------- 현황
@@ -180,7 +199,7 @@ async function loadServers() {
   const groups = [...new Set(allServers.map((s) => s.group).filter(Boolean))].sort();
   const sel = $('filter-group'), cur = sel.value; sel.replaceChildren(new Option('전체 그룹', ''));
   groups.forEach((g) => sel.append(new Option(g, g))); sel.value = groups.includes(cur) ? cur : '';
-  $('summary-time').textContent = `서버 ${allServers.length}대 · 갱신 ${new Date().toISOString().slice(0, 19)}Z`;
+  $('summary-time').textContent = `서버 ${allServers.length}대 · 갱신 ${new Date().toLocaleString('ko-KR', { hour12: false })}`;
   renderStatCards(); renderTable();
   if (detailServerId && $('detail').classList.contains('show')) await renderDetail(detailServerId);
 }
@@ -425,13 +444,23 @@ async function loadCd() {
 }
 // ---- 설정·운영: 탭, 체크리스트, 채널 요약 (사용자 입장의 '무엇부터 해야 하나' 안내)
 let cdCache = null, cdTabName = 'home';
+const CD_HEAD = {
+  home: ['대시보드', '인증서 발급·배포, 알림, 백업 상태를 한눈에 봅니다. 처음이면 아래 설정 체크리스트를 위에서부터 따라 하세요.'],
+  certs: ['인증서·승인', '인증서별 개인키 보호 방식을 고르고, 갱신본 배포 승인 요청을 처리합니다.'],
+  notify: ['알림', '장애·만료 알림을 받을 메일·메신저·티켓 채널을 설정하고 바로 시험합니다.'],
+  backup: ['백업', '매일 자동 암호화 백업 결과와 외부 복사 상태를 확인합니다.'],
+};
 function cdTab(name) {
   cdTabName = name;
   document.querySelectorAll('[data-cd-pane]').forEach((p) => { p.hidden = p.dataset.cdPane !== name; });
-  document.querySelectorAll('#cd-tabs .nav-link').forEach((b) => b.classList.toggle('active', b.dataset.cdTab === name));
+  const [title, sub] = CD_HEAD[name] || CD_HEAD.home;
+  $('cd-title').textContent = title; $('cd-sub').textContent = sub;
+  if (currentView === 'cd') markNav();
 }
 function cdGo(tab, targetId) {
   cdTab(tab);
+  if (currentView !== 'cd') { $('view-cd').hidden = false; ['dashboard', 'audit', 'users', 'debug'].forEach((v) => { $(`view-${v}`).hidden = true; }); currentView = 'cd'; }
+  markNav();
   const c = targetId ? $(targetId) : null;
   if (c && c.classList.contains('collapse')) bootstrap.Collapse.getOrCreateInstance(c, { toggle: false }).show();
   (c || $('view-cd')).scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -516,11 +545,11 @@ function renderCd() {
   });
   const req = rows.filter((r) => r.req), done = req.filter((r) => r.s === 'ok').length;
   const pr = $('cd-home-progress'); pr.className = `badge ms-auto ${done === req.length ? 'text-bg-success' : 'text-bg-warning'}`; pr.textContent = `필수 ${done}/${req.length} 완료`;
-  const setBadge = (id, text, cls) => { const b = $(id); b.hidden = !text; b.textContent = text || ''; if (cls) b.className = `badge ${cls} ms-1`; };
-  setBadge('cd-badge-home', todo.length ? String(todo.length) : '', 'text-bg-danger');
-  setBadge('cd-badge-certs', pend ? String(pend) : '', 'text-bg-warning');
-  setBadge('cd-badge-backup', bkOk ? '' : '!', 'text-bg-danger');
-  setBadge('cd-badge-notify', nch ? '' : '!', 'text-bg-danger');
+  const setBadge = (id, text, cls) => { const b = $(id); b.hidden = !text; b.textContent = text || ''; if (cls) b.className = `cp-nav-badge ${cls}`; };
+  setBadge('cd-badge-home', todo.length ? String(todo.length) : '', 'is-danger');
+  setBadge('cd-badge-certs', pend ? String(pend) : '', 'is-warning');
+  setBadge('cd-badge-backup', bkOk ? '' : '!', 'is-danger');
+  setBadge('cd-badge-notify', nch ? '' : '!', 'is-danger');
   renderChannelRows(c.o);
 }
 function renderChannelRows(o) {
@@ -752,13 +781,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
   $('logout').addEventListener('click', async (e) => { e.preventDefault(); await api('/auth/logout', 'POST').catch(() => {}); allServers = []; showLogin(); });
-  document.querySelectorAll('#main-tabs .nav-link').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); showView(a.dataset.view); }));
+  document.querySelectorAll('#main-tabs .cp-nav-link').forEach((a) => a.addEventListener('click', (e) => {
+    e.preventDefault(); closeSidebar();
+    if (a.dataset.cdTab) {
+      cdTab(a.dataset.cdTab);
+      if (currentView !== 'cd') showView('cd'); else { markNav(); window.scrollTo({ top: 0 }); }
+    } else showView(a.dataset.view);
+  }));
   $('btn-scan-all').addEventListener('click', (e) => guarded(() => busy(e.currentTarget, async () => { const r = await api('/scan', 'POST'); toast(`${r.scanned}대 조회 완료`); await loadServers(); })));
   $('btn-export').addEventListener('click', () => { window.location = '/export.csv'; });
   $('btn-verify').addEventListener('click', () => guarded(verifyAudit));
   $('cd-mail-form').addEventListener('submit', saveMail);
   wireChannels();
-  document.querySelectorAll('#cd-tabs .nav-link').forEach((b) => b.addEventListener('click', () => cdTab(b.dataset.cdTab)));
   $('btn-mail-test').addEventListener('click', testMail);
   $('btn-cd-refresh').addEventListener('click', () => guarded(loadCd));
   $('btn-dbg-refresh').addEventListener('click', () => guarded(loadDebug));

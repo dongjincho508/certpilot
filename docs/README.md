@@ -1,10 +1,12 @@
 # 문서 안내
 
-이 저장소는 **인증서 감시(Prometheus·ssl_exporter·Alertmanager·Grafana) + 인증서 발급·자동 배포(`certdeploy`)** 를 Rocky Linux 관리 서버 1대에서 운영하기 위한 코드와 문서다. CertPilot 웹 앱은 Render 구성은 쓰지 않고, 같은 코드를 관리 서버의 **관리자 화면(설정·운영)** 으로 설치해 쓴다. 웹 앱 자체 문서는 맨 아래.
+이 저장소는 **인증서 감시(Prometheus·ssl_exporter·Alertmanager·Grafana) + 인증서 발급·자동 배포(`certdeploy`)** 를 Rocky Linux 관리 서버 1대에서 운영하기 위한 코드와 문서다. CertPilot 웹 앱은 Render 구성은 쓰지 않고, 같은 코드를 관리 서버의 **관리자 화면** 으로 설치해 쓴다. 웹 앱 자체 문서는 맨 아래.
 
-## 지금 상태 (2026-10-28)
-- 코드·자동 테스트 완료, **실제 VM·실제 장비 검증 전** → 무엇을 검증했고 무엇이 남았는지는 [검증 보고서](ops/verification-report.md)
-- **RapidSSL 와일드카드 만료 2026-11-12 08:59(KST)** — 11/5 에 새 방식 사용 여부 결정([준비 체크리스트](ops/pre-vm-checklist.md))
+## 지금 상태 (2026-11-16)
+- 개발·자동 시험(995개)·진짜 소프트웨어 검증(nginx·Apache·Tomcat·BIND·sshd, 설치 스크립트 실제 실행, 실제 브라우저) 완료, **실제 VM·장비 검증 전** → [검증 보고서](ops/verification-report.md)
+- 요구사항이 어디에 구현·검증됐고 VM 에서 무엇으로 확인하는지: **[요구사항 추적표](ops/requirements.md)** (재검토 2026-11-16)
+- 관리자 화면은 사이드바 앱 셸(운영·감시·관리 메뉴, 대시보드, 다크 모드, 모바일)로 개편
+- RapidSSL 와일드카드(2026-11-12 만료)는 이 시스템 시험과 별개로 기존 절차로 교체
 
 ## 🚀 처음이라면
 **[원스톱 시작 가이드](ops/quickstart.md)** — 설치(마법사) → 첫날 체크리스트 → 화면 가이드 → 운영 주기표 → 증상별 조치를 한 문서에. 자세한 명령은 아래 표의 상세 매뉴얼.
@@ -12,9 +14,9 @@
 | 내가 지금… | 바로 가기 |
 |---|---|
 | 🛠 서버를 새로 설치한다 | [원스톱 시작 가이드 4장](ops/quickstart.md) → [상세 매뉴얼](ops/vm-install-and-test.md) |
-| 👀 매일 운영한다 | [운영 주기표](ops/quickstart.md) · 관리자 화면 「설정·운영 → 시작하기」 |
+| 👀 매일 운영한다 | [운영 주기표](ops/quickstart.md) · 관리자 화면 「대시보드」 |
 | 🧯 문제가 생겼다 | [증상별 조치](ops/quickstart.md) · [디버깅 가이드](ops/debugging.md) |
-| ✅ 시험한다 | [테스트 시나리오 T-01~T-28](ops/test-scenarios.md) |
+| ✅ 시험한다 | [테스트 시나리오 T-01~T-31](ops/test-scenarios.md) |
 | 📋 결정·요청할 것을 정리한다 | [준비 체크리스트](ops/pre-vm-checklist.md) |
 
 ## 읽는 순서
@@ -22,10 +24,10 @@
 |---|---|---|
 | ① 준비 | [VM 구성 전 준비 체크리스트](ops/pre-vm-checklist.md) | 결정할 것, 모을 정보, 요청할 것, 일정 |
 | ② 설치 | [관리 서버 설치·테스트 매뉴얼](ops/vm-install-and-test.md) | Rocky 10.x 에서 감시 스택+certdeploy 설치(명령어 상세), 예상 화면. **자동 설치 스크립트**(`scripts/install-mgmt-server.sh`)·Kickstart 예시 포함 |
-| ③ 시험 | [테스트 시나리오](ops/test-scenarios.md) | T-01~T-28 절차·기대 결과·증거·결과 기록표 |
+| ③ 시험 | [테스트 시나리오](ops/test-scenarios.md) | T-01~T-31 절차·기대 결과·증거·결과 기록표 |
 | ④ 발급 | [자동 발급 가이드](ops/auto-issue.md) · [certdeploy](ops/certdeploy.md) | Let's Encrypt(DNS 연동/수동) 발급, 수동 와일드카드 가져오기, 명령 요약 |
 | ⑤ 호환성 | [호환성 가이드](ops/compatibility.md) | DNS 제공자 선택, 웹방화벽·어플라이언스(HTTP API) 배포, 확장 방법 |
-| ⑤-1 설정 화면 | [설치 매뉴얼 7-5](ops/vm-install-and-test.md) · [시작 가이드 6장](ops/quickstart.md) | 관리자 화면 「설정·운영」: 체크리스트, 알림(메일·웹훅·티켓), 승인, 백업, 개인키 보호 |
+| ⑤-1 설정 화면 | [설치 매뉴얼 7-5](ops/vm-install-and-test.md) · [시작 가이드 6장](ops/quickstart.md) | 관리자 화면(사이드바 운영 메뉴): 대시보드·체크리스트, 알림(메일·웹훅·티켓), 승인, 백업, 개인키 보호 |
 | ⑤-2 자동 탐색 | [설치 매뉴얼 10-1](ops/vm-install-and-test.md) | `certdeploy-discover`: 대역을 스캔해 미등록·위험 인증서 찾기(읽기 전용, 주 1회 타이머, 알림) |
 | ⑥ 장애 | [디버깅 가이드](ops/debugging.md) | trace/diagnose, 버그 수집·전달 형식 |
 | ⑦ 교체 | [인증서 교체 체크리스트](ops/cert-rotation-checklist.md) | 11/12 만료 대응(기존 방식) 일정·절차 |
@@ -33,6 +35,7 @@
 ## 참고
 | 문서 | 내용 |
 |---|---|
+| [요구사항 추적표](ops/requirements.md) | 요구사항 R1~R20 ↔ 구현 ↔ 검증 ↔ VM 시험, 운영 결정, 재검토 결과 |
 | [검증 보고서](ops/verification-report.md) | 기능별 검증 방법·결과, 미검증 항목과 VM 에서 확인할 방법 |
 | [오늘 밤 할 일](ops/tonight-todo.md) | 2026-10-28 밤 작업(준비 체크리스트의 첫 단계) |
 | [감시 서버 구축 가이드(Rocky 10)](ops/rocky-linux-deploy.md) | 감시 스택만 구축하는 상세 가이드(설치 매뉴얼의 5~6단계 원본) |

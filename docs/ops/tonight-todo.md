@@ -20,7 +20,7 @@
 | 3 | **`deploy` 계정 생성 가능 여부** | 대상 서버마다 SSH 키 로그인 계정(`deploy`)과 인증서 전용 디렉터리, 재로드 명령만 sudo 허용이 가능한지 담당자 확인 — [설치 매뉴얼 8단계](vm-install-and-test.md) |
 | 4 | **시험용 대상 1대 지정** | 운영 영향이 적은 Apache 1대(없으면 시험용 서버). 실패 주입(T-07) 시험에 쓴다 — [테스트 시나리오](test-scenarios.md) |
 | 5 | **알림 정보** | SMTP 릴레이 주소·포트·인증 여부·발신 주소·수신자 목록, (사용 시) Teams 웹훅 URL — **URL·비밀번호는 채팅/메일로 보내지 말고** 설치 당일 서버에서 직접 입력 |
-| 6 | Windows(IIS)·WebtoB/JEUS 담당자 확인 | 자동 배포가 어려운 서버는 수동 교체 대상으로 분류. IIS 는 [deploy-iis.ps1](../../certdeploy/deploy-iis.ps1)(초안·미검증)만 있음 |
+| 6 | Windows(IIS)·WebtoB/JEUS 담당자 확인 | 자동 배포가 어려운 서버는 수동 교체 대상으로 분류. IIS 는 `type: iis`(SSH+PowerShell)로 자동 배포 가능(T-25), SSH 를 열 수 없으면 [deploy-iis.ps1](../../certdeploy/deploy-iis.ps1)(초안·미검증)만 있음 |
 
 ## C. VM 이 준비되면 (당일 순서)
 1. [설치 매뉴얼](vm-install-and-test.md) 1~6단계: OS → Docker → 감시 스택 기동 → nginx HTTPS (합격 기준은 각 단계 끝)

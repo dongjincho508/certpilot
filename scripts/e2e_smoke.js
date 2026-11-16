@@ -17,6 +17,8 @@ const { chromium } = require('playwright');
   await page.waitForFunction(() => document.getElementById('login-error').textContent.length > 0);
   await page.fill('#login-pass', 'Demo!Passw0rd-1234');
   await page.click('#login-form button');
+  await page.waitForSelector('#app-view:not([hidden])');
+  await page.click('#main-tabs [data-view="dashboard"]');   // 관리자는 대시보드(운영)로 들어오므로 인벤토리로 이동
   await page.waitForSelector('#servers-body tr td .badge');
   const rows = await page.$$eval('#servers-body tr', (trs) => trs.map((t) => t.innerText.replace(/\s+/g, ' ')));
   console.log('rows:', JSON.stringify(rows));
@@ -41,7 +43,7 @@ const { chromium } = require('playwright');
   await page.screenshot({ path: `${out}/5-probe.png` });
   await page.click('#server-modal button:has-text("취소")');
   await page.waitForSelector('#server-modal', { state: 'hidden' });
-  await page.click('[data-view=audit]');
+  await page.click('#main-tabs [data-view=audit]');
   await page.click('#btn-verify');
   await page.waitForFunction(() => document.getElementById('audit-integrity').textContent.includes('무결성 정상'));
   await page.screenshot({ path: `${out}/4-audit.png` });
