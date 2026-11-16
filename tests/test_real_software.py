@@ -397,7 +397,7 @@ def real_ssh(tmp_path):
         if str(d) in ("/", "/tmp"):
             break
         os.chmod(d, 0o755)
-    user = f"cdep{os.getpid() % 10000}"
+    user = "cdep" + os.urandom(3).hex()                         # 시험마다 고유한 임시 계정(이전 실행의 잔여 계정과 겹치지 않게)
     subprocess.run(["useradd", "-m", "-s", "/bin/bash", user], check=True, capture_output=True)
     subprocess.run(["usermod", "-p", "*", user], check=True, capture_output=True)       # 잠긴 계정(!)은 UsePAM no 일 때 공개키 로그인도 거부된다
     sshdir = tmp_path / "sshd"
@@ -431,7 +431,7 @@ def real_ssh(tmp_path):
     p.terminate()
     p.wait(timeout=10)
     sudoers.unlink(missing_ok=True)
-    subprocess.run(["userdel", "-r", user], capture_output=True)
+    subprocess.run(["userdel", "-r", "-f", user], capture_output=True)
 
 
 @need("nginx", "sshd")

@@ -10,57 +10,83 @@
     <link rel="stylesheet" href="/static/css/app.css">
     <script src="/static/js/theme.js"></script>
 </head>
-<body class="bg-body-tertiary">
+<body class="cp-body">
 
 <!-- 로그인 -->
-<main id="login-view" class="container py-5" hidden>
-    <div class="row justify-content-center"><div class="col-11 col-sm-8 col-md-5 col-lg-4">
-        <div class="text-center mb-4">
-            <i class="bi bi-shield-check text-primary" style="font-size:3rem"></i>
-            <h1 class="h3 mt-2 mb-0">CertPilot</h1>
-            <p class="text-body-secondary">Linux 서버 인증서 만료 모니터링</p>
+<main id="login-view" class="cp-login" hidden>
+    <section class="cp-login-hero d-none d-lg-flex" aria-hidden="true">
+        <div class="cp-hero-inner">
+            <div class="cp-brand-lg"><span class="cp-logo"><i class="bi bi-shield-lock-fill"></i></span>CertPilot</div>
+            <h2 class="cp-hero-title">인증서 만료부터 배포까지,<br>한 곳에서 안전하게.</h2>
+            <ul class="cp-hero-list">
+                <li><i class="bi bi-activity"></i><div><strong>만료 감시와 단계별 알림</strong><span>30·14·7·3일 전 메일·메신저·티켓으로 알립니다</span></div></li>
+                <li><i class="bi bi-rocket-takeoff"></i><div><strong>에이전트 없는 자동 배포</strong><span>SSH·API 로 반영하고, 실패하면 자동으로 되돌립니다</span></div></li>
+                <li><i class="bi bi-patch-check"></i><div><strong>승인·2단계 인증·감사 로그</strong><span>누가 언제 무엇을 했는지 변조 없이 남깁니다</span></div></li>
+                <li><i class="bi bi-hdd-network"></i><div><strong>매일 암호화 백업</strong><span>서버가 사라져도 새 서버로 복구합니다</span></div></li>
+            </ul>
+            <div class="cp-hero-foot">인증서 운영 콘솔</div>
         </div>
-        <form id="login-form" class="card shadow-sm"><div class="card-body p-4">
-            <div class="form-floating mb-3"><input class="form-control" id="login-user" placeholder="계정" autocomplete="username" required><label for="login-user">계정</label></div>
-            <div class="form-floating mb-3"><input class="form-control" id="login-pass" type="password" placeholder="비밀번호" autocomplete="current-password" required><label for="login-pass">비밀번호</label></div>
-            <div id="login-code-wrap" hidden class="form-floating mb-3"><input class="form-control" id="login-code" placeholder="인증 코드" autocomplete="one-time-code" inputmode="numeric" maxlength="11"><label for="login-code">인증 앱 6자리 코드 (또는 복구 코드)</label></div>
-            <div id="login-error" class="text-danger small mb-3" role="alert"></div>
-            <button class="btn btn-primary w-100 btn-lg" id="login-btn">로그인</button>
-        </div></form>
-    </div></div>
+    </section>
+    <section class="cp-login-panel">
+        <div class="cp-login-card">
+            <div class="cp-brand-sm d-lg-none"><span class="cp-logo"><i class="bi bi-shield-lock-fill"></i></span>CertPilot</div>
+            <h1 class="cp-login-title">로그인</h1>
+            <p class="cp-login-sub">관리 콘솔에 접속합니다. 계정은 관리자에게 받으세요.</p>
+            <form id="login-form" novalidate>
+                <div class="form-floating mb-3"><input class="form-control" id="login-user" placeholder="계정" autocomplete="username" required><label for="login-user">계정</label></div>
+                <div class="form-floating mb-3"><input class="form-control" id="login-pass" type="password" placeholder="비밀번호" autocomplete="current-password" required><label for="login-pass">비밀번호</label></div>
+                <div id="login-code-wrap" hidden class="form-floating mb-3"><input class="form-control" id="login-code" placeholder="인증 코드" autocomplete="one-time-code" inputmode="numeric" maxlength="11"><label for="login-code">인증 앱 6자리 코드 (또는 복구 코드)</label></div>
+                <div id="login-error" class="cp-form-error mb-3" role="alert"></div>
+                <button class="btn btn-primary w-100 btn-lg" id="login-btn">로그인</button>
+            </form>
+            <div class="cp-login-note"><i class="bi bi-shield-check"></i> 2단계 인증을 켠 계정은 비밀번호 확인 후 인증 앱 코드를 묻습니다. 5회 실패하면 15분간 잠깁니다.</div>
+        </div>
+    </section>
 </main>
 
 <!-- 앱 -->
-<div id="app-view" hidden>
-    <nav class="navbar navbar-expand-md bg-body border-bottom sticky-top shadow-sm">
-        <div class="container-xxl">
-            <a class="navbar-brand fw-bold" href="#"><i class="bi bi-shield-check me-2"></i>CertPilot</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav" aria-controls="nav" aria-expanded="false" aria-label="메뉴"><span class="navbar-toggler-icon"></span></button>
-            <div class="collapse navbar-collapse" id="nav">
-                <ul class="navbar-nav me-auto" id="main-tabs">
-                    <li class="nav-item"><a class="nav-link active" href="#" data-view="dashboard"><i class="bi bi-speedometer2 me-1"></i>현황</a></li>
-                    <li class="nav-item admin-only"><a class="nav-link" href="#" data-view="audit"><i class="bi bi-journal-text me-1"></i>감사 로그</a></li>
-                    <li class="nav-item admin-only"><a class="nav-link" href="#" data-view="users"><i class="bi bi-people me-1"></i>사용자</a></li>
-                    <li class="nav-item admin-only"><a class="nav-link" href="#" data-view="cd"><i class="bi bi-sliders me-1"></i>설정·운영</a></li>
-                    <li class="nav-item admin-only"><a class="nav-link" href="#" data-view="debug"><i class="bi bi-bug me-1"></i>진단</a></li>
-                </ul>
-                <div class="d-flex align-items-center gap-2">
-                    <button class="btn btn-outline-secondary btn-sm" id="theme-toggle" type="button" aria-label="테마 전환" title="라이트/다크 전환"><i class="bi bi-moon-stars"></i></button>
-                    <div class="dropdown">
-                        <button class="btn btn-outline-secondary btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-person-circle me-1"></i><span id="whoami"></span></button>
-                        <ul class="dropdown-menu dropdown-menu-end">
-                            <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#pw-modal"><i class="bi bi-key me-2"></i>비밀번호 변경</a></li>
-                            <li><a class="dropdown-item" href="#" id="open-mfa"><i class="bi bi-shield-lock me-2"></i>2단계 인증</a></li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="#" id="logout"><i class="bi bi-box-arrow-right me-2"></i>로그아웃</a></li>
-                        </ul>
-                    </div>
+<div id="app-view" class="cp-app" hidden>
+    <aside class="cp-sidebar offcanvas-lg offcanvas-start" tabindex="-1" id="sidebar" aria-label="주 메뉴">
+        <div class="cp-brand">
+            <span class="cp-logo"><i class="bi bi-shield-lock-fill"></i></span>
+            <div class="cp-brand-text"><strong>CertPilot</strong><span>인증서 운영 콘솔</span></div>
+            <button type="button" class="btn-close btn-close-white ms-auto d-lg-none" data-bs-dismiss="offcanvas" data-bs-target="#sidebar" aria-label="메뉴 닫기"></button>
+        </div>
+        <nav class="cp-nav" id="main-tabs">
+            <div class="cp-nav-label admin-only">운영</div>
+            <a class="cp-nav-link admin-only" href="#" data-view="cd" data-cd-tab="home"><i class="bi bi-grid-1x2"></i><span>대시보드</span><span class="cp-nav-badge is-danger" id="cd-badge-home" hidden></span></a>
+            <a class="cp-nav-link admin-only" href="#" data-view="cd" data-cd-tab="certs"><i class="bi bi-award"></i><span>인증서·승인</span><span class="cp-nav-badge is-warning" id="cd-badge-certs" hidden></span></a>
+            <a class="cp-nav-link admin-only" href="#" data-view="cd" data-cd-tab="notify"><i class="bi bi-bell"></i><span>알림</span><span class="cp-nav-badge is-danger" id="cd-badge-notify" hidden></span></a>
+            <a class="cp-nav-link admin-only" href="#" data-view="cd" data-cd-tab="backup"><i class="bi bi-hdd-network"></i><span>백업</span><span class="cp-nav-badge is-danger" id="cd-badge-backup" hidden></span></a>
+            <div class="cp-nav-label">감시</div>
+            <a class="cp-nav-link" href="#" data-view="dashboard"><i class="bi bi-hdd-stack"></i><span>서버 인벤토리</span></a>
+            <div class="cp-nav-label admin-only">관리</div>
+            <a class="cp-nav-link admin-only" href="#" data-view="users"><i class="bi bi-people"></i><span>사용자</span></a>
+            <a class="cp-nav-link admin-only" href="#" data-view="audit"><i class="bi bi-journal-text"></i><span>감사 로그</span></a>
+            <a class="cp-nav-link admin-only" href="#" data-view="debug"><i class="bi bi-activity"></i><span>진단</span></a>
+        </nav>
+        <div class="cp-sidebar-foot"><i class="bi bi-book"></i> 도움말: <code>docs/ops/quickstart.md</code></div>
+    </aside>
+
+    <div class="cp-main">
+        <header class="cp-topbar">
+            <button class="btn cp-icon-btn d-lg-none" id="sidebar-toggle" type="button" data-bs-toggle="offcanvas" data-bs-target="#sidebar" aria-controls="sidebar" aria-label="메뉴 열기"><i class="bi bi-list"></i></button>
+            <nav class="cp-crumbs" aria-label="현재 위치"><span id="crumb-group">운영</span><i class="bi bi-chevron-right"></i><span id="crumb-page">대시보드</span></nav>
+            <div class="ms-auto d-flex align-items-center gap-2">
+                <button class="btn cp-icon-btn" id="theme-toggle" type="button" aria-label="테마 전환" title="라이트/다크 전환"><i class="bi bi-moon-stars"></i></button>
+                <div class="dropdown">
+                    <button class="btn cp-user-btn dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false"><span class="cp-avatar" id="avatar">?</span><span class="d-none d-sm-inline" id="whoami"></span></button>
+                    <ul class="dropdown-menu dropdown-menu-end shadow">
+                        <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#pw-modal"><i class="bi bi-key me-2"></i>비밀번호 변경</a></li>
+                        <li><a class="dropdown-item" href="#" id="open-mfa"><i class="bi bi-shield-lock me-2"></i>2단계 인증</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="#" id="logout"><i class="bi bi-box-arrow-right me-2"></i>로그아웃</a></li>
+                    </ul>
                 </div>
             </div>
-        </div>
-    </nav>
+        </header>
 
-    <main class="container-xxl py-4">
+        <main class="cp-content">
         <!-- 2단계 인증 등록 필요(보안 정책) -->
         <section id="view-mfagate" hidden>
             <div class="row justify-content-center"><div class="col-md-8 col-lg-6">
@@ -74,8 +100,8 @@
 
         <!-- 현황 -->
         <section id="view-dashboard">
-            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-                <div><h1 class="h3 mb-0">인증서 현황</h1><div class="text-body-secondary small" id="summary-time"></div></div>
+            <div class="cp-page-head">
+                <div><h1 class="cp-page-title">서버 인벤토리</h1><div class="cp-page-sub">SSH·TLS 로 직접 조회한 서버별 인증서 상태입니다. <span id="summary-time"></span></div></div>
                 <div class="d-flex gap-2">
                     <button class="btn btn-outline-secondary" id="btn-export"><i class="bi bi-filetype-csv me-1"></i>CSV</button>
                     <button class="btn btn-outline-primary admin-only" data-bs-toggle="modal" data-bs-target="#server-modal"><i class="bi bi-plus-lg me-1"></i>서버 등록</button>
@@ -105,8 +131,8 @@
 
         <!-- 진단 -->
         <section id="view-debug" hidden>
-            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-                <div><h1 class="h3 mb-0"><i class="bi bi-bug me-2"></i>진단</h1><div class="text-body-secondary small">문제가 생겼을 때 먼저 여기를 보세요. <strong>환경 점검</strong>(✅/⚠️)과 최근 오류 기록이 원인을 알려 줍니다. 도움 요청 시 「진단 번들」을 전달하면 됩니다(비밀번호·키는 들어 있지 않습니다).</div></div>
+            <div class="cp-page-head">
+                <div><h1 class="cp-page-title">진단</h1><div class="cp-page-sub">문제가 생겼을 때 먼저 여기를 보세요. <strong>환경 점검</strong>(✅/⚠️)과 최근 오류 기록이 원인을 알려 줍니다. 도움 요청 시 「진단 번들」을 전달하면 됩니다(비밀번호·키는 들어 있지 않습니다).</div></div>
                 <div class="d-flex align-items-center gap-2">
                     <button class="btn btn-outline-primary" id="btn-dbg-refresh"><i class="bi bi-arrow-clockwise me-1"></i>새로고침</button>
                     <button class="btn btn-outline-secondary" id="btn-dbg-bundle"><i class="bi bi-download me-1"></i>진단 번들(JSON)</button></div>
@@ -122,8 +148,8 @@
 
         <!-- 감사 로그 -->
         <section id="view-audit" hidden>
-            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-                <div><h1 class="h3 mb-0"><i class="bi bi-journal-text me-2"></i>감사 로그</h1><div class="text-body-secondary small">누가·언제·무엇을 했는지 기록입니다(변조 방지 체인). 붉은 줄은 보안 관련 이벤트(로그인 실패, 호스트 키 변경 등)입니다.</div></div>
+            <div class="cp-page-head">
+                <div><h1 class="cp-page-title">감사 로그</h1><div class="cp-page-sub">누가·언제·무엇을 했는지 기록입니다(변조 방지 체인). 붉은 줄은 보안 관련 이벤트(로그인 실패, 호스트 키 변경 등)입니다.</div></div>
                 <div class="d-flex align-items-center gap-2"><span id="audit-integrity" class="small"></span>
                     <button class="btn btn-outline-primary" id="btn-verify"><i class="bi bi-patch-check me-1"></i>무결성 검증</button></div>
             </div>
@@ -134,19 +160,14 @@
 
         <!-- 설정·운영 (certdeploy) -->
         <section id="view-cd" hidden>
-            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-                <div><h1 class="h3 mb-0"><i class="bi bi-sliders me-2"></i>설정·운영</h1>
-                    <div class="text-body-secondary small">인증서 발급·배포, 알림, 백업을 한 곳에서 관리합니다. <strong>처음이면 「시작하기」의 체크리스트를 위에서 아래로</strong> 따라 하세요.</div></div>
+            <div class="cp-page-head">
+                <div><h1 class="cp-page-title" id="cd-title">대시보드</h1>
+                    <div class="cp-page-sub" id="cd-sub">인증서 발급·배포, 알림, 백업 상태를 한눈에 봅니다. 처음이면 아래 <strong>설정 체크리스트</strong>를 위에서부터 따라 하세요.</div></div>
                 <button class="btn btn-outline-primary" id="btn-cd-refresh"><i class="bi bi-arrow-clockwise me-1"></i>새로고침</button>
             </div>
             <div id="cd-banner" class="alert alert-warning small" hidden></div>
             <div id="cd-body">
-                <ul class="nav nav-pills cd-subnav gap-1 mb-3" id="cd-tabs" role="tablist">
-                    <li class="nav-item"><button type="button" class="nav-link active" data-cd-tab="home"><i class="bi bi-house-heart me-1"></i>시작하기·요약 <span class="badge text-bg-danger ms-1" id="cd-badge-home" hidden></span></button></li>
-                    <li class="nav-item"><button type="button" class="nav-link" data-cd-tab="certs"><i class="bi bi-award me-1"></i>인증서·승인 <span class="badge text-bg-warning ms-1" id="cd-badge-certs" hidden></span></button></li>
-                    <li class="nav-item"><button type="button" class="nav-link" data-cd-tab="notify"><i class="bi bi-bell me-1"></i>알림 <span class="badge text-bg-secondary ms-1" id="cd-badge-notify" hidden></span></button></li>
-                    <li class="nav-item"><button type="button" class="nav-link" data-cd-tab="backup"><i class="bi bi-hdd-network me-1"></i>백업 <span class="badge text-bg-danger ms-1" id="cd-badge-backup" hidden></span></button></li>
-                </ul>
+
 
                 <!-- 시작하기·요약 -->
                 <div data-cd-pane="home">
@@ -157,12 +178,12 @@
                         <div class="card-footer small text-body-secondary"><i class="bi bi-check-circle-fill text-success"></i> 정상 &nbsp; <i class="bi bi-exclamation-triangle-fill text-warning"></i> 확인 필요 &nbsp; <i class="bi bi-x-octagon-fill text-danger"></i> 문제 &nbsp; <i class="bi bi-circle text-secondary"></i> 선택 사항(안 해도 됨)</div></div>
                     <div class="card shadow-sm mb-3"><div class="card-header fw-semibold"><i class="bi bi-calendar-check me-1"></i>운영 주기표 — 언제 무엇을 보면 되나요?</div>
                         <div class="table-responsive"><table class="table align-middle mb-0 small"><thead><tr><th>주기</th><th>할 일</th><th>어디서</th></tr></thead><tbody>
-                            <tr><td class="text-nowrap"><i class="bi bi-brightness-high me-1"></i>매일</td><td>알림 메일·메신저 확인, 「현황」의 만료 임박(주황)·만료(빨강) 인증서 확인</td><td>현황 탭, 메일</td></tr>
-                            <tr><td class="text-nowrap"><i class="bi bi-brightness-high me-1"></i>매일(자동)</td><td>백업이 자동으로 돌았는지 — 「백업」 탭의 배지가 초록이면 정상</td><td>백업 탭</td></tr>
-                            <tr><td class="text-nowrap"><i class="bi bi-arrow-repeat me-1"></i>갱신 때</td><td>승인 요청이 오면 확인 후 승인/반려 → 배포 결과(성공·롤백) 확인</td><td>인증서·승인 탭</td></tr>
-                            <tr><td class="text-nowrap"><i class="bi bi-calendar-week me-1"></i>매주</td><td>자동 탐색 결과(미등록 인증서) 확인, 감사 로그 훑어보기</td><td>서버 <code>certdeploy-discover</code>, 감사 로그 탭</td></tr>
-                            <tr><td class="text-nowrap"><i class="bi bi-calendar3 me-1"></i>분기</td><td>백업 복구 훈련, 퇴사·이동자 계정 정리, 2단계 인증 사용 여부 점검</td><td>사용자 탭, 설치 매뉴얼 10-4</td></tr>
-                            <tr><td class="text-nowrap"><i class="bi bi-calendar-event me-1"></i>연 1회</td><td>개인키 암호·백업 비밀번호 교체 검토, 감사 로그 무결성 검증, 상용 인증서 구매·갱신 일정 확인</td><td>감사 로그 탭</td></tr>
+                            <tr><td class="text-nowrap"><i class="bi bi-brightness-high me-1"></i>매일</td><td>알림 메일·메신저 확인, 「대시보드」의 만료 임박(주황)·만료(빨강) 인증서 확인</td><td>대시보드, 메일</td></tr>
+                            <tr><td class="text-nowrap"><i class="bi bi-brightness-high me-1"></i>매일(자동)</td><td>백업이 자동으로 돌았는지 — 「백업」 메뉴의 상태가 초록이면 정상</td><td>백업</td></tr>
+                            <tr><td class="text-nowrap"><i class="bi bi-arrow-repeat me-1"></i>갱신 때</td><td>승인 요청이 오면 확인 후 승인/반려 → 배포 결과(성공·롤백) 확인</td><td>인증서·승인</td></tr>
+                            <tr><td class="text-nowrap"><i class="bi bi-calendar-week me-1"></i>매주</td><td>자동 탐색 결과(미등록 인증서) 확인, 감사 로그 훑어보기</td><td>서버 <code>certdeploy-discover</code>, 감사 로그</td></tr>
+                            <tr><td class="text-nowrap"><i class="bi bi-calendar3 me-1"></i>분기</td><td>백업 복구 훈련, 퇴사·이동자 계정 정리, 2단계 인증 사용 여부 점검</td><td>사용자, 설치 매뉴얼 10-4</td></tr>
+                            <tr><td class="text-nowrap"><i class="bi bi-calendar-event me-1"></i>연 1회</td><td>개인키 암호·백업 비밀번호 교체 검토, 감사 로그 무결성 검증, 상용 인증서 구매·갱신 일정 확인</td><td>감사 로그</td></tr>
                         </tbody></table></div></div>
                 </div>
 
@@ -277,8 +298,7 @@
 
         <!-- 사용자 -->
         <section id="view-users" hidden>
-            <h1 class="h3 mb-1"><i class="bi bi-people me-2"></i>사용자</h1>
-            <div class="text-body-secondary small mb-3"><span class="badge text-bg-primary">관리자</span> 모든 설정·사용자 관리 &nbsp; <span class="badge text-bg-secondary">운영자</span> 현황 조회만. 담당자마다 <strong>개인 계정</strong>을 만들고, 퇴사·이동 시 바로 삭제하세요. 2단계 인증이 꺼진 계정은 표에서 확인할 수 있습니다.</div>
+            <div class="cp-page-head"><div><h1 class="cp-page-title">사용자</h1><div class="cp-page-sub"><span class="badge text-bg-primary">관리자</span> 모든 설정·사용자 관리 &nbsp; <span class="badge text-bg-secondary">운영자</span> 현황 조회만. 담당자마다 <strong>개인 계정</strong>을 만들고, 퇴사·이동 시 바로 삭제하세요. 2단계 인증이 꺼진 계정은 표에서 확인할 수 있습니다.</div></div></div>
             <div class="card shadow-sm mb-3"><div class="card-body">
                 <form id="user-form" class="row g-2">
                     <div class="col-md-3"><input class="form-control" id="u-name" placeholder="계정" aria-label="계정" required></div>
@@ -291,7 +311,8 @@
                 <table class="table align-middle mb-0"><thead ><tr><th>계정</th><th>역할</th><th>2단계 인증</th><th>잠금</th><th class="text-end">작업</th></tr></thead><tbody id="users-body"></tbody></table>
             </div></div>
         </section>
-    </main>
+        </main>
+    </div>
 </div>
 
 <!-- 인증서 상세 -->

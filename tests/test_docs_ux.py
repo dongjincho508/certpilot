@@ -21,12 +21,12 @@ def test_relative_links_and_images_resolve():
 def test_quickstart_covers_screens_steps_and_is_linked():
     q = (ROOT / "docs/ops/quickstart.md").read_text(encoding="utf-8")
     html = (ROOT / "frontend/templates/index.html").read_text(encoding="utf-8")
-    for tab in ("현황", "시작하기·요약", "인증서·승인", "알림", "백업", "감사 로그", "사용자", "진단"):
+    for tab in ("대시보드", "인증서·승인", "알림", "백업", "서버 인벤토리", "감사 로그", "사용자", "진단"):
         assert tab in q, tab
         assert tab.split("·")[0] in html
     for step in ("preflight", "base", "docker", "source", "monitoring", "nginx", "certdeploy", "admin", "verify"):
         assert step in (ROOT / "scripts/install-mgmt-server.sh").read_text(encoding="utf-8")
-    for must in ("install-mgmt-server.sh", "설치 마법사", "--dry-run", "같은 명령을 다시 실행", "서버 밖", "증상", "백업 비밀번호", "T-01~T-29"):
+    for must in ("install-mgmt-server.sh", "설치 마법사", "--dry-run", "같은 명령을 다시 실행", "서버 밖", "증상", "백업 비밀번호", "T-01~T-31"):
         assert must in q, must
     assert "quickstart.md" in (ROOT / "docs/README.md").read_text(encoding="utf-8") and "quickstart.md" in (ROOT / "README.md").read_text(encoding="utf-8")
     assert "quickstart.md" in (ROOT / "docs/ops/vm-install-and-test.md").read_text(encoding="utf-8")
@@ -35,9 +35,9 @@ def test_quickstart_covers_screens_steps_and_is_linked():
 def test_scenarios_count_matches_docs():
     s = (ROOT / "docs/ops/test-scenarios.md").read_text(encoding="utf-8")
     ids = sorted(set(re.findall(r"^### (T-\d+[a-z]?)\b", s, re.M)))
-    assert "T-29" in ids and len(ids) >= 28
+    assert "T-31" in ids and len(ids) >= 28
     for f in (ROOT / "docs/ops/quickstart.md", ROOT / "docs/ops/vm-install-and-test.md"):
-        assert "T-01~T-29" in f.read_text(encoding="utf-8")
+        assert "T-01~T-31" in f.read_text(encoding="utf-8")
 
 
 def test_wizard_questions_are_documented():

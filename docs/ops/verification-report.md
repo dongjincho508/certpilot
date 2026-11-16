@@ -1,15 +1,16 @@
-# 검증 보고서 (2026-10-28 기준)
+# 검증 보고서 (2026-11-16 기준)
 
-무엇을 어떻게 검증했고, **무엇이 아직 검증되지 않았는지**를 구분해 기록한다. "자동 테스트 통과"는 *가짜 서버·로컬 환경에서의 동작*을 뜻하며 실제 장비·서비스에서의 동작을 보증하지 않는다.
+무엇을 어떻게 검증했고, **무엇이 아직 검증되지 않았는지**를 구분해 기록한다. 요구사항별 추적은 [요구사항 추적표](requirements.md). "자동 테스트 통과"는 *가짜 서버·로컬 환경에서의 동작*을 뜻하며 실제 장비·서비스에서의 동작을 보증하지 않는다.
 
 ## 1. 한눈에
 | 구분 | 결과 |
 |---|---|
-| 자동 테스트 | **699개 통과·건너뜀 0 (promtool·amtool 포함)** (`scripts/check.sh`, promtool/amtool 포함 실행 기준) |
+| 자동 테스트 | **995개 통과·건너뜀 0** (`scripts/check.sh`, promtool/amtool 포함 실행 기준) |
 | 정적 보안 분석(bandit, 중간 이상) | 지적 **0건** (CI `security` 잡) |
 | 의존성 취약점(pip-audit) | 알려진 취약점 **0건** |
 | 실제 바이너리로 확인 | Prometheus 3.5.0 · Alertmanager 0.28.1 · ssl_exporter 2.4.3(설정 검증·규칙 단위 시험·실수집), OpenSSL(체인 검증), JDK keytool(JKS), systemd-analyze(유닛), docker compose config |
-| **실제 장비·서비스로 확인** | **없음** — VM·실제 Let's Encrypt·Infoblox·웹서버·WAF·SMTP 검증은 [VM 시험](test-scenarios.md)에서 수행 |
+| **진짜 소프트웨어로 확인(개발 환경)** | nginx·Apache·Tomcat(JVM) 실제 배포·서빙·롤백, BIND RFC 2136 TSIG·CNAME 위임, OpenSSH+sudo 최소 권한 배포, 설치 스크립트 전체 실행(가짜 시스템 명령), 관리자 화면 실제 브라우저(Chromium, 데스크톱·모바일 폭) |
+| **실제 장비·서비스로 확인** | **아직 없음** — Rocky 10 VM·SELinux, 실제 Let's Encrypt·Infoblox, IIS·WebtoB·JEUS 제품, 모니터랩 WAF, 실제 SMTP·Teams·ServiceNow·Jira 는 [VM 시험](test-scenarios.md) T-01~T-31 에서 수행 |
 
 ## 2. 기능별 검증 현황
 범례: ✅ 자동 테스트로 확인 · 🔶 실제 바이너리/도구로 부분 확인 · ⬜ 실제 환경 확인 필요(VM 시험 ID)
@@ -42,14 +43,26 @@
 | PKCS#12 / **JKS**(Tomcat·JEUS) 변환 | ✅ + 🔶 실제 keytool 로 확인 | ⬜ T-09 (제품이 읽는지) |
 | strict TLS 검증(체인·호스트명·사설 CA), HTTP 헬스체크, soak, pre/post 훅(최소 환경) | ✅ | ⬜ T-05 |
 | **웹방화벽/어플라이언스 `http_api`**: 로그인(쿠키·토큰)→업로드(JSON/폼/multipart/PFX)→적용(`wait`)→확인, 응답 본문 코드 판정, 실패 시 이전 배포본으로 롤백, 수동 롤백, 비밀 비노출, 설정 검증 | ✅ `test_certdeploy_waf.py` 24개 — 가짜 WAF 관리 API | ⬜ **T-18 (모니터랩 API 문서 확보 후; 현재 설정 예시는 가상 필드)** |
-| IIS | 초안 스크립트만(`deploy-iis.ps1`), **미검증** | ⬜ 별도 협의 |
+| IIS(`type: iis`, SSH+PowerShell) | ✅ `test_iis.py` — 가짜 Windows(실제 PowerShell 실행은 미검증) | ⬜ **T-25** |
 | 알림(Alertmanager·SMTP·Webhook[slack/teams/generic]), 지표(textfile·Pushgateway), 해시 체인 감사 로그, 보고서 | ✅ 가짜 수신기·실제 Alertmanager 페이로드 | ⬜ T-02, T-10, T-19 |
 | 암호화 백업/복원(AES-256-GCM/scrypt), 키 파일 권한 점검 | ✅ | ⬜ T-11 |
 | **수동 교체 대상 `type: manual`**(WAF 옵션 C): 교체용 파일(PEM/PFX) 준비·메일 안내·독촉 승격·서빙 확인으로 자동 완료·`confirm`·개인키 사본 삭제, 지표·알림 규칙(1일/3일)·Grafana 패널 | ✅ `test_certdeploy_options.py`(수동 교체 9개) + promtool 규칙 단위 시험 | ⬜ **T-21** (모니터랩 화면에서 실제 교체) |
 | **개인키 저장 방식 선택**: `key_encryption: none/passphrase` — import·csr·내장 ACME(대기 키 포함) 저장본 암호화, 배포 때만 복호화, `key-encrypt`/`key-decrypt` 전환·백업, 설정↔실제 상태 불일치 점검 | ✅ `test_certdeploy_options.py`(암호화 8개) | ⬜ **T-20** (재부팅·타이머 환경에서 암호 공급) |
 | 알림 시험 `notify-test`(메일 우선 설정), 전송 실패 진단 이벤트 | ✅ | ⬜ **T-02a** (실제 SMTP 수신) |
-| **관리자 화면(설정·운영)**: 메일 입력·저장·시험 메일(원인 분류), 인증서별 개인키 보호 사용/사용 안 함 선택·즉시 변환(평문 사본 검증 후 삭제)·암호 변경, 현황(만료·대상 상태), 관리자 전용·감사 기록(비밀 제외), 설정 화면 값이 CLI·타이머에 자동 적용 | ✅ `test_certdeploy_admin.py`(가짜 SMTP 서버로 실제 메일 전송·인증 실패·수신 거부 확인, 키 변환·롤백 안전) + 실제 브라우저 조작 확인 | ⬜ **T-22** (systemd·nginx 8443 구성, 실제 SMTP) |
+| **관리자 화면(운영 메뉴)**: 메일 입력·저장·시험 메일(원인 분류), 인증서별 개인키 보호 사용/사용 안 함 선택·즉시 변환(평문 사본 검증 후 삭제)·암호 변경, 현황(만료·대상 상태), 관리자 전용·감사 기록(비밀 제외), 설정 화면 값이 CLI·타이머에 자동 적용 | ✅ `test_certdeploy_admin.py`(가짜 SMTP 서버로 실제 메일 전송·인증 실패·수신 거부 확인, 키 변환·롤백 안전) + 실제 브라우저 조작 확인 | ⬜ **T-22** (systemd·nginx 8443 구성, 실제 SMTP) |
 | `check`(Nagios 형식 종료 코드), `schema`, `diagnose`, `trace`, `--debug` | ✅ `test_prevm_checks.py`, `test_debug_tools.py` | ⬜ T-19 |
+
+### 추가 기능 (상용 제품 비교 후)
+| 기능 | 검증 | 실제 환경 확인 |
+|---|---|---|
+| 미등록 인증서 자동 탐색(`certdeploy-discover`, 사설 대역만·읽기 전용) | ✅ `test_discover.py`(실제 TLS 소켓) | ⬜ **T-30** |
+| 2단계 인증(TOTP)·복구 코드·정책 강제 | ✅ `test_mfa.py`, 🧪 설치 시험에서 강제 등록 흐름 | ⬜ T-23 |
+| 배포 전 승인(1~3인)·긴급 우회 | ✅ `test_approval.py` | ⬜ T-24 |
+| WebtoB/JEUS(암호화 키·소유자·키스토어) | ✅ `test_webtob_jeus.py`, 🧪 실제 Tomcat 이 키스토어를 읽음 | ⬜ T-26 |
+| 알림 확장(메신저 5종·ServiceNow/Jira 티켓·심각도·반복 억제) | ✅ `test_notify_channels.py`(가짜 서버) | ⬜ T-27 |
+| 백업 자동화(암호화·검증·외부 복사·보관·복구) | ✅ `test_backup_auto.py`, 🧪 설치 직후 실제 백업 | ⬜ T-28 |
+| 원스톱 설치·재실행·업데이트 | ✅ `test_install_scripts.py`, 🧪 `test_installer_real.py`(5 시나리오 실제 실행) | ⬜ **T-31** |
+| 관리자 화면(사이드바 앱 셸·대시보드·다크 모드·모바일) | 🧪 `test_ui_cd.py`(실제 Chromium) | ⬜ T-22 |
 
 ### 보안 설계 (코드로 확인된 것)
 - 개인키·계정은 로그·트레이스·진단 번들·알림에 남지 않음(마스킹 + 테스트로 부재 확인), 개인키 파일 0600/디렉터리 0700, 대기 키는 사용 후 삭제
@@ -113,8 +126,8 @@
 | `tests/test_notify_channels.py` | 35 | 알림 확장(웹훅 5형식·심각도 필터·반복 억제, ServiceNow/Jira/일반 티켓 생성·중복 방지·해소·실패 재시도, YAML 검증, 관리자 화면 저장/마스킹/시험, 감사 로그 비밀 비노출). **실제 ServiceNow/Jira/Teams 는 미검증** |
 | `tests/test_backup_auto.py` | 35 | 백업 자동화(설정 검증, 수집·SQLite 스냅샷·제외·누락 보고, 암호화·변조 검출, GFS 보관 정리, 폴더/SSH 외부 복사와 실패 격리, 지표·상태, CLI, 심층 검증, 복구 계획/적용, 악성 아카이브 거부, 관리자 화면). **실제 NAS·SSH 서버·새 VM 복구는 미검증** |
 | `tests/test_installer_real.py` (+`installer_harness.sh`, `installer_verify.py`) | 5 | **설치 스크립트 실제 실행**(가짜 dnf·systemctl·docker 등만 끼운 overlay 격리 환경): 전체 설치→비밀번호·권한·설정 생성→설치된 설정으로 백업 실행→관리자 화면 기동·로그인·2단계 인증 강제, 재실행(비밀번호 유지)·중단 후 재개·최소 설치·OS 불일치 거부. 이 시험으로 임시 인증서 폴더 누락, 다중 인증서 백업 누락 등 버그를 찾아 수정. **실제 dnf·이미지 내려받기·방화벽·SELinux 는 미검증** |
-| `tests/test_ui_cd.py` (+`ui_cd_smoke.js`) | 1 | 설정·운영 화면을 **실제 브라우저(Chromium)** 로 확인(체크리스트·탭·이동 버튼·모바일 폭 가로 넘침 없음·한글 감사 라벨). node/playwright 없으면 건너뜀 |
-| `tests/test_docs_ux.py` | 5 | 시작 가이드가 모든 화면 탭·설치 단계·마법사 질문을 설명하는지, 문서 링크·이미지 유효, 시험 번호(T-01~T-29) 일치 |
+| `tests/test_ui_cd.py` (+`ui_cd_smoke.js`) | 1 | 관리자 화면을 **실제 브라우저(Chromium)** 로 확인(관리자 첫 화면=대시보드, 사이드바 메뉴 전환·활성 표시·이동 경로, 체크리스트 이동 버튼, 모바일 ☰ 메뉴 닫힘·가로 넘침 없음, 한글 감사 라벨). node/playwright 없으면 건너뜀 |
+| `tests/test_docs_ux.py` | 5 | 시작 가이드가 모든 화면 탭·설치 단계·마법사 질문을 설명하는지, 문서 링크·이미지 유효, 시험 번호(T-01~T-31) 일치 |
 | `tests/test_real_software.py` | 17 | **진짜 소프트웨어로 검증**: 실제 nginx·Apache 에 배포→새 인증서 서빙 확인→설정 오류·재로드 실패 시 롤백, 실제 Tomcat(JVM)이 우리가 만든 PKCS12·JKS 키스토어를 읽고 서빙(실제 keytool 로 확인), 실제 BIND 에 대한 RFC 2136 TSIG 갱신(올바른 키만 수락·잘못된 키/서명 없음/다른 영역 거부), 실제 sshd+sudo 로 배포·롤백·호스트 키 변경 거부·최소 권한(재로드만 sudo) 구성, 설치가 만드는 nginx 설정을 실제 `nginx -t`, 모든 systemd 유닛을 실제 `systemd-analyze verify`(음성 대조 포함). 이 시험으로 nginx `http2 on;`(1.25 미만 오류), 최소 권한 구성에서 점검 명령의 sudo 누락, 저장소에 섞인 `.whl` 부산물을 찾아 수정. **Rocky·SELinux·실제 장비는 미검증** |
 | `tests/test_acme_delegate.py` | 14 | ACME CNAME 위임(자동 조회·명시 매핑·순환 감지·설정 검증·수동 안내·가짜 CA 로 발급 전 과정에서 TXT 가 대상 이름에만 등록/삭제) |
 | `tests/test_pipeline_e2e.py` | 1 | 전 과정 시나리오(등록→발급→배포→지표→실패 주입→진단→복구) |
