@@ -3,7 +3,7 @@
 이 저장소는 **인증서 감시(Prometheus·ssl_exporter·Alertmanager·Grafana) + 인증서 발급·자동 배포(`certdeploy`)** 를 Rocky Linux 관리 서버 1대에서 운영하기 위한 코드와 문서다. CertPilot 웹 앱은 Render 구성은 쓰지 않고, 같은 코드를 관리 서버의 **관리자 화면** 으로 설치해 쓴다. 웹 앱 자체 문서는 맨 아래.
 
 ## 지금 상태 (2026-11-16)
-- 개발·자동 시험(995개)·진짜 소프트웨어 검증(nginx·Apache·Tomcat·BIND·sshd, 설치 스크립트 실제 실행, 실제 브라우저) 완료, **실제 VM·장비 검증 전** → [검증 보고서](ops/verification-report.md)
+- 개발·자동 시험(1003개)·진짜 소프트웨어 검증(**실제 ACME 서버로 발급·교체**, nginx·Apache·Tomcat·BIND·sshd, 설치 스크립트 실제 실행, 실제 브라우저) 완료, **실제 VM·장비 검증 전** → [검증 보고서](ops/verification-report.md)
 - 요구사항이 어디에 구현·검증됐고 VM 에서 무엇으로 확인하는지: **[요구사항 추적표](ops/requirements.md)** (재검토 2026-11-16)
 - 관리자 화면은 사이드바 앱 셸(운영·감시·관리 메뉴, 대시보드, 다크 모드, 모바일)로 개편
 - RapidSSL 와일드카드(2026-11-12 만료)는 이 시스템 시험과 별개로 기존 절차로 교체

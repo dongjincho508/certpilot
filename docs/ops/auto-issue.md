@@ -48,6 +48,10 @@ CD="sudo -u certdeploy /usr/local/bin/cdrun"
 ```bash
 $CD validate
 ```
+```bash
+$CD --cert hnu preflight
+```
+첫 발급 전에도 동작한다(`아직 발급 전(자동 발급)` 표시 후 설정과 **대상 서버 접속·sudo·쓰기 권한·현재 TLS** 를 점검). 대상 서버 준비가 끝났는지 발급 전에 확인한다.
 
 ## 3. 처음 실행 (순서 고정)
 **① 스테이징 발급**(시험용 CA — 운영 한도·운영 인증서와 무관, 운영 위치에 설치·배포하지 않음)
@@ -55,7 +59,7 @@ $CD validate
 $CD --cert hnu issue --staging
 ```
 - 연동: TXT 자동 등록→검증→삭제, `스테이징 발급 성공` 이 나오면 DNS 연동·권한·전파가 정상
-- 수동: 종료 코드 **4** 와 함께 등록할 TXT 가 출력된다 → DNS 에 등록 → 같은 명령 재실행 → `스테이징 발급 성공`
+- 수동: 종료 코드 **4** 와 함께 등록할 TXT 가 출력된다 → DNS 에 등록 → 같은 명령 재실행 → `스테이징 발급 성공` → 안내에 따라 TXT 삭제
 - 실패 시: `$CD trace --errors` 의 `acme/*` 단계(어느 단계에서 왜 실패했는지)와 `$CD diagnose --out /tmp/diag.json` 번들을 전달
 **② 운영 발급**(`--staging` 없이)
 ```bash

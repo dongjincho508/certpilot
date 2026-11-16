@@ -5,11 +5,11 @@
 ## 1. 한눈에
 | 구분 | 결과 |
 |---|---|
-| 자동 테스트 | **995개 통과·건너뜀 0** (`scripts/check.sh`, promtool/amtool 포함 실행 기준) |
+| 자동 테스트 | **1003개 통과·건너뜀 0** (`scripts/check.sh`, promtool/amtool 포함 실행 기준) |
 | 정적 보안 분석(bandit, 중간 이상) | 지적 **0건** (CI `security` 잡) |
 | 의존성 취약점(pip-audit) | 알려진 취약점 **0건** |
 | 실제 바이너리로 확인 | Prometheus 3.5.0 · Alertmanager 0.28.1 · ssl_exporter 2.4.3(설정 검증·규칙 단위 시험·실수집), OpenSSL(체인 검증), JDK keytool(JKS), systemd-analyze(유닛), docker compose config |
-| **진짜 소프트웨어로 확인(개발 환경)** | nginx·Apache·Tomcat(JVM) 실제 배포·서빙·롤백, BIND RFC 2136 TSIG·CNAME 위임, OpenSSH+sudo 최소 권한 배포, 설치 스크립트 전체 실행(가짜 시스템 명령), 관리자 화면 실제 브라우저(Chromium, 데스크톱·모바일 폭) |
+| **진짜 소프트웨어로 확인(개발 환경)** | **실제 ACME 서버(Pebble — Let's Encrypt 가 만든 시험용 CA)로 와일드카드 발급→배포→교체 전 과정**, nginx·Apache·Tomcat(JVM) 실제 배포·서빙·롤백, BIND RFC 2136 TSIG·CNAME 위임, OpenSSH+sudo 최소 권한 배포, 설치 스크립트 전체 실행(가짜 시스템 명령), 관리자 화면 실제 브라우저(Chromium, 데스크톱·모바일 폭) |
 | **실제 장비·서비스로 확인** | **아직 없음** — Rocky 10 VM·SELinux, 실제 Let's Encrypt·Infoblox, IIS·WebtoB·JEUS 제품, 모니터랩 WAF, 실제 SMTP·Teams·ServiceNow·Jira 는 [VM 시험](test-scenarios.md) T-01~T-31 에서 수행 |
 
 ## 2. 기능별 검증 현황
@@ -101,7 +101,7 @@
 | `tests/test_certdeploy_acme.py` | 30 | 내장 ACME + DNS 제공자 7종(가짜 CA/WAPI/DNS/Cloudflare/PowerDNS/RFC2136/웹훅/exec) |
 | `tests/test_monitoring.py` | 29 | 감시 설정: promtool/amtool, 규칙 단위 시험(수동 교체 알림 포함), 대시보드 15패널, 도구 |
 | `tests/test_policy.py` | 28 | 원격 명령 정책(읽기 전용 화이트리스트) |
-| `tests/test_certdeploy_cli.py` | 26 | certdeploy CLI·lego 래퍼·설정 검증 |
+| `tests/test_certdeploy_cli.py` | 27 | certdeploy CLI·lego 래퍼·설정 검증, 첫 발급 전 validate·preflight |
 | `tests/test_certdeploy_manual.py` | 25 | 수동 인증서 csr/import |
 | `tests/test_certdeploy_waf.py` | 24 | 웹방화벽 HTTP API 배포(옵션 A) |
 | `tests/test_scanner.py` | 22 | CertPilot 조회기(보류 앱) |
@@ -129,6 +129,7 @@
 | `tests/test_ui_cd.py` (+`ui_cd_smoke.js`) | 1 | 관리자 화면을 **실제 브라우저(Chromium)** 로 확인(관리자 첫 화면=대시보드, 사이드바 메뉴 전환·활성 표시·이동 경로, 체크리스트 이동 버튼, 모바일 ☰ 메뉴 닫힘·가로 넘침 없음, 한글 감사 라벨). node/playwright 없으면 건너뜀 |
 | `tests/test_docs_ux.py` | 5 | 시작 가이드가 모든 화면 탭·설치 단계·마법사 질문을 설명하는지, 문서 링크·이미지 유효, 시험 번호(T-01~T-31) 일치 |
 | `tests/test_real_software.py` | 17 | **진짜 소프트웨어로 검증**: 실제 nginx·Apache 에 배포→새 인증서 서빙 확인→설정 오류·재로드 실패 시 롤백, 실제 Tomcat(JVM)이 우리가 만든 PKCS12·JKS 키스토어를 읽고 서빙(실제 keytool 로 확인), 실제 BIND 에 대한 RFC 2136 TSIG 갱신(올바른 키만 수락·잘못된 키/서명 없음/다른 영역 거부), 실제 sshd+sudo 로 배포·롤백·호스트 키 변경 거부·최소 권한(재로드만 sudo) 구성, 설치가 만드는 nginx 설정을 실제 `nginx -t`, 모든 systemd 유닛을 실제 `systemd-analyze verify`(음성 대조 포함). 이 시험으로 nginx `http2 on;`(1.25 미만 오류), 최소 권한 구성에서 점검 명령의 sudo 누락, 저장소에 섞인 `.whl` 부산물을 찾아 수정. **Rocky·SELinux·실제 장비는 미검증** |
+| `tests/test_real_acme_e2e.py` | 6 | **실제 ACME 서버로 발급·교체 전 과정**(운영과 같은 `certdeploy` CLI 실행): Pebble 이 실제 BIND 에서 TXT 를 조회해 DNS-01 검증 → `*.hnu.test`+`hnu.test` 발급(OpenSSL 로 체인 검증) → 실제 SSH+sudo 로 nginx, 로컬 Apache 배포 → 갱신 불필요 시 건너뜀 → 갱신 시점에 재발급·두 서버 교체, 한 서버 설정이 깨져 있으면 그 서버만 롤백, 잘못된 DNS 키(NOTAUTH)는 무변경 실패·재시도 대기, 수동 TXT 두 단계(일부만 등록 시 대기, 실제 nsupdate 로 등록), 개인키 암호 보호+배포 승인, 실제 Tomcat 키스토어. 이 시험으로 첫 발급 전 `validate`·`preflight` 불가 문제를 찾아 수정. **실제 Let's Encrypt·Infoblox 는 미검증(T-14~T-16)** |
 | `tests/test_acme_delegate.py` | 14 | ACME CNAME 위임(자동 조회·명시 매핑·순환 감지·설정 검증·수동 안내·가짜 CA 로 발급 전 과정에서 TXT 가 대상 이름에만 등록/삭제) |
 | `tests/test_pipeline_e2e.py` | 1 | 전 과정 시나리오(등록→발급→배포→지표→실패 주입→진단→복구) |
 

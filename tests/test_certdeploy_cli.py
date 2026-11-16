@@ -270,3 +270,29 @@ def test_shipped_example_config_and_systemd_units_are_valid():
     unit = open(os.path.join(root, "systemd", "certdeploy-renew.service"), encoding="utf-8").read()
     assert "certdeploy -c /etc/certdeploy/certdeploy.yml renew" in unit and "NoNewPrivileges=true" in unit
     assert "OnCalendar" in open(os.path.join(root, "systemd", "certdeploy-renew.timer"), encoding="utf-8").read()
+
+
+def test_validate_and_preflight_work_before_first_acme_issue(tmp_path):
+    """자동 발급(ACME)을 막 설정한 상태(인증서 파일 없음)에서도 validate·preflight 로 설정·대상 서버를 먼저 점검할 수 있어야 한다
+    (실제 ACME 서버 시험에서 발견: 이전에는 '인증서 파일이 없습니다' 로 종료 코드 2)."""
+    web = tmp_path / "web"
+    web.mkdir()
+    cfg = {"state_dir": str(tmp_path / "state"),
+           "certificates": [{"name": "hnu", "acme": {"directory": "https://acme.example/dir", "domains": ["*.hnu.test", "hnu.test"], "dns": {"mode": "manual"}},
+                             "targets": [{"name": "w", "type": "nginx", "cert_path": str(web / "a.crt"), "key_path": str(web / "a.key"),
+                                          "reload_cmd": "true", "verify": {"host": "127.0.0.1", "port": 9, "sni": "www.hnu.test"}},
+                                         {"name": "bad", "type": "nginx", "cert_path": str(web / "b.crt"), "key_path": str(web / "b.key"),
+                                          "reload_cmd": "true", "verify": {"host": "other.example", "port": 9}}]}]}
+    p = tmp_path / "c.yml"
+    p.write_text(yaml.safe_dump(cfg))
+    r = CliRunner().invoke(main, ["-c", str(p), "validate"], catch_exceptions=False)
+    assert "아직 발급 전" in r.output and "*.hnu.test, hnu.test" in r.output
+    assert "bad: 인증서 SAN 이 other.example" in r.output and "w: 인증서 SAN" not in r.output     # 발급할 이름으로 SAN 점검
+    assert r.exit_code == 1
+    cfg["certificates"][0]["targets"].pop()
+    p.write_text(yaml.safe_dump(cfg))
+    assert CliRunner().invoke(main, ["-c", str(p), "validate"], catch_exceptions=False).exit_code == 0
+    r = CliRunner().invoke(main, ["-c", str(p), "preflight"], catch_exceptions=False)
+    assert "아직 발급 전" in r.output and "디렉터리 쓰기" in r.output                              # 대상 점검은 진행
+    r = CliRunner().invoke(main, ["-c", str(p), "deploy"], catch_exceptions=False)
+    assert r.exit_code != 0                                                                          # 배포는 실제 인증서가 있어야만
